@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.11", "3.12"]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Syntax check
+        run: |
+          python3 -m py_compile netfix/*.py
+          python3 scripts/release_audit.py --scope workspace --root . --warn-only
+
+      - name: CLI smoke test
+        run: |
+          python3 netfix.py --help
+          python3 netfix.py triage --json --timeout 8
+
+      - name: API / Web smoke test
+        run: |
+          python3 netfix.py server --host 127.0.0.1 --port 8766 --timeout 10 &
+          SERVER_PID=$!
+          sleep 2
+          curl -fs http://127.0.0.1:8766/health
+          curl -fs http://127.0.0.1:8766/ | head -1
+          kill $SERVER_PID || true
+
+      - name: MCP smoke test
+        run: |
+          echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1.0"}}}' | python3 -m netfix.mcp_server >/dev/null
+
+      - name: Run unit tests
+        run: python3 -m unittest discover tests -v
+
+  app:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true
+
+      - name: Build SwiftUI menu bar app
+        run: |
+          cd gui/macos
+          swift build
+
+      - name: Build and audit local app bundle
+        run: |
+          cd gui/macos
+          ./build_app.sh
+          python3 ../../scripts/release_audit.py --scope bundle --root .build/Netfix.app

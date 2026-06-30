@@ -1,0 +1,2514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Netfix AI 工具连接检查</title>
+    <link rel="icon" href="data:,">
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --panel: #ffffff;
+      --line: #dfe4ea;
+      --line-strong: #c8d0da;
+      --text: #18212f;
+      --muted: #647084;
+      --ok: #0f9f6e;
+      --warn: #b7791f;
+      --fail: #d64545;
+      --primary: #1f6feb;
+      --primary-strong: #174ea6;
+      --radius: 8px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+      letter-spacing: 0;
+    }
+    .container { max-width: 1120px; margin: 0 auto; padding: 22px; }
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+    h1 { margin: 0; font-size: 24px; font-weight: 720; }
+    .subhead { margin: 4px 0 0; color: var(--muted); max-width: 720px; }
+    .trust { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    .status-strip {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      background: var(--panel);
+      min-width: 260px;
+    }
+    .status-dot { width: 11px; height: 11px; border-radius: 999px; flex: 0 0 auto; }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .fail { color: var(--fail); }
+    .status-dot.ok { background: var(--ok); }
+    .status-dot.warn { background: var(--warn); }
+    .status-dot.fail { background: var(--fail); }
+    .status-text { font-size: 14px; font-weight: 650; }
+    .grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(320px, .85fr); gap: 14px; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .panel h2 { margin: 0 0 10px; font-size: 18px; }
+    .panel h3 { margin: 0 0 10px; font-size: 15px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
+    button {
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      padding: 9px 12px;
+      font-size: 14px;
+      cursor: pointer;
+      background: #fff;
+      color: var(--text);
+      font-weight: 600;
+    }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-strong); }
+    .btn-danger { color: var(--fail); }
+    .summary {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+      background: #fbfcfd;
+      min-height: 92px;
+    }
+    .summary-result {
+      display: grid;
+      gap: 8px;
+    }
+    .summary-next {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 10px;
+      background: #fff;
+    }
+    .summary-next-title {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .summary-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .headline { font-weight: 720; margin-bottom: 8px; }
+    .muted { color: var(--muted); }
+    .goal-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 10px 0 12px; }
+    .goal-option {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 9px 10px;
+      background: #fff;
+      cursor: pointer;
+      font-weight: 650;
+      min-height: 54px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .goal-option input { width: auto; margin: 0; }
+    .goal-option:has(input:checked) { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+    .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+    .card { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; background: #fff; min-height: 74px; }
+    .card-title { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    .card-value { font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
+    .card.ok { border-left: 4px solid var(--ok); }
+    .card.warn { border-left: 4px solid var(--warn); }
+    .card.fail { border-left: 4px solid var(--fail); }
+    .service-row, .event-row, .profile-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #eef1f4;
+      font-size: 13px;
+    }
+    .service-row:last-child, .event-row:last-child, .profile-row:last-child { border-bottom: none; }
+    .badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 8px; font-size: 12px; background: #eef1f4; color: var(--muted); }
+    .badge.ok { background: #dff8ec; color: #096745; }
+    .badge.warn { background: #fff3cd; color: #745017; }
+    .badge.fail { background: #fde2e2; color: #8a2424; }
+    .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+    .metric { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; background: #fbfcfd; min-width: 0; }
+    .metric-label { font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+    .metric-value { font-weight: 650; overflow-wrap: anywhere; }
+    .action-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; margin-bottom: 8px; background: #fff; }
+    .action-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+    .action-meta { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+    .action-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+    .recovery-panel {
+      border-color: #f0c36d;
+      background: #fff9eb;
+    }
+    .recovery-detail {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+    .action-preview, .log {
+      background: #101722;
+      color: #e8eef7;
+      border-radius: var(--radius);
+      padding: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      overflow: auto;
+      max-height: 260px;
+    }
+    .action-preview { margin-top: 10px; }
+    .log { min-height: 160px; }
+    .manual-list { margin: 8px 0 0; padding-left: 18px; color: var(--muted); }
+    .status-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 10px;
+      background: #fbfcfd;
+      margin-bottom: 10px;
+    }
+    .status-card .headline { margin-bottom: 4px; }
+    details.details-block {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      background: #fbfcfd;
+      margin-top: 10px;
+    }
+    details.details-block > summary {
+      cursor: pointer;
+      font-weight: 650;
+    }
+    details.inline-actions {
+      display: inline-block;
+      margin-left: 4px;
+    }
+    details.inline-actions > summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-weight: 650;
+      padding: 6px 8px;
+    }
+    label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      padding: 9px 10px;
+      font: inherit;
+      background: #fff;
+      color: var(--text);
+    }
+    textarea { resize: vertical; min-height: 72px; }
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+    aside .form-grid, aside .metric-grid { grid-template-columns: 1fr; }
+    .image-preview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+    .image-preview { border: 1px solid var(--line); border-radius: var(--radius); padding: 6px; background: #fbfcfd; min-width: 0; }
+    .image-preview img { width: 100%; height: 64px; object-fit: cover; border-radius: 6px; display: block; margin-bottom: 4px; }
+    .image-preview-name { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .hidden { display: none; }
+    @media (max-width: 860px) {
+      header { display: block; }
+      .status-strip { margin-top: 12px; width: 100%; }
+      .grid, .cards, .form-grid, .goal-options { grid-template-columns: 1fr; }
+      .service-row, .event-row, .profile-row { display: block; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>Netfix：AI 工具连不上，一键查原因并给修法</h1>
+        <p class="subhead">10 秒判断是 Wi-Fi、DNS、线路、节点、账号密钥还是目标服务问题，再告诉你下一步。</p>
+        <div class="trust">本地检查；不上传线路配置；只自动处理低风险问题；改系统设置前一定先给你确认。</div>
+      </div>
+      <div class="status-strip">
+        <div id="status-dot" class="status-dot warn"></div>
+        <div id="status-text" class="status-text">正在准备 Netfix...</div>
+      </div>
+    </header>
+
+    <div class="grid">
+      <main>
+        <section id="home-panel" class="panel">
+          <h2>一键检查</h2>
+          <div class="goal-options" role="radiogroup" aria-label="选择要检查的目标">
+            <label class="goal-option">
+              <input type="radio" name="diagnose-goal" value="chatgpt">
+              ChatGPT 网页打不开
+            </label>
+            <label class="goal-option">
+              <input type="radio" name="diagnose-goal" value="codex">
+              Codex / OpenAI 报错
+            </label>
+            <label class="goal-option">
+              <input type="radio" name="diagnose-goal" value="github">
+              GitHub / Copilot 连不上
+            </label>
+            <label class="goal-option">
+              <input type="radio" name="diagnose-goal" value="unsure" checked>
+              都连不上 / 不确定
+            </label>
+          </div>
+          <div id="summary" class="summary">
+            <div class="headline">先检查为什么连不上</div>
+            <div class="muted">点击后会直接告诉你问题在哪、能不能自动处理、哪些操作需要你确认。</div>
+          </div>
+          <div class="toolbar">
+            <button id="btn-diagnose" class="btn-primary" onclick="runDiagnose()">一键检查</button>
+            <button id="btn-fix" class="hidden" onclick="runFix()" disabled data-legacy-label="处理低风险问题">一键处理可自动修的问题</button>
+            <button id="btn-latest-report" class="hidden" onclick="loadReport()" data-legacy-label="上次检查结果">查看上次结果</button>
+            <button id="btn-open-logs" class="hidden" onclick="openLogs()" data-legacy-label="操作记录">运行记录</button>
+          </div>
+          <div class="cards">
+            <div id="card-network" class="card"><div class="card-title">基础网络</div><div class="card-value">待检测</div></div>
+            <div id="card-dns" class="card"><div class="card-title">ChatGPT 网页</div><div class="card-value">待检测</div></div>
+            <div id="card-proxy" class="card"><div class="card-title">Codex / OpenAI</div><div class="card-value">待检测</div></div>
+            <div id="card-services" class="card"><div class="card-title">GitHub / Copilot</div><div class="card-value">待检测</div></div>
+          </div>
+        </section>
+
+        <section id="recovery-panel" class="panel recovery-panel hidden" role="alert" aria-live="assertive">
+          <h3 id="recovery-title">操作没有完成</h3>
+          <div id="recovery-message"></div>
+          <ol id="recovery-steps" class="manual-list"></ol>
+          <div id="recovery-detail" class="recovery-detail"></div>
+          <div class="toolbar">
+            <button id="btn-retry-job" class="btn-primary" onclick="retryFailedJob()">重试</button>
+            <button onclick="copyRecoveryDetail()">复制给客服/技术人员</button>
+            <button onclick="openLogs()">查看运行记录</button>
+          </div>
+        </section>
+
+        <section id="actions-panel" class="panel hidden">
+          <h3>可以处理的问题</h3>
+          <div id="actions-list"></div>
+          <div id="action-preview" class="action-preview hidden"></div>
+          <ul id="manual-list" class="manual-list"></ul>
+        </section>
+
+        <section id="services-panel" class="panel hidden">
+          <h3>目标服务</h3>
+          <div id="services-list"></div>
+        </section>
+      </main>
+
+      <aside>
+        <section id="assist-panel" class="panel">
+          <h3>需要时再用</h3>
+          <div class="muted">先完成一键检查；如果你已经有自己的网络线路，或想让 AI 解释结果，再打开对应工具。</div>
+          <div class="toolbar">
+            <button onclick="openProxyPanel()">我有自己的网络线路</button>
+            <button onclick="openAIPanel()">用 AI 解释结果</button>
+          </div>
+        </section>
+
+        <section id="log-panel" class="panel hidden">
+          <h3>运行记录</h3>
+          <details id="technical-log-details" class="details-block">
+            <summary>查看技术记录</summary>
+            <div id="log" class="log"></div>
+          </details>
+          <div id="backend-log" class="muted" role="status" aria-live="polite" style="margin-top:8px;font-size:12px;">正在读取运行记录...</div>
+          <div class="toolbar">
+            <button id="btn-refresh-logs" onclick="loadLogs()">刷新记录</button>
+            <button onclick="clearLogs()">清理记录</button>
+          </div>
+          <details id="local-data-danger-settings" class="details-block">
+            <summary>数据与恢复</summary>
+            <div class="muted">这些操作会删除本机运行记录、设置或保存的钥匙串项，不会修改系统网络配置。</div>
+            <button class="btn-danger" style="margin-top:8px" onclick="clearAllData()">删除本机保存的数据</button>
+          </details>
+          <details class="details-block">
+            <summary>隐私设置</summary>
+            <label style="display:flex;align-items:flex-start;gap:8px;margin-top:0;">
+              <input id="persist-proxy-identity-report" type="checkbox" style="width:auto;margin-top:3px;">
+              <span data-legacy-label="保存完整线路身份记录">保存完整线路身份记录</span>
+            </label>
+            <div class="muted" style="font-size:12px;">关闭时只保存出口身份摘要，不长期保存完整出口 IP、ISP/ASN 和目标矩阵。</div>
+            <button style="margin-top:8px" onclick="savePrivacySettings()">保存隐私设置</button>
+          </details>
+        </section>
+
+        <section id="ai-panel" class="panel hidden">
+          <h3>需要时让 AI 帮你解释</h3>
+          <div id="llm-status-card" class="status-card">
+            <div class="headline">正在读取 AI 状态</div>
+            <div class="muted">有检查结果后，可以让 AI 用人话解释当前问题和下一步。</div>
+          </div>
+          <label for="llm-question">你想问什么</label>
+          <textarea id="llm-question" placeholder="请解释当前检查结果，或者描述截图里你想确认的问题。"></textarea>
+          <div class="toolbar">
+            <button class="btn-primary" onclick="askAI()">解释当前问题</button>
+          </div>
+          <div id="llm-result" class="muted" style="margin-top:8px;font-size:13px;">没有检查结果时，请先运行上方检查。</div>
+
+          <details id="llm-advanced-settings" class="details-block">
+            <summary>高级设置</summary>
+            <label for="llm-provider">AI 供应商</label>
+            <select id="llm-provider"></select>
+            <div id="llm-provider-note" class="muted" style="margin-top:6px;font-size:12px;">默认优先 DeepSeek；图片问诊需显式启用实验入口。</div>
+            <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+              <input id="llm-enabled" type="checkbox" style="width:auto;">
+              启用云端 AI 解释；关闭时只使用本地规则解释
+            </label>
+            <div class="form-grid">
+              <div>
+                <label for="llm-base-url">接口地址</label>
+                <input id="llm-base-url" placeholder="https://api.example.com">
+              </div>
+              <div>
+                <label for="llm-model">模型</label>
+                <input id="llm-model" placeholder="model name">
+              </div>
+            </div>
+            <form id="llm-key-form" onsubmit="return false;" autocomplete="off">
+              <input type="text" name="username" autocomplete="username" value="deepseek" hidden aria-hidden="true">
+              <label for="llm-api-key">账号密钥</label>
+              <input id="llm-api-key" type="password" autocomplete="new-password" placeholder="留空表示不修改已保存的账号密钥">
+              <div class="muted" style="font-size:12px;margin-top:4px;">保存后写入系统钥匙串（Keychain），默认界面不会显示密钥。</div>
+            </form>
+            <div id="llm-chain-readiness" class="muted" style="margin-top:8px;font-size:12px;">正在读取国内模型链路状态...</div>
+            <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+              <input id="llm-fallback-enabled" type="checkbox" style="width:auto;">
+              国内模型失败时自动尝试已配置的备用模型
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+              <input id="llm-budget-enabled" type="checkbox" style="width:auto;">
+              启用本地请求预算，降低连续失败和意外费用风险；这不是供应商账单硬上限
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+              <input id="llm-budget-persist-ledger" type="checkbox" style="width:auto;">
+              跨重启保留本地预算计数
+            </label>
+            <div class="muted" style="font-size:12px;margin-top:4px;">关闭此项或关闭预算会删除本地预算账本；账本只记录供应商、模式、时间戳和冷却状态。</div>
+            <div class="form-grid">
+              <div>
+                <label for="llm-budget-hourly">每小时云端请求上限</label>
+                <input id="llm-budget-hourly" type="number" min="0" max="10000" value="60">
+              </div>
+              <div>
+                <label for="llm-budget-image-hourly">每小时图片问诊上限</label>
+                <input id="llm-budget-image-hourly" type="number" min="0" max="10000" value="12">
+              </div>
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+              <input id="llm-image-question-enabled" type="checkbox" style="width:auto;">
+              启用图片问诊实验入口
+            </label>
+            <label for="llm-images">图片（PNG、JPEG、WebP 或 GIF，最多 3 张，单张 4.5MB 以内）</label>
+            <input id="llm-images" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onchange="handleAIImageSelection(event)">
+            <div class="muted" style="font-size:12px;margin-top:6px;">Netfix 会剥离图片文件元数据，但不会自动识别或打码图片里的文字；发送前请先裁剪或遮挡线路密码、账号密钥、账号信息。</div>
+            <div id="llm-image-preview" class="image-preview-grid"></div>
+            <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;">
+              <input id="llm-upload-confirmed" type="checkbox" style="width:auto;margin-top:3px;">
+              <span>我确认发送脱敏检查结果<span id="llm-image-confirm-copy"></span>和图片给已配置的云端模型；AI 不会直接执行系统命令。</span>
+            </label>
+            <div class="toolbar">
+            <button onclick="saveLLMSettings()">保存设置</button>
+            <button onclick="importDeepSeekSidecarKey()">导入 DeepSeek 密钥</button>
+            <button onclick="testLLMChain()">测试链路</button>
+            <button onclick="clearAIImages()">清空图片</button>
+            </div>
+          </details>
+        </section>
+
+        <section id="proxy-panel" class="panel hidden">
+          <h3>检查你的网络线路</h3>
+          <label for="proxy-input">粘贴供应商给你的线路/节点信息</label>
+          <textarea id="proxy-input" data-legacy-label="粘贴新的线路凭据" placeholder="http://user:pass@host:port 或 host:port:user:pass"></textarea>
+          <label for="proxy-target-profile" data-legacy-label="检查场景">要检查的场景</label>
+          <select id="proxy-target-profile">
+            <option value="ai_dev">AI / 开发工具</option>
+            <option value="baseline">通用连通性</option>
+          </select>
+          <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;">
+            <input id="proxy-start-monitor-on-save" type="checkbox" checked style="width:auto;margin-top:3px;">
+            <span data-legacy-label="保存后自动看护">保存后自动看护<br><span class="muted" style="font-size:12px;">只会做本地后台健康检查并保存恢复意图；不会修改系统网络设置。</span></span>
+          </label>
+          <div class="toolbar">
+            <button onclick="validateProxy()">先检查能不能用</button>
+            <button class="btn-primary" aria-label="开始看护" onclick="saveProxyProfile()">保存并验证 AI 工具</button>
+          </div>
+          <details class="details-block">
+            <summary>批量导入和格式检查</summary>
+            <div class="toolbar">
+              <button onclick="parseProxy()">解析</button>
+              <button onclick="importProxyPreview()" data-legacy-label="批量预检">批量预检</button>
+            </div>
+          </details>
+          <div id="proxy-result" class="muted" style="margin-top:8px;font-size:13px;">Netfix 不卖线路、不保证平台放行，只帮你检查、保存、看护自己合法获得的线路/节点。</div>
+          <div id="proxy-bridge" class="muted" style="margin-top:8px;font-size:13px;">还没有应用到系统网络。</div>
+          <div id="proxy-monitor" class="muted" style="margin-top:8px;font-size:13px;">还没有开始持续检查。</div>
+          <details class="details-block">
+            <summary>已保存线路和高级操作</summary>
+            <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;">
+              <input id="proxy-bridge-auto-restart" type="checkbox" data-legacy-label="重启时自动恢复上次本机转发" style="width:auto;margin-top:3px;" onchange="saveProxyBridgeSettings()">
+              <span>重启时自动恢复上次本机转发<br><span class="muted" style="font-size:12px;">只在系统仍指向上次 Netfix 本机转发、端口已空且已保存密码可用时启动；不会静默改写系统网络设置。</span></span>
+            </label>
+            <div id="proxy-profiles"></div>
+          </details>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = '';
+    let apiReady = false;
+    let lastReport = null;
+    let lastParsedProxy = null;
+    let llmProviders = [];
+    let llmSettings = {};
+    let llmChainReadiness = {};
+    let privacySettings = {};
+    let proxyBridgeSettings = {};
+    let aiQuestionImages = [];
+    let lastFailedJob = null;
+    let lastRecoveryDetail = '';
+    let operationInProgress = false;
+    const allowedImageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function log(msg) {
+      const el = document.getElementById('log');
+      el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function openLogs() {
+      const panel = document.getElementById('log-panel');
+      panel.classList.remove('hidden');
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      loadLogs();
+    }
+
+    function friendlyJobFailure(label, detail) {
+      const text = String(detail || '').toLowerCase();
+      if (text.includes('timed out') || text.includes('timeout') || text.includes('超时')) {
+        return `${label}耗时过长，通常是线路/节点无响应、DNS 等待过久或目标服务连接质量很差。`;
+      }
+      if (text.includes('403') || text.includes('forbidden') || text.includes('token')) {
+        return `${label}被本地安全网关拒绝，可能是页面会话已过期或 Netfix 本地服务刚刚重启。`;
+      }
+      if (text.includes('failed to fetch') || text.includes('connection') || text.includes('refused')) {
+        return `${label}无法连接 Netfix 本地服务，服务可能正在重启或已经退出。`;
+      }
+      return `${label}没有完成，Netfix 已保留失败详情用于复查。`;
+    }
+
+    function recoverySteps(detail) {
+      const text = String(detail || '').toLowerCase();
+      if (text.includes('timed out') || text.includes('timeout') || text.includes('超时')) {
+        return [
+          '先点重试；如果连续超时，打开运行记录看卡在哪一步。',
+          '检查线路客户端是否仍在运行，并确认当前节点不是离线或认证失败。',
+          '如果结果里提示需要改系统设置，先看预览，再确认要不要改。'
+        ];
+      }
+      if (text.includes('403') || text.includes('forbidden') || text.includes('token')) {
+        return [
+          '刷新页面或从 App 重新打开本地控制台，让浏览器拿到新的本地会话。',
+          '确认请求来自 127.0.0.1 页面，不要从复制出来的外部 HTML 控制 Netfix 本地服务。',
+          '重新检查前先刷新运行记录，确认 Netfix 没有刚刚重启。'
+        ];
+      }
+      if (text.includes('failed to fetch') || text.includes('connection') || text.includes('refused')) {
+        return [
+          '确认 Netfix App 仍在运行；如果刚启动，等几秒后重试。',
+          '打开运行记录查看 Netfix 服务是否异常退出。',
+          '必要时退出并重新打开 Netfix，再运行一键检查。'
+        ];
+      }
+      return [
+        '点重试再跑一次同样操作。',
+        '打开运行记录查看最近操作和结果保存位置。',
+        '复制失败详情，用于后续定位。'
+      ];
+    }
+
+    function showJobRecovery(label, command, timeout, onDone, detail) {
+      lastFailedJob = { command, timeout, label, onDone };
+      lastRecoveryDetail = [
+        `${label} failed`,
+        `command=${JSON.stringify(command)}`,
+        `timeout=${timeout}`,
+        String(detail || '')
+      ].join('\n');
+
+      const panel = document.getElementById('recovery-panel');
+      document.getElementById('recovery-title').textContent = `${label}未完成`;
+      const message = friendlyJobFailure(label, detail);
+      document.getElementById('recovery-message').textContent = message;
+      renderFailureState(`${label}未完成`, message);
+      document.getElementById('recovery-steps').innerHTML = recoverySteps(detail)
+        .map(step => `<li>${escapeHtml(step)}</li>`)
+        .join('');
+      document.getElementById('recovery-detail').textContent = String(detail || '无详细错误。');
+      document.getElementById('btn-retry-job').disabled = !command || !onDone;
+      panel.classList.remove('hidden');
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function hideJobRecovery() {
+      const panel = document.getElementById('recovery-panel');
+      if (panel) panel.classList.add('hidden');
+    }
+
+    async function retryFailedJob() {
+      if (!lastFailedJob) return;
+      const job = lastFailedJob;
+      hideJobRecovery();
+      await runJob(job.command, job.timeout, job.label, job.onDone);
+    }
+
+    async function copyRecoveryDetail() {
+      try {
+        await navigator.clipboard.writeText(lastRecoveryDetail || 'No recovery detail recorded.');
+        log('已复制失败详情');
+      } catch (e) {
+        log('复制失败详情失败: ' + (e.message || e));
+      }
+    }
+
+    async function api(method, path, body) {
+      const opts = { method, headers: {}, credentials: 'same-origin' };
+      if (body) {
+        opts.headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
+      const res = await fetch(API_BASE + path, opts);
+      let data = {};
+      try { data = await res.json(); } catch (e) { data = { ok: false, error: e.message }; }
+      data.http_status = res.status;
+      if (!res.ok) data.ok = false;
+      return data;
+    }
+
+    function setStatus(status, text) {
+      const dot = document.getElementById('status-dot');
+      const txt = document.getElementById('status-text');
+      dot.className = 'status-dot ' + status;
+      txt.textContent = text;
+    }
+
+    function setCard(id, status, text) {
+      const card = document.getElementById(id);
+      card.className = 'card ' + status;
+      card.querySelector('.card-value').textContent = text;
+    }
+
+    function selectedGoal() {
+      return document.querySelector('input[name="diagnose-goal"]:checked')?.value || 'unsure';
+    }
+
+    function openAIPanel() {
+      const panel = document.getElementById('ai-panel');
+      panel.classList.remove('hidden');
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function openProxyPanel() {
+      const panel = document.getElementById('proxy-panel');
+      panel.classList.remove('hidden');
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function serviceLabel(name) {
+      const labels = {
+        openai_api: 'ChatGPT / OpenAI',
+        openai_chat: 'ChatGPT 网页',
+        github: 'GitHub',
+        github_api: 'GitHub',
+        github_copilot: 'GitHub / Copilot',
+        anthropic_api: 'Claude',
+        gemini_api: 'Gemini',
+        codex_api_direct: '开发工具连接',
+        codex_api_via_proxy: '开发工具连接',
+      };
+      return labels[name] || String(name || '').replace(/_/g, ' ');
+    }
+
+    function providerLabel(id) {
+      const provider = llmProviders.find(item => item.id === id || item.provider === id);
+      return provider ? provider.label : String(id || '');
+    }
+
+    function friendlyAIStatus(status) {
+      const labels = {
+        ready: '已连接',
+        ok: '已通过',
+        missing_key: '未配置',
+        missing_api_key: '缺少账号密钥',
+        missing_keys: '缺少备用密钥',
+        feature_disabled: '未开启',
+        disabled: '已关闭',
+        skipped: '已跳过',
+        failed: '失败',
+        blocked: '不可用',
+        auth_failed: '认证失败',
+        rate_limited: '请求过快',
+        quota_or_billing: '额度或账单异常',
+        network_error: '网络错误',
+        timeout: '超时',
+        adapter_pending: '待适配',
+        unsupported: '不支持',
+      };
+      return labels[status] || status || '未知';
+    }
+
+    function friendlyAINextStep(text) {
+      const value = String(text || '');
+      if (value.includes('Configured providers')) return '当前文本解释可用。';
+      if (value.includes('Enable image-question')) return '图片问诊未开启；普通文本解释不受影响。';
+      if (value.includes('Save provider-scoped')) return '需要先保存对应供应商的账号密钥。';
+      if (value.includes('Enable cloud AI')) return '需要先开启云端 AI 解释。';
+      if (value.includes('Review provider')) return '请检查供应商能力或功能开关。';
+      return value;
+    }
+
+    function friendlyProxyStatus(status) {
+      const labels = {
+        ok: '正常',
+        ready: '可用',
+        valid: '可用',
+        warn: '需注意',
+        fail: '失败',
+        failed: '失败',
+        blocked: '不可用',
+        unknown: '未知',
+        stopped: '未启动',
+        running: '运行中',
+        recovery_required: '需要恢复',
+        check_failed: '检查失败',
+        no_journal: '无历史记录',
+        supported: '支持',
+        bridge_required: '需要本机转发',
+        available: '可导出',
+      };
+      return labels[status] || status || '未知';
+    }
+
+    function updateAIStatusCard() {
+      const card = document.getElementById('llm-status-card');
+      if (!card) return;
+      const providerId = llmSettings.provider || document.getElementById('llm-provider')?.value || 'deepseek';
+      const label = providerLabel(providerId) || 'AI';
+      const enabled = !!llmSettings.enabled;
+      const keySet = !!llmSettings.api_key_set || !!(llmProviders.find(item => item.id === providerId) || {}).api_key_set;
+      const budget = llmSettings.budget || {};
+      const budgetCopy = budget.enabled === false
+        ? '费用保护未开启；供应商账单仍以对方后台为准。'
+        : `费用保护已开：每小时最多 ${budget.max_requests_per_hour || 60} 次文本、${budget.max_image_requests_per_hour || 12} 次图片。`;
+      let title = `当前 AI：${label} 未连接`;
+      let detail = '可以先用本地规则解释；要使用云端 AI，请导入或保存账号密钥。';
+      let badge = 'warn';
+      if (!enabled) {
+        title = '当前 AI：未开启';
+        detail = '现在只使用本地规则解释，不会发送检查结果给云端模型。';
+      } else if (keySet) {
+        title = `当前 AI：${label} 已连接`;
+        detail = '可以解释当前检查结果；点击解释会发送脱敏后的结果，不会执行系统命令。';
+        badge = 'ok';
+      }
+      card.innerHTML = `
+        <div class="action-title">
+          <strong>${escapeHtml(title)}</strong>
+          <span class="badge ${badge}">${escapeHtml(keySet && enabled ? '可用' : '需配置')}</span>
+        </div>
+        <div class="muted">${escapeHtml(detail)}</div>
+        <div class="muted" style="margin-top:4px">${escapeHtml(budgetCopy)}</div>
+      `;
+    }
+
+    async function checkApi() {
+      try {
+        const data = await api('GET', '/health');
+        apiReady = !!data.ok;
+        if (apiReady) {
+          if (!operationInProgress) setStatus('ok', `Netfix 已就绪 v${data.version}`);
+          log('API 连接成功');
+        } else {
+          if (!operationInProgress) setStatus('fail', 'Netfix 本地服务异常');
+          log('API 异常: ' + JSON.stringify(data));
+        }
+      } catch (e) {
+        if (!operationInProgress) setStatus('fail', '未连接到 Netfix 本地服务');
+        log('API 连接失败: ' + e.message);
+      }
+    }
+
+    async function loadReport() {
+      if (operationInProgress) return;
+      const data = await api('GET', '/report/latest');
+      if (data.ok === false) {
+        log('读取检查结果失败: ' + (data.error || 'no report'));
+        return;
+      }
+      renderReport(data);
+    }
+
+    function normalizeCopy(value) {
+      return String(value || '').trim().replace(/\s+/g, ' ');
+    }
+
+    function userCopy(value) {
+      return String(value || '')
+        .replace(/网络或代理问题/g, '网络问题')
+        .replace(/网络或网络线路问题/g, '网络问题')
+        .replace(/API Key|API key|api key/g, '账号密钥')
+        .replace(/分层诊断/g, '检查')
+        .replace(/诊断/g, '检查')
+        .replace(/本地桥接/g, '本机转发')
+        .replace(/桥接/g, '本机转发')
+        .replace(/系统代理/g, '系统网络设置')
+        .replace(/代理节点/g, '网络线路')
+        .replace(/代理配置/g, '网络线路配置')
+        .replace(/代理/g, '网络线路')
+        .replace(/日志/g, '运行记录')
+        .replace(/报告/g, '检查结果');
+    }
+
+    function diagnosticCounts(diagnostics) {
+      return (diagnostics || []).reduce((acc, item) => {
+        const status = item.status || 'unknown';
+        acc[status] = (acc[status] || 0) + 1;
+        return acc;
+      }, {});
+    }
+
+    function buildReportViewModel(report) {
+      const explanation = report.explanation || {};
+      const root = (report.root_causes || [])[0] || {};
+      const rawHeadline = explanation.headline || root.description || '暂无异常';
+      const rawDetailOriginal = explanation.explanation || '';
+      const rawRootCopy = root.description || '';
+      const rootKey = normalizeCopy([root.id, rawHeadline, rawRootCopy, rawDetailOriginal].filter(Boolean).join(' '));
+      const headline = userCopy(rawHeadline);
+      const rawDetail = userCopy(rawDetailOriginal);
+      const rootCopy = userCopy(rawRootCopy);
+      let detail = rawDetail && normalizeCopy(rawDetail) !== normalizeCopy(headline)
+        ? rawDetail
+        : '';
+
+      const suggestedFixes = explanation.actions || [];
+      const autoFix = suggestedFixes.find(action => !action.needs_confirm);
+      const confirmFix = suggestedFixes.find(action => action.needs_confirm);
+      const actions = [];
+      const pushAction = (id, label, primary = false) => {
+        if (actions.some(item => item.id === id)) return;
+        actions.push({ id, label, primary: primary && !actions.some(item => item.primary) });
+      };
+      let nextTitle = '下一步';
+      let nextCopy = detail || '先看下面的目标服务和可处理问题；需要更多解释时，让 AI 读取当前检查结果。';
+
+      if (root.id === 'codex-reachable-needs-key' || (/OpenAI/.test(rootKey) && /API Key/.test(rootKey))) {
+        nextTitle = '下一步：按你的真实目标处理';
+        nextCopy = '如果只是 ChatGPT 网页打不开，先不用管账号密钥；如果是 Codex、OpenAI API 或开发工具报错，再去配置账号密钥。';
+        pushAction('configure-key', '配置 Codex / OpenAI 密钥', true);
+      } else if (root.id === 'direct-blocked' || /直连.*代理.*可用/.test(rootKey)) {
+        nextTitle = '下一步：继续使用线路/节点';
+        nextCopy = detail || '直连访问受阻，但线路路径可用；保持线路开启，必要时切换节点。';
+        pushAction('proxy-panel', '换节点或检查线路', true);
+      } else if (root.id === 'node-failed' || /直连.*代理.*失败/.test(rootKey)) {
+        nextTitle = '下一步：先换节点或检查线路工具';
+        nextCopy = detail || '直连和线路都失败时，优先换节点，再检查线路客户端是否运行。';
+        pushAction('proxy-panel', '换节点或检查线路', true);
+      } else if (root.id && /dns/i.test(root.id)) {
+        nextTitle = '下一步：先处理 DNS';
+        nextCopy = detail || 'DNS 异常会让网页和开发工具都误判为网络坏了，先执行安全修复或更换 DNS。';
+        if (autoFix) pushAction('run-auto-fix', '一键处理可自动修的问题', true);
+        else if (confirmFix) pushAction('see-actions', '先看会改什么', true);
+      } else if (root.id && /proxy/i.test(root.id)) {
+        nextTitle = '下一步：先处理线路配置';
+        nextCopy = detail || '当前更像线路配置或线路客户端问题，先看线路状态和建议操作。';
+        pushAction('proxy-panel', '换节点或检查线路', true);
+      } else if (!root.id && !(report.diagnostics || []).some(d => d.status === 'fail' || d.status === 'warn')) {
+        nextTitle = '下一步：不用修网络';
+        nextCopy = '当前检查没有发现主要网络故障；如果某个 App 仍异常，带着具体报错再问 AI 或重新检查。';
+        pushAction('rerun', '重新检查', true);
+      }
+
+      if (!actions.some(item => item.primary)) {
+        if (autoFix) pushAction('run-auto-fix', '一键处理可自动修的问题', true);
+        else if (confirmFix) pushAction('see-actions', '先看会改什么', true);
+        else pushAction('service-details', '查看目标服务', true);
+      }
+      pushAction('ask-ai', '让 AI 解释', false);
+      pushAction('service-details', '查看目标服务', false);
+
+      if (!detail && rootCopy && normalizeCopy(rootCopy) !== normalizeCopy(headline)) {
+        detail = rootCopy;
+      }
+      const counts = diagnosticCounts(report.diagnostics || []);
+      const technical = {
+        root_id: root.id || null,
+        confidence: root.confidence ?? null,
+        diagnostic_counts: counts,
+        report_status: report.status || null,
+      };
+      return { headline, detail, nextTitle, nextCopy, actions, technical };
+    }
+
+    function renderReportSummary(report) {
+      const model = buildReportViewModel(report);
+      const detailHtml = model.detail ? `<div class="muted">${escapeHtml(model.detail)}</div>` : '';
+      const actionHtml = model.actions.map(action => `
+        <button ${action.primary ? 'class="btn-primary"' : ''} data-summary-action="${escapeHtml(action.id)}">${escapeHtml(action.label)}</button>
+      `).join('');
+      document.getElementById('summary').innerHTML = `
+        <div class="summary-result">
+          <div>
+            <div class="headline">${escapeHtml(model.headline)}</div>
+            ${detailHtml}
+          </div>
+          <div class="summary-next">
+            <div class="summary-next-title">${escapeHtml(model.nextTitle)}</div>
+            <div>${escapeHtml(model.nextCopy)}</div>
+            <div class="summary-actions">${actionHtml}</div>
+          </div>
+          <details class="details-block">
+            <summary>给技术人员看的信息</summary>
+            <div class="muted">判断依据: ${escapeHtml(model.technical.root_id || '未记录')}</div>
+            <div class="muted">可信度: ${escapeHtml(model.technical.confidence ?? '未记录')}</div>
+            <div class="muted">检查项: 正常 ${escapeHtml(model.technical.diagnostic_counts.ok || 0)}，需注意 ${escapeHtml(model.technical.diagnostic_counts.warn || 0)}，失败 ${escapeHtml(model.technical.diagnostic_counts.fail || 0)}</div>
+          </details>
+        </div>
+      `;
+      document.querySelectorAll('[data-summary-action]').forEach(btn => {
+        btn.addEventListener('click', () => handleSummaryAction(btn.dataset.summaryAction));
+      });
+    }
+
+    function openAIAdvanced() {
+      const details = document.getElementById('llm-advanced-settings');
+      if (details) details.open = true;
+    }
+
+    function scrollToPanel(id) {
+      const panel = document.getElementById(id);
+      if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function handleSummaryAction(action) {
+      if (action === 'ask-ai') {
+        openAIPanel();
+        document.getElementById('llm-question')?.focus();
+        return;
+      }
+      if (action === 'run-auto-fix') {
+        runFix();
+        return;
+      }
+      if (action === 'see-actions') {
+        scrollToPanel('actions-panel');
+        return;
+      }
+      if (action === 'rerun') {
+        runDiagnose();
+        return;
+      }
+      if (action === 'retry-failed') {
+        retryFailedJob();
+        return;
+      }
+      if (action === 'open-logs') {
+        openLogs();
+        return;
+      }
+      if (action === 'configure-key') {
+        openAIPanel();
+        openAIAdvanced();
+        document.getElementById('llm-api-key')?.focus();
+        return;
+      }
+      if (action === 'proxy-panel') {
+        openProxyPanel();
+        return;
+      }
+      if (action === 'service-details') {
+        scrollToPanel('services-panel');
+      }
+    }
+
+    function renderRunningState(title, detail) {
+      document.getElementById('summary').innerHTML = `
+        <div class="summary-result" aria-live="polite">
+          <div>
+            <div class="headline">${escapeHtml(title)}</div>
+            <div class="muted">${escapeHtml(detail)}</div>
+          </div>
+          <div class="summary-next">
+            <div class="summary-next-title">正在处理</div>
+            <div>通常需要十几秒；完成后会自动刷新原因、下一步和建议操作。</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderFailureState(title, detail) {
+      document.getElementById('summary').innerHTML = `
+        <div class="summary-result" aria-live="polite">
+          <div>
+            <div class="headline">${escapeHtml(title)}</div>
+            <div class="muted">${escapeHtml(detail)}</div>
+          </div>
+          <div class="summary-next">
+            <div class="summary-next-title">下一步</div>
+            <div>先按下方建议重试；如果连续失败，查看运行记录再定位卡在哪一步。</div>
+            <div class="summary-actions">
+              <button data-summary-action="retry-failed">重试</button>
+              <button data-summary-action="open-logs">查看运行记录</button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.querySelectorAll('[data-summary-action]').forEach(btn => {
+        btn.addEventListener('click', () => handleSummaryAction(btn.dataset.summaryAction));
+      });
+    }
+
+    function renderReport(report) {
+      lastReport = report;
+      const explanation = report.explanation || {};
+      renderReportSummary(report);
+      showPostCheckControls(explanation);
+
+      const diags = report.diagnostics || [];
+      const hasFail = diags.some(d => d.status === 'fail');
+      const hasWarn = diags.some(d => d.status === 'warn');
+      setStatus(hasFail ? 'fail' : hasWarn ? 'warn' : 'ok',
+        hasFail ? '检测到连接故障' : hasWarn ? '部分服务需要注意' : '网络正常');
+
+      const byLayer = statusByLayer(diags);
+      setCard('card-network', byLayer.network.status, byLayer.network.text);
+      setCard('card-dns', byLayer.dns.status, byLayer.dns.text);
+      setCard('card-proxy', byLayer.proxy.status, byLayer.proxy.text);
+      setCard('card-services', byLayer.services.status, byLayer.services.text);
+
+      renderServices(diags);
+      renderActions(explanation);
+      loadLogs();
+    }
+
+    function showPostCheckControls(explanation) {
+      const actions = explanation.actions || [];
+      const hasAutoFix = actions.some(action => !action.needs_confirm);
+      const fixButton = document.getElementById('btn-fix');
+      fixButton.classList.toggle('hidden', !hasAutoFix);
+      fixButton.disabled = !hasAutoFix;
+      document.getElementById('btn-latest-report')?.classList.remove('hidden');
+      document.getElementById('btn-open-logs')?.classList.remove('hidden');
+    }
+
+    function worstStatus(items) {
+      if (items.some(d => d.status === 'fail')) return 'fail';
+      if (items.some(d => d.status === 'warn')) return 'warn';
+      if (items.length) return 'ok';
+      return '';
+    }
+
+    function statusText(status, empty) {
+      if (!status) return empty;
+      return status === 'fail' ? '异常' : status === 'warn' ? '需注意' : '正常';
+    }
+
+    function userFacingStatusText(items, status, empty = '待检测') {
+      if (!items.length) return empty;
+      if (status === 'fail') return '失败';
+      if (status === 'warn') return '需注意';
+      return '正常';
+    }
+
+    function statusByLayer(diags) {
+      const groups = {
+        network: diags.filter(d => /gateway|route|wifi|interface|dhcp|connectivity|mtu|dns|doh/i.test(d.name || '')),
+        dns: diags.filter(d => /openai_chat/i.test(d.name || '')),
+        proxy: diags.filter(d => /openai_api|codex/i.test(d.name || '')),
+        services: diags.filter(d => /github/i.test(d.name || '')),
+      };
+      const out = {};
+      Object.entries(groups).forEach(([key, items]) => {
+        const st = worstStatus(items);
+        if (!st && diags.length) {
+          out[key] = { status: 'ok', text: '未见异常' };
+          return;
+        }
+        const text = userFacingStatusText(items, st, '待检测');
+        out[key] = { status: st || '', text };
+      });
+      return out;
+    }
+
+    function renderActions(explanation) {
+      const panel = document.getElementById('actions-panel');
+      const list = document.getElementById('actions-list');
+      const manual = document.getElementById('manual-list');
+      const preview = document.getElementById('action-preview');
+      const actions = explanation.actions || [];
+      const manualSteps = explanation.manual_steps || [];
+
+      list.innerHTML = '';
+      manual.innerHTML = '';
+      preview.classList.add('hidden');
+      preview.textContent = '';
+
+      if (!actions.length && !manualSteps.length) {
+        panel.classList.add('hidden');
+        return;
+      }
+      panel.classList.remove('hidden');
+      list.innerHTML = actions.map(action => {
+        const needsConfirm = !!action.needs_confirm;
+        const tierLabel = needsConfirm ? '需要你确认' : '可一键处理';
+        const button = needsConfirm
+          ? `<button data-preview-action="${escapeHtml(action.id)}">先看会改什么</button>`
+          : `<button class="btn-primary" data-run-action="${escapeHtml(action.id)}">一键处理</button>`;
+        return `
+          <div class="action-card">
+            <div class="action-title">
+              <strong>${escapeHtml(userCopy(action.label || action.id))}</strong>
+              <span class="badge ${needsConfirm ? 'warn' : 'ok'}">${escapeHtml(tierLabel)}</span>
+            </div>
+            <div class="action-buttons">${button}</div>
+            <details class="details-block">
+              <summary>技术详情</summary>
+              <div class="action-meta">${escapeHtml(action.id)}${action.verify_diagnostic ? ' · 验证: ' + escapeHtml(action.verify_diagnostic) : ''}</div>
+            </details>
+          </div>
+        `;
+      }).join('');
+      list.querySelectorAll('[data-preview-action]').forEach(btn => {
+        btn.addEventListener('click', () => previewAction(btn.dataset.previewAction));
+      });
+      list.querySelectorAll('[data-run-action]').forEach(btn => {
+        btn.addEventListener('click', () => runAction(btn.dataset.runAction));
+      });
+      manual.innerHTML = manualSteps.map(step => {
+        const text = userCopy(step.description || step.id || step);
+        return `<li>${escapeHtml(text)}</li>`;
+      }).join('');
+    }
+
+    function renderServices(diagnostics) {
+      const panel = document.getElementById('services-panel');
+      const list = document.getElementById('services-list');
+      const diags = diagnostics || [];
+      const serviceGroups = [
+        { id: 'chatgpt', label: 'ChatGPT 网页', match: /openai_chat/i },
+        { id: 'codex', label: 'Codex / OpenAI', match: /openai_api|codex/i },
+        { id: 'github', label: 'GitHub / Copilot', match: /github/i },
+        { id: 'network', label: '基础网络', match: /gateway|route|wifi|interface|dhcp|connectivity|mtu|dns|doh/i },
+      ].map(group => {
+        const items = diags.filter(d => group.match.test(d.name || ''));
+        return { ...group, items, status: worstStatus(items) };
+      }).filter(group => group.items.length);
+      const orders = {
+        chatgpt: ['chatgpt', 'network', 'codex', 'github'],
+        codex: ['codex', 'network', 'chatgpt', 'github'],
+        github: ['github', 'network', 'codex', 'chatgpt'],
+        unsure: ['chatgpt', 'codex', 'github', 'network'],
+      };
+      const order = orders[selectedGoal()] || orders.unsure;
+      const items = serviceGroups.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      if (!items.length) {
+        panel.classList.add('hidden');
+        return;
+      }
+      panel.classList.remove('hidden');
+      list.innerHTML = items.map(s => `
+        <div class="service-row">
+          <span>${escapeHtml(s.label)}</span>
+          <span class="badge ${escapeHtml(s.status)}">${escapeHtml(userFacingStatusText(s.items, s.status))}</span>
+        </div>
+      `).join('');
+    }
+
+    async function runJob(command, timeout, label, onDone) {
+      hideJobRecovery();
+      let started = {};
+      try {
+        started = await api('POST', '/run', { command, timeout, async: true });
+      } catch (e) {
+        const detail = e.message || e;
+        setStatus('fail', `${label}启动失败`);
+        log(label + '启动失败: ' + detail);
+        showJobRecovery(label, command, timeout, onDone, detail);
+        return;
+      }
+      if (!started.ok) {
+        const detail = started.error || JSON.stringify(started);
+        setStatus('fail', `${label}启动失败`);
+        log(label + '启动失败: ' + detail);
+        showJobRecovery(label, command, timeout, onDone, detail);
+        return;
+      }
+      log(`${label}已启动，job=${started.job_id}`);
+      const deadline = Date.now() + (timeout + 15) * 1000;
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 800));
+        let job = {};
+        try {
+          job = await api('GET', `/jobs/${started.job_id}`);
+        } catch (e) {
+          const detail = e.message || e;
+          setStatus('fail', `${label}状态读取失败`);
+          log(`${label}状态读取失败: ${detail}`);
+          showJobRecovery(label, command, timeout, onDone, detail);
+          return;
+        }
+        if (job.status === 'done') {
+          log(`${label}完成`);
+          if (job.result && job.result.ok && job.result.result) {
+            hideJobRecovery();
+            onDone(job.result.result);
+          } else {
+            const detail = JSON.stringify(job.result || job);
+            setStatus('fail', `${label}失败`);
+            log(`${label}失败: ` + detail);
+            showJobRecovery(label, command, timeout, onDone, detail);
+          }
+          return;
+        }
+      }
+      const detail = `${label} timed out after ${timeout + 15}s while waiting for async job ${started.job_id}`;
+      setStatus('fail', `${label}超时`);
+      log(label + '超时，请打开运行记录查看。');
+      showJobRecovery(label, command, timeout, onDone, detail);
+    }
+
+    async function runDiagnose() {
+      const btn = document.getElementById('btn-diagnose');
+      operationInProgress = true;
+      btn.disabled = true;
+      btn.textContent = '检查中...';
+      btn.setAttribute('aria-busy', 'true');
+      setStatus('warn', '正在检查...');
+      renderRunningState('正在检查连接路径', 'Netfix 正在检查 Wi-Fi、DNS、线路、节点和目标服务。');
+      try {
+        await runJob(['codex'], 60, '检查', renderReport);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '一键检查';
+        btn.removeAttribute('aria-busy');
+        operationInProgress = false;
+      }
+    }
+
+    async function runFix() {
+      if (operationInProgress) return;
+      if (!confirm('只会处理低风险问题；凡是要改系统设置的操作，都会另外让你先看预览并确认。继续？')) return;
+      const btn = document.getElementById('btn-fix');
+      operationInProgress = true;
+      btn.disabled = true;
+      btn.textContent = '处理中...';
+      btn.setAttribute('aria-busy', 'true');
+      setStatus('warn', '正在处理...');
+      renderRunningState('正在处理可自动修的问题', '这里只处理低风险问题；需要改配置的操作仍会要求你单独确认。');
+      try {
+        await runJob(['fix', '--all', '--yes', '--report'], 40, '自动处理', renderReport);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '一键处理可自动修的问题';
+        btn.removeAttribute('aria-busy');
+        operationInProgress = false;
+      }
+    }
+
+    async function previewAction(actionId) {
+      log(`预览处理 ${actionId}...`);
+      const res = await api('POST', '/run', { command: ['fix', '--issue', actionId, '--dry-run'], timeout: 30 });
+      const preview = document.getElementById('action-preview');
+      preview.classList.remove('hidden');
+      preview.textContent = JSON.stringify(res.result || res, null, 2);
+    }
+
+    async function runAction(actionId) {
+      if (operationInProgress) return;
+      if (!confirm('将处理这个低风险问题，并在处理后重新检查。继续？')) return;
+      await runJob(['fix', '--issue', actionId, '--yes', '--report'], 40, '处理问题', renderReport);
+    }
+
+    async function loadLogs() {
+      const target = document.getElementById('backend-log');
+      target.textContent = '正在读取运行记录...';
+      let data = {};
+      try {
+        data = await api('GET', '/logs');
+      } catch (err) {
+        target.textContent = '无法读取运行记录: ' + (err.message || err);
+        return;
+      }
+      if (!data.ok) {
+        target.textContent = '无法读取运行记录: ' + (data.error || 'unknown');
+        return;
+      }
+      if (data.latest_report_exists) {
+        document.getElementById('btn-latest-report')?.classList.remove('hidden');
+      }
+      const summary = data.latest_report_summary || {};
+      const events = data.events || [];
+      const eventHtml = events.slice(-8).reverse().map(ev => `
+        <div class="event-row">
+          <span>${escapeHtml(ev.timestamp || '')} · ${escapeHtml(ev.headline || ev.type || '')}</span>
+          <span class="badge ${escapeHtml(ev.status || 'warn')}">${escapeHtml(ev.status || 'event')}</span>
+        </div>
+      `).join('');
+      const latestEvent = events.length ? events[events.length - 1] : null;
+      const latestEventHtml = latestEvent ? `
+        <div class="event-row">
+          <span>${escapeHtml(latestEvent.headline || latestEvent.type || '最近事件')}</span>
+          <span class="badge ${escapeHtml(latestEvent.status || 'warn')}">${escapeHtml(latestEvent.status === 'ok' ? '正常' : latestEvent.status === 'warn' ? '需注意' : latestEvent.status || '事件')}</span>
+        </div>
+      ` : '<div class="muted">还没有运行记录。</div>';
+      target.innerHTML = `
+        <div class="status-card">
+          <div class="headline">${escapeHtml(summary.headline || '还没有检查结果')}</div>
+          <div class="muted">${data.latest_report_exists ? '最近一次检查结果已保存。' : '完成一次一键检查后会生成检查结果。'}</div>
+          <div style="margin-top:8px">${latestEventHtml}</div>
+        </div>
+        <details class="details-block">
+          <summary>查看历史运行记录和结果路径</summary>
+          <div class="muted">结果路径: ${data.latest_report_exists ? escapeHtml(data.latest_report_path) : '暂无'}</div>
+          <div style="margin-top:8px">${eventHtml || '还没有运行记录。'}</div>
+        </details>
+      `;
+    }
+
+    async function clearLogs() {
+      if (!confirm('只删除最近检查结果和运行记录，不删除设置或系统钥匙串。继续？')) return;
+      const data = await api('POST', '/logs/clear', { latest_report: true, events: true });
+      log(data.ok ? `已清理 ${data.removed ? data.removed.length : 0} 个记录文件` : '清理运行记录失败: ' + (data.error || JSON.stringify(data.errors || {})));
+      await loadLogs();
+    }
+
+    async function clearAllData() {
+      if (!confirm('这会删除 Netfix 运行记录、设置、AI 本地预算账本和已知系统钥匙串项；不会删除 App 或系统网络配置。继续？')) return;
+      const data = await api('POST', '/data/clear', { confirm: 'DELETE_NETFIX_LOCAL_DATA', keychain: true });
+      const deleted = data.keychain && data.keychain.deleted ? data.keychain.deleted.length : 0;
+      const budgetRemoved = data.llm_budget && data.llm_budget.removed ? data.llm_budget.removed.length : 0;
+      log(data.ok ? `已删除本地数据，钥匙串项 ${deleted} 个，AI 预算账本 ${budgetRemoved} 个` : '删除本地数据失败: ' + (data.error || JSON.stringify(data)));
+      if (data.ok) {
+        llmSettings = {};
+        await loadLLMSettings();
+        await loadProxyProfiles();
+      }
+      await loadLogs();
+    }
+
+    async function loadPrivacySettings() {
+      const data = await api('GET', '/settings/privacy');
+      if (!data.ok) return;
+      privacySettings = data.settings || {};
+      document.getElementById('persist-proxy-identity-report').checked = !!privacySettings.persist_proxy_identity_report;
+    }
+
+    async function savePrivacySettings() {
+      const enabled = document.getElementById('persist-proxy-identity-report').checked;
+      const payload = {
+        log_retention_enabled: privacySettings.log_retention_enabled !== false,
+        log_retention_days: privacySettings.log_retention_days || 7,
+        save_latest_report: privacySettings.save_latest_report !== false,
+        persist_proxy_identity_report: enabled,
+      };
+      const data = await api('POST', '/settings/privacy', payload);
+      if (data.ok) {
+        privacySettings = data.settings || {};
+        document.getElementById('persist-proxy-identity-report').checked = !!privacySettings.persist_proxy_identity_report;
+        log(enabled ? '已允许保存完整线路身份记录。' : '已关闭完整线路身份记录保存，只保留摘要。');
+      } else {
+        log('保存隐私设置失败: ' + (data.error || 'unknown'));
+      }
+    }
+
+    async function loadProxyBridgeSettings() {
+      const data = await api('GET', '/settings/proxy-bridge');
+      if (!data.ok) return;
+      Object.assign(proxyBridgeSettings, data.settings || {});
+      document.getElementById('proxy-bridge-auto-restart').checked = !!proxyBridgeSettings.auto_restart_enabled;
+    }
+
+    async function saveProxyBridgeSettings() {
+      const enabled = document.getElementById('proxy-bridge-auto-restart').checked;
+      const data = await api('POST', '/settings/proxy-bridge', {
+        auto_restart_enabled: enabled,
+        idle_timeout: proxyBridgeSettings.idle_timeout || 0,
+      });
+      if (data.ok) {
+        Object.assign(proxyBridgeSettings, data.settings || {});
+        document.getElementById('proxy-bridge-auto-restart').checked = !!proxyBridgeSettings.auto_restart_enabled;
+        log(enabled ? '已启用启动时本机转发自动恢复；不会静默改写系统网络设置。' : '已关闭启动时本机转发自动恢复。');
+      } else {
+        log('保存本机转发策略失败: ' + (data.error || 'unknown'));
+      }
+      await loadProxyBridge();
+    }
+
+    async function loadProviders() {
+      const data = await api('GET', '/llm/providers');
+      llmProviders = data.providers || [];
+      const select = document.getElementById('llm-provider');
+      select.innerHTML = llmProviders.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label)}</option>`).join('');
+      select.addEventListener('change', () => {
+        const p = llmProviders.find(item => item.id === select.value);
+        if (p) {
+          document.getElementById('llm-base-url').value = p.base_url || '';
+          document.getElementById('llm-model').value = p.model || '';
+          updateProviderNote(p);
+        }
+      });
+    }
+
+    function updateProviderNote(provider) {
+      const notes = [];
+      if (provider.id === 'deepseek') notes.push('推荐默认：便宜、文本解释量大，暂不支持图片问诊。');
+      else if (provider.id === 'minimax') notes.push('国内多模态候选；图片问诊开启后优先尝试。');
+      else if (provider.market === 'domestic') notes.push('国内模型优先适配；MiniMax/Kimi/Qwen 可作为图片问诊候选。');
+      else notes.push('可用作备用或自定义兼容接口。');
+      if (provider.image_question_ready) notes.push('图片问诊已可路由到该供应商。');
+      else if (provider.image_question_provider_supported) notes.push('供应商支持视觉，图片问诊需显式启用后端实验入口。');
+      else notes.push('此预设不作为图片问诊候选。');
+      if (provider.notes) notes.push(provider.notes);
+      if (provider.api_key_set) notes.push('账号密钥已保存。');
+      else notes.push('还没有保存账号密钥；备用链路会自动跳过它。');
+      document.getElementById('llm-provider-note').textContent = notes.join(' ');
+      updateAIStatusCard();
+    }
+
+    function renderProviderAdapterEvidence(provider) {
+      const docs = Array.isArray(provider.official_docs) ? provider.official_docs : [];
+      const checked = provider.metadata_checked_at || '';
+      const tokenField = provider.max_tokens_field || 'max_tokens';
+      if (!docs.length && !checked && tokenField === 'max_tokens') return '';
+      const docHtml = docs.slice(0, 2)
+        .map(url => `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">官方文档</a>`)
+        .join(' · ');
+      const account = provider.api_key_account || provider.provider || provider.id || '';
+      return `
+        <details class="details-block">
+          <summary>技术详情</summary>
+          <div class="muted">
+            账号槽位 ${escapeHtml(account || '未记录')} · 官方文档核验 ${escapeHtml(checked || '未记录')} · 请求字段 ${escapeHtml(tokenField)}
+            ${docHtml ? ' · ' + docHtml : ''}
+          </div>
+        </details>
+      `;
+    }
+
+    function fallbackChainSummary() {
+      const chain = (llmSettings.fallback && llmSettings.fallback.chain) || ['deepseek', 'moonshot_kimi', 'minimax', 'qwen'];
+      return chain.map(id => {
+        const p = llmProviders.find(item => item.id === id) || { id };
+        const state = p.api_key_set ? '已连接' : '未配置，会跳过';
+        return `${p.label || id}(${state})`;
+      }).join(' → ');
+    }
+
+    function renderLLMChainReadiness(data) {
+      const chains = data.chains || [];
+      const budgetHtml = renderLLMBudgetStatus(data.budget || {});
+      if (!chains.length) return budgetHtml || '暂无链路状态。';
+      const statusClass = status => status === 'ready' ? 'ok' : (status === 'disabled' || status === 'feature_disabled' || status === 'missing_keys' ? 'warn' : 'fail');
+      const chainHtml = chains.map(chain => {
+        const rows = (chain.providers || []).map(provider => `
+          <div class="event-row">
+            <span>${escapeHtml(provider.label || provider.provider)}<br><span class="muted">${escapeHtml(provider.api_key_set ? '账号密钥已保存' : '还没保存账号密钥')}</span></span>
+            <span>
+              <span class="badge ${statusClass(provider.status)}">${escapeHtml(friendlyAIStatus(provider.status))}</span>
+              ${provider.status === 'missing_key' ? `<button data-select-llm-provider="${escapeHtml(provider.provider)}">配置密钥</button>` : ''}
+            </span>
+          </div>
+          ${renderProviderAdapterEvidence(provider)}
+        `).join('');
+        return `
+          <div class="action-card" data-schema="${escapeHtml(data.schema_version || 'netfix_llm_chain_readiness.v1')}">
+            <div class="action-title">
+              <strong>${escapeHtml(chain.label || chain.id)}</strong>
+              <span class="badge ${statusClass(chain.status)}">${escapeHtml(friendlyAIStatus(chain.status))}</span>
+            </div>
+            <div class="muted">可用 ${escapeHtml(chain.ready_count || 0)} 个；${escapeHtml(friendlyAINextStep(chain.next_step || ''))}</div>
+            ${rows}
+            <details class="details-block">
+              <summary>链路技术信息</summary>
+              <div class="action-preview">${escapeHtml(JSON.stringify({ schema_version: data.schema_version, chain }, null, 2))}</div>
+            </details>
+          </div>
+        `;
+      }).join('');
+      return budgetHtml + chainHtml;
+    }
+
+    function renderLLMBudgetStatus(budget) {
+      if (!budget || Object.keys(budget).length === 0) return '';
+      if (budget.enabled === false) {
+        return '<div class="muted" style="margin-bottom:8px">本地 AI 请求预算未启用；供应商账单仍以对方后台为准。</div>';
+      }
+      const totalLimit = budget.max_requests_per_hour ?? 0;
+      const imageLimit = budget.max_image_requests_per_hour ?? 0;
+      const totalUsed = budget.used_requests ?? 0;
+      const imageUsed = budget.used_image_requests ?? 0;
+      const totalRemaining = budget.remaining_requests ?? 0;
+      const imageRemaining = budget.remaining_image_requests ?? 0;
+      const cooldowns = Object.entries(budget.cooldowns || {})
+        .map(([provider, state]) => `${provider} 冷却 ${state.retry_after_s || 0}s`)
+        .join('；');
+      const persistence = budget.persisted ? '跨重启保留本地计数' : '仅本次运行计数';
+      return `
+        <div class="muted" style="margin-bottom:8px">
+          本地预算：剩余 ${escapeHtml(totalRemaining)}/${escapeHtml(totalLimit)}，已用 ${escapeHtml(totalUsed)}；
+          图片剩余 ${escapeHtml(imageRemaining)}/${escapeHtml(imageLimit)}，已用 ${escapeHtml(imageUsed)}。
+          ${escapeHtml(persistence)}${cooldowns ? '；' + escapeHtml(cooldowns) : ''}
+        </div>
+      `;
+    }
+
+    function selectLLMProviderForKey(providerId) {
+      const select = document.getElementById('llm-provider');
+      select.value = providerId;
+      const provider = llmProviders.find(item => item.id === providerId);
+      if (provider) {
+        document.getElementById('llm-base-url').value = provider.base_url || '';
+        document.getElementById('llm-model').value = provider.model || '';
+        updateProviderNote(provider);
+        document.getElementById('llm-result').textContent = `正在配置 ${provider.label || providerId} 的账号密钥，保存后链路就绪度会刷新。`;
+      }
+      document.getElementById('llm-api-key').focus();
+    }
+
+    async function loadLLMChainReadiness() {
+      const data = await api('GET', '/llm/chain-readiness');
+      if (!data.ok) return;
+      llmChainReadiness = data;
+      const target = document.getElementById('llm-chain-readiness');
+      if (target) target.innerHTML = renderLLMChainReadiness(data);
+      if (target) {
+        target.querySelectorAll('[data-select-llm-provider]').forEach(btn => {
+          btn.addEventListener('click', () => selectLLMProviderForKey(btn.dataset.selectLlmProvider));
+        });
+      }
+    }
+
+    function renderLLMChainTest(data) {
+      const chains = data.chains || [];
+      const badge = status => status === 'ok' ? 'ok' : (status === 'skipped' ? 'warn' : 'fail');
+      const chainHtml = chains.map(chain => {
+        const rows = (chain.providers || []).map(provider => `
+          <div class="event-row">
+            <span>${escapeHtml(provider.label || provider.provider)}<br><span class="muted">${provider.reason_code ? escapeHtml(friendlyAIStatus(provider.reason_code)) : '最小请求已通过'}</span></span>
+            <span class="badge ${badge(provider.status)}">${escapeHtml(friendlyAIStatus(provider.status))}</span>
+          </div>
+        `).join('');
+        return `
+          <div class="action-card">
+            <div class="action-title">
+              <strong>${escapeHtml(chain.label || chain.id)}</strong>
+              <span class="badge ${badge(chain.status)}">${escapeHtml(friendlyAIStatus(chain.status))}</span>
+            </div>
+            <div class="muted">通过 ${escapeHtml(chain.ok_count || 0)} 个，失败 ${escapeHtml(chain.failed_count || 0)} 个，跳过 ${escapeHtml(chain.skipped_count || 0)} 个。</div>
+            ${rows}
+          </div>
+        `;
+      }).join('');
+      return `
+        <strong>${data.ok ? '链路测试通过' : '链路测试未通过'}</strong>
+        ${data.error ? `<div class="muted">${escapeHtml(data.error)}</div>` : ''}
+        <div class="muted">显式链路测试会调用已配置供应商；缺账号密钥或未启用图片问诊的供应商会跳过。</div>
+        ${chainHtml}
+        ${(data.warnings || []).map(item => `<div class="muted">${escapeHtml(item)}</div>`).join('')}
+      `;
+    }
+
+    async function testLLMChain() {
+      const ok = confirm('将调用已配置的 DeepSeek/Kimi/MiniMax/Qwen 等供应商做最小链路测试，可能计入供应商用量或费用。继续？');
+      if (!ok) return;
+      const target = document.getElementById('llm-result');
+      target.textContent = '正在测试国内模型链路...';
+      const data = await api('POST', '/llm/chain-test', { confirmation: 'TEST_LLM_CHAIN', mode: 'all' });
+      target.innerHTML = renderLLMChainTest(data);
+      await loadLLMChainReadiness();
+    }
+
+    async function importDeepSeekSidecarKey() {
+      const ok = confirm('将从本机 DeepSeek 侧车 .env 读取账号密钥，并写入 Netfix 的系统钥匙串。不会显示或写入运行记录。继续？');
+      if (!ok) return;
+      const target = document.getElementById('llm-result');
+      target.textContent = '正在导入 DeepSeek 密钥...';
+      const data = await api('POST', '/llm/import-deepseek-sidecar-key', {
+        confirmation: 'IMPORT_DEEPSEEK_SIDECAR_KEY',
+        api_key_account: 'deepseek',
+        enable_llm: true,
+      });
+      if (data.ok) {
+        llmSettings = data.settings || llmSettings;
+        await loadProviders();
+        await loadLLMSettings();
+        document.getElementById('llm-result').textContent = `已导入 DeepSeek 密钥，模型：${data.model || 'deepseek'}。现在可以问 AI 或测试链路。`;
+        log('已导入 DeepSeek 密钥');
+      } else {
+        target.textContent = `导入失败：${data.error || data.reason_code || 'unknown'}`;
+        log('DeepSeek 密钥导入失败');
+      }
+    }
+
+    async function loadLLMSettings() {
+      const data = await api('GET', '/settings/llm');
+      if (!data.ok) return;
+      const s = data.settings || {};
+      llmSettings = s;
+      document.getElementById('llm-provider').value = s.provider || 'custom_openai_compatible';
+      document.getElementById('llm-base-url').value = s.base_url || '';
+      document.getElementById('llm-model').value = s.model || '';
+      document.getElementById('llm-enabled').checked = !!s.enabled;
+      document.getElementById('llm-fallback-enabled').checked = s.fallback ? !!s.fallback.enabled : true;
+      document.getElementById('llm-budget-enabled').checked = s.budget ? !!s.budget.enabled : true;
+      document.getElementById('llm-budget-persist-ledger').checked = s.budget ? s.budget.persist_usage_ledger !== false : true;
+      document.getElementById('llm-budget-hourly').value = (s.budget && s.budget.max_requests_per_hour) ?? 60;
+      document.getElementById('llm-budget-image-hourly').value = (s.budget && s.budget.max_image_requests_per_hour) ?? 12;
+      document.getElementById('llm-image-question-enabled').checked = !!(s.features && s.features.image_question);
+      updateProviderNote(llmProviders.find(item => item.id === document.getElementById('llm-provider').value) || {});
+      document.getElementById('llm-result').textContent = s.api_key_set
+        ? 'AI 可以解释当前检查结果。备用模型状态见高级设置。'
+        : '还没有保存当前供应商的账号密钥；问 AI 会先使用本地规则解释。';
+      updateAIStatusCard();
+      await loadLLMChainReadiness();
+    }
+
+    async function saveLLMSettings() {
+      const apiKey = document.getElementById('llm-api-key').value;
+      const payload = {
+        enabled: document.getElementById('llm-enabled').checked,
+        provider: document.getElementById('llm-provider').value,
+        api_key_account: document.getElementById('llm-provider').value,
+        base_url: document.getElementById('llm-base-url').value,
+        model: document.getElementById('llm-model').value,
+        redaction_level: 'balanced',
+        upload_consent: 'ask_each_time',
+        fallback: {
+          enabled: document.getElementById('llm-fallback-enabled').checked,
+          domestic_only: true,
+          include_custom: false,
+          include_global: false,
+          chain: ['deepseek', 'moonshot_kimi', 'minimax', 'qwen'],
+          vision_chain: ['minimax', 'moonshot_kimi', 'qwen'],
+        },
+        budget: {
+          enabled: document.getElementById('llm-budget-enabled').checked,
+          persist_usage_ledger: document.getElementById('llm-budget-persist-ledger').checked,
+          max_requests_per_hour: Math.max(0, Number.parseInt(document.getElementById('llm-budget-hourly').value || '60', 10)),
+          max_image_requests_per_hour: Math.max(0, Number.parseInt(document.getElementById('llm-budget-image-hourly').value || '12', 10)),
+          cooldown_seconds_after_rate_limit: 300,
+          cooldown_seconds_after_quota: 3600,
+        },
+        features: {
+          explain: true,
+          repair_steps: true,
+          residential_proxy_guide: true,
+          image_question: document.getElementById('llm-image-question-enabled').checked,
+        },
+      };
+      if (apiKey) payload.api_key = apiKey;
+      const data = await api('POST', '/settings/llm', payload);
+      document.getElementById('llm-api-key').value = '';
+      if (data.ok) llmSettings = data.settings || llmSettings;
+      if (data.ok) await loadProviders();
+      if (data.ok) await loadLLMChainReadiness();
+      document.getElementById('llm-result').textContent = data.ok ? `设置已保存。备用链路：${fallbackChainSummary()}` : '保存失败: ' + (data.error || 'unknown');
+      log(data.ok ? 'LLM 设置已保存' : 'LLM 设置保存失败');
+    }
+
+    function readFileAsDataURL(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error('read failed'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function handleAIImageSelection(event) {
+      const result = document.getElementById('llm-result');
+      const files = Array.from(event.target.files || []).slice(0, 3);
+      const next = [];
+      for (const file of files) {
+        if (!allowedImageTypes.has(file.type)) {
+          result.textContent = `${file.name} 只支持 PNG、JPEG、WebP 或 GIF。`;
+          continue;
+        }
+        if (file.size > 4_500_000) {
+          result.textContent = `${file.name} 太大，请选择 4.5MB 以内的图片。`;
+          continue;
+        }
+        try {
+          const dataUrl = await readFileAsDataURL(file);
+          next.push({ name: file.name, dataUrl });
+        } catch (err) {
+          result.textContent = `无法读取 ${file.name}: ${err.message || err}`;
+        }
+      }
+      aiQuestionImages = next;
+      renderAIImagePreview();
+    }
+
+    function renderAIImagePreview() {
+      const target = document.getElementById('llm-image-preview');
+      const copy = document.getElementById('llm-image-confirm-copy');
+      copy.textContent = aiQuestionImages.length ? `和上方 ${aiQuestionImages.length} 张图片` : '';
+      target.innerHTML = aiQuestionImages.map(item => `
+        <div class="image-preview">
+          <img src="${escapeHtml(item.dataUrl)}" alt="${escapeHtml(item.name)}">
+          <div class="image-preview-name">${escapeHtml(item.name)}</div>
+        </div>
+      `).join('');
+    }
+
+    function clearAIImages() {
+      aiQuestionImages = [];
+      document.getElementById('llm-images').value = '';
+      renderAIImagePreview();
+    }
+
+    async function askAI() {
+      if (!lastReport) {
+        document.getElementById('llm-result').textContent = '请先点“一键检查”，有本次检查结果后我才能解释。';
+        return;
+      }
+      const target = document.getElementById('llm-result');
+      const question = document.getElementById('llm-question').value || '';
+      const images = aiQuestionImages.map(item => item.dataUrl);
+      const uploadConfirmed = images.length ? document.getElementById('llm-upload-confirmed').checked : true;
+      if (images.length && !uploadConfirmed) {
+        target.textContent = '发送图片前请先在高级设置里勾选确认。未确认时不会发送图片或检查结果。';
+        return;
+      }
+      if (images.length) {
+        target.textContent = '图片问诊可能产生额外模型费用，正在发送已确认的脱敏请求...';
+      } else {
+        target.textContent = '正在解释当前检查结果...';
+      }
+      const data = await api('POST', '/explain_llm', {
+        question,
+        mode: images.length ? 'image_question' : 'explain',
+        images,
+        redaction_level: 'balanced',
+        upload_confirmed: uploadConfirmed,
+        allow_fallback: !!(llmSettings.fallback && llmSettings.fallback.enabled),
+      });
+      if (!data.ok) {
+        target.textContent = '解释失败: ' + (data.error || 'unknown');
+        return;
+      }
+      const result = data.result || {};
+      const fallbackReason = result.fallback_reason_label || result.fallback_reason || '';
+      const chain = (result.fallback_chain || []).map(item => `${item.provider}:${item.status}${item.reason_code ? '/' + item.reason_code : ''}`).join(' → ');
+      const providerUsed = result.provider_used ? providerLabel(result.provider_used) || result.provider_used : '';
+      target.innerHTML = `
+        <strong>${escapeHtml(result.headline || '解释结果')}</strong>
+        <div>${escapeHtml(result.explanation || '')}</div>
+        ${providerUsed ? `<div class="muted">由 ${escapeHtml(providerUsed)} 返回；检查结果已脱敏后发送。</div>` : ''}
+        ${fallbackReason ? `<div class="muted">${escapeHtml(fallbackReason)}</div>` : ''}
+        <details class="details-block">
+          <summary>技术详情</summary>
+          <div class="muted">来源：${escapeHtml(result.source || '')}${chain ? '；备用链路：' + escapeHtml(chain) : ''}</div>
+          <div class="action-preview">${escapeHtml(JSON.stringify({
+            provider_used: result.provider_used || null,
+            fallback_chain: result.fallback_chain || [],
+            redaction_audit: result.redaction_audit || {},
+            redacted_report_hash: result.redacted_report_hash || null,
+          }, null, 2))}</div>
+        </details>
+      `;
+    }
+
+    async function parseProxy() {
+      const input = document.getElementById('proxy-input').value;
+      const data = await api('POST', '/proxy/parse', { input });
+      const target = document.getElementById('proxy-result');
+      if (!data.ok) {
+        lastParsedProxy = null;
+        target.innerHTML = `
+          <strong>解析失败</strong>
+          <div>${escapeHtml((data.errors || [data.error || 'unknown']).join(' / '))}</div>
+          ${renderProxyDecision(data.deployment_decision)}
+        `;
+        return;
+      }
+      lastParsedProxy = { input };
+      target.innerHTML = `
+        <strong>${escapeHtml(data.redacted_url)}</strong>
+        <div>账号密码: ${data.credential_present ? '已检测到，保存时会放进系统钥匙串' : '未检测到'}</div>
+        <div class="muted">${(data.warnings || []).map(escapeHtml).join('<br>') || '格式有效。'}</div>
+        ${renderProxyDecision(data.deployment_decision)}
+      `;
+    }
+
+    function sourceProxyLine(lineNumber) {
+      const lines = document.getElementById('proxy-input').value.split(/\r?\n/);
+      const index = Number.parseInt(lineNumber || '0', 10) - 1;
+      return index >= 0 && index < lines.length ? lines[index].trim() : '';
+    }
+
+    function renderProxyImportPreview(data) {
+      const summary = data.summary || {};
+      const candidates = data.candidates || [];
+      const recommendation = data.recommendation || null;
+      const warnings = data.warnings || [];
+      const rows = candidates.map(item => {
+        const decision = item.deployment_decision || {};
+        const status = item.ok ? (decision.status || 'valid') : 'invalid';
+        const badge = item.ok ? (status === 'ready' ? 'ok' : 'warn') : 'fail';
+        const lineButtons = item.ok
+          ? `<button data-use-proxy-line="${escapeHtml(item.line_number)}">使用此行</button><button data-save-proxy-line="${escapeHtml(item.line_number)}">保存并看护</button>`
+          : '';
+        const detail = item.ok
+          ? `${escapeHtml(item.redacted_url || '')}<br><span class="muted">${escapeHtml(decision.headline || '')}</span>`
+          : `<span class="muted">${escapeHtml((item.errors || []).join(' / ') || '解析失败')}</span>`;
+        return `
+          <div class="event-row">
+            <span>第 ${escapeHtml(item.line_number)} 行<br>${detail}</span>
+            <span><span class="badge ${badge}">${escapeHtml(friendlyProxyStatus(status))}</span>${lineButtons}</span>
+          </div>
+        `;
+      }).join('');
+      return `
+        <strong>预检结果：${escapeHtml(summary.valid_count || 0)} 条可用，${escapeHtml(summary.invalid_count || 0)} 条需修正</strong>
+        ${recommendation ? `<div class="muted">推荐先使用第 ${escapeHtml(recommendation.line_number)} 行：${escapeHtml(recommendation.redacted_url || '')}</div>` : ''}
+        <div class="muted">已处理 ${escapeHtml(summary.processed_count || 0)} 条，跳过 ${escapeHtml(summary.skipped_count || 0)} 条。预检不会保存密码；可先解析候选，也可直接保存并按当前设置开始看护。</div>
+        <details class="details-block">
+          <summary>技术详情</summary>
+          <div class="muted">schema: ${escapeHtml(data.schema_version || 'netfix_proxy_import_preview.v1')}</div>
+        </details>
+        <div style="margin-top:8px">${rows || '没有可预检的线路。'}</div>
+        ${warnings.length ? `<div class="muted" style="margin-top:8px">${warnings.map(escapeHtml).join('<br>')}</div>` : ''}
+      `;
+    }
+
+    async function importProxyPreview() {
+      const input = document.getElementById('proxy-input').value;
+      const target = document.getElementById('proxy-result');
+      target.textContent = '正在预检供应商线路列表...';
+      const data = await api('POST', '/proxy/import-preview', { input });
+      target.innerHTML = renderProxyImportPreview(data);
+      target.querySelectorAll('[data-use-proxy-line]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const selected = sourceProxyLine(btn.dataset.useProxyLine);
+          if (!selected) {
+            target.textContent = '未找到对应原始行，请重新粘贴后再试。';
+            return;
+          }
+          document.getElementById('proxy-input').value = selected;
+          await parseProxy();
+        });
+      });
+      target.querySelectorAll('[data-save-proxy-line]').forEach(btn => {
+        btn.addEventListener('click', () => saveProxyImportCandidate(btn.dataset.saveProxyLine));
+      });
+    }
+
+    async function saveProxyProfile() {
+      const input = document.getElementById('proxy-input').value;
+      await saveProxyProfileInput(input);
+    }
+
+    async function saveProxyImportCandidate(lineNumber) {
+      const selected = sourceProxyLine(lineNumber);
+      const target = document.getElementById('proxy-result');
+      if (!selected) {
+        target.textContent = '未找到对应原始行，请重新粘贴后再试。';
+        return;
+      }
+      document.getElementById('proxy-input').value = selected;
+      await saveProxyProfileInput(selected, '正在保存并开始持续检查...');
+    }
+
+    async function saveProxyProfileInput(input, pendingCopy = '正在保存并开始持续检查...') {
+      const target = document.getElementById('proxy-result');
+      target.textContent = pendingCopy;
+      const target_profile = document.getElementById('proxy-target-profile').value || 'baseline';
+      const data = await api('POST', '/proxy/profiles', {
+        input,
+        start_monitor: document.getElementById('proxy-start-monitor-on-save').checked,
+        monitor_interval: 60,
+        timeout: 10,
+        target_profile,
+      });
+      if (data.ok) {
+        const monitor = data.monitor || {};
+        const monitorCopy = monitor.ok
+          ? '已保存并开始持续检查。系统网络设置还没有修改；需要改系统设置时，请到高级操作里预览后确认。'
+          : (data.monitor ? '已保存，但持续检查未启动。系统网络设置还没有修改。' : '已保存。系统网络设置还没有修改。');
+        target.textContent = monitorCopy;
+      } else {
+        target.textContent = '保存失败: ' + (data.error || (data.errors || []).join(' / '));
+      }
+      await loadProxyProfiles();
+      await loadProxyMonitor();
+    }
+
+    function renderProxyDecision(decision) {
+      if (!decision) return '';
+      const system = decision.system_apply || {};
+      const appEnv = decision.app_env || {};
+      const client = decision.client_export || {};
+      const monitor = decision.monitor || {};
+      const nextSteps = decision.next_steps || [];
+      const warnings = decision.warnings || [];
+      const systemBadge = system.status === 'supported' || system.status === 'bridge_required'
+        ? 'ok'
+        : (system.status === 'blocked' ? 'fail' : 'warn');
+      const headline = decision.headline || '线路使用建议';
+      const lineCopy = decision.status === 'ready'
+        ? '这条线路看起来可以使用。'
+        : decision.status === 'blocked'
+          ? '这条线路暂时不能直接使用。'
+          : '这条线路还需要再确认。';
+      const systemCopy = system.status === 'blocked'
+        ? '当前不会更改系统网络设置；这条线路还不能应用到全局。'
+        : system.requires_netfix_running
+          ? '当前不会更改系统网络设置；如需全局使用，会先让你确认本机转发。'
+          : '当前不会更改系统网络设置；需要应用到系统时会先让你确认。';
+      const nextCopy = userCopy(nextSteps[0] || (decision.status === 'ready'
+        ? '可以先验证 ChatGPT、Codex 和 GitHub 是否恢复。'
+        : '按提示修正线路信息后再验证。'));
+      return `
+        <div class="action-card" style="margin-top:10px">
+          <div class="action-title">
+            <strong>${escapeHtml(headline)}</strong>
+              <span class="badge ${escapeHtml(decision.status === 'ready' ? 'ok' : decision.status === 'blocked' ? 'fail' : 'warn')}">${escapeHtml(friendlyProxyStatus(decision.status))}</span>
+          </div>
+          <div class="metric-grid">
+            <div class="metric"><div class="metric-label">这条线路</div><div class="metric-value">${escapeHtml(lineCopy)}</div></div>
+            <div class="metric"><div class="metric-label">系统设置</div><div class="metric-value">${escapeHtml(systemCopy)}</div></div>
+            <div class="metric"><div class="metric-label">下一步</div><div class="metric-value">${escapeHtml(nextCopy)}</div></div>
+          </div>
+          <details class="details-block">
+            <summary>给技术人员看的信息</summary>
+            <div class="metric-grid">
+              <div class="metric"><div class="metric-label">macOS 系统代理</div><div class="metric-value"><span class="badge ${systemBadge}">${escapeHtml(friendlyProxyStatus(system.status))}</span></div><div class="muted">${escapeHtml(system.label || '')}</div></div>
+              <div class="metric"><div class="metric-label">命令行使用</div><div class="metric-value">${escapeHtml(friendlyProxyStatus(appEnv.status))}</div><div class="muted">${escapeHtml(appEnv.label || '')}</div></div>
+              <div class="metric"><div class="metric-label">客户端导出</div><div class="metric-value">${escapeHtml(friendlyProxyStatus(client.status))}</div><div class="muted">${escapeHtml((client.formats || []).join(' / '))}</div></div>
+              <div class="metric"><div class="metric-label">持续看护</div><div class="metric-value">${escapeHtml(friendlyProxyStatus(monitor.status))}</div><div class="muted">${escapeHtml(monitor.label || '')}</div></div>
+            </div>
+            ${system.requires_netfix_running ? '<div class="muted" style="margin-top:8px">该路径依赖 127.0.0.1 本机转发，应用期间需要保持 Netfix 运行；退出前请恢复系统网络设置。</div>' : ''}
+            ${nextSteps.length ? `<ol class="manual-list">${nextSteps.map(step => `<li>${escapeHtml(userCopy(step))}</li>`).join('')}</ol>` : ''}
+            ${warnings.length ? `<div class="muted" style="margin-top:8px">${warnings.map(item => escapeHtml(userCopy(item))).join('<br>')}</div>` : ''}
+          </details>
+        </div>
+      `;
+    }
+
+    function renderProxyOperation(data, title = '线路操作结果') {
+      const status = data.status || (data.ok ? 'ok' : 'failed');
+      const badge = data.ok ? (status === 'blocked' ? 'warn' : 'ok') : 'fail';
+      const applied = data.applied || {};
+      const bridge = data.bridge || {};
+      const verify = data.verify || null;
+      return `
+        <strong>${escapeHtml(title)}：${escapeHtml(friendlyProxyStatus(status))}</strong>
+        <span class="badge ${badge}">${data.ok ? '已处理' : '未完成'}</span>
+        ${data.error ? `<div>${escapeHtml(data.error)}</div>` : ''}
+        ${data.reason_code ? `<div class="muted">原因：${escapeHtml(data.reason_code)}</div>` : ''}
+        ${applied.scope ? `<div>应用范围：${escapeHtml(applied.scope)}${applied.requires_netfix_running ? ' · 需要保持 Netfix 运行' : ''}</div>` : ''}
+        ${bridge.id ? `<div>本机转发：${escapeHtml(bridge.listen_host || '127.0.0.1')}:${escapeHtml(bridge.listen_port || '')}</div>` : ''}
+        ${verify ? `<div style="margin-top:10px">${renderProxyValidation(verify)}</div>` : ''}
+        ${renderProxyDecision(data.deployment_decision || (data.dry_run && data.dry_run.deployment_decision))}
+      `;
+    }
+
+    function renderProxyRollback(data) {
+      const status = data.status || (data.ok ? 'ok' : 'failed');
+      const badge = data.ok ? 'ok' : 'fail';
+      const restore = data.restore || data.rollback || {};
+      return `
+        <strong>系统网络恢复结果：${escapeHtml(status)}</strong>
+        <span class="badge ${badge}">${data.ok ? '已处理' : '未完成'}</span>
+        ${data.error ? `<div>${escapeHtml(data.error)}</div>` : ''}
+        ${data.reason_code ? `<div class="muted">原因：${escapeHtml(data.reason_code)}</div>` : ''}
+        ${restore.network_service ? `<div>Network Service：${escapeHtml(restore.network_service)}</div>` : ''}
+        ${data.bridge_stop ? `<div class="muted">本机转发停止：${escapeHtml(data.bridge_stop.status || data.bridge_stop.ok || '')}</div>` : ''}
+      `;
+    }
+
+    function renderProxyBridgeLifecycle(lifecycle) {
+      if (!lifecycle) return '';
+      const severity = lifecycle.severity === 'warning' ? 'warn' : (lifecycle.severity === 'error' ? 'fail' : 'ok');
+      const nextSteps = lifecycle.next_steps || [];
+      const audit = lifecycle.audit || {};
+      const bridge = lifecycle.bridge || {};
+      const recoveryButton = lifecycle.recovery_available
+        ? '<button onclick="recoverProxyBridge()">恢复网络设置</button>'
+        : '';
+      return `
+        <div class="action-card" data-schema="${escapeHtml(lifecycle.schema_version || 'netfix_proxy_bridge_lifecycle.v1')}" style="margin-top:8px">
+          <div class="action-title">
+            <strong>${escapeHtml(userCopy(lifecycle.headline || '本机转发状态'))}</strong>
+            <span class="badge ${severity}">${escapeHtml(friendlyProxyStatus(lifecycle.status))}</span>
+          </div>
+          ${lifecycle.detail ? `<div>${escapeHtml(userCopy(lifecycle.detail))}</div>` : ''}
+          ${bridge.listen_port ? `<div class="muted">本机转发端口：${escapeHtml(bridge.listen_host || '127.0.0.1')}:${escapeHtml(bridge.listen_port)}</div>` : ''}
+          ${Object.keys(audit).length ? `<div class="muted">请求 ${escapeHtml(audit.request_count || 0)} 次 · 活跃连接 ${escapeHtml(audit.active_connections || 0)} · 最近客户端 ${escapeHtml(audit.recent_client_count || 0)} 个</div>` : ''}
+          ${lifecycle.requires_netfix_running ? '<div class="muted">当前路径依赖 Netfix 本机转发；退出前请恢复系统网络设置。</div>' : ''}
+          ${nextSteps.length ? `<ol class="manual-list">${nextSteps.map(step => `<li>${escapeHtml(userCopy(step))}</li>`).join('')}</ol>` : ''}
+          ${recoveryButton}
+        </div>
+      `;
+    }
+
+    function renderProxyBridgeStartupCheck(startup) {
+      if (!startup || !startup.lifecycle) return '';
+      const lifecycle = startup.lifecycle || {};
+      const autoRestart = startup.auto_restart || {};
+      const autoRestartHtml = autoRestart.status === 'restarted'
+        ? `<div class="muted">已自动恢复本机转发 ${escapeHtml((autoRestart.bridge && autoRestart.bridge.listen_host) || '127.0.0.1')}:${escapeHtml((autoRestart.bridge && autoRestart.bridge.listen_port) || '')}；没有改写系统网络设置。</div>`
+        : (startup.settings && startup.settings.auto_restart_enabled
+          ? '<div class="muted">已启用启动时本机转发自动恢复；本次未发现可重启的失效转发。</div>'
+          : '');
+      if (!lifecycle.needs_attention && lifecycle.status !== 'recovery_required' && lifecycle.status !== 'check_failed') {
+        return autoRestartHtml;
+      }
+      const badge = lifecycle.status === 'check_failed' ? 'fail' : 'warn';
+      return `
+        <div class="action-card" data-schema="${escapeHtml(startup.schema_version || 'netfix_proxy_bridge_startup_check.v1')}" style="margin-top:8px">
+          <div class="action-title">
+            <strong>启动时本机转发检查</strong>
+            <span class="badge ${badge}">${escapeHtml(friendlyProxyStatus(lifecycle.status))}</span>
+          </div>
+          <div>${escapeHtml(userCopy(lifecycle.headline || '本机转发启动检查需要处理'))}</div>
+          ${autoRestartHtml}
+          ${startup.checked_at ? `<div class="muted">检测时间：${escapeHtml(startup.checked_at)}</div>` : ''}
+          ${lifecycle.detail ? `<div class="muted">${escapeHtml(userCopy(lifecycle.detail))}</div>` : ''}
+        </div>
+      `;
+    }
+
+    function renderIdentityReport(report) {
+      if (!report) return '';
+      const identity = report.identity || {};
+      const geo = report.expected_geo || {};
+      const targets = report.targets || [];
+      const warnings = report.warnings || [];
+      const targetRows = targets.map(item => `
+        <div class="event-row">
+          <span>${escapeHtml(item.label || item.id || 'target')}<br><span class="muted">${escapeHtml(item.target || '')}</span></span>
+	          <span class="badge ${escapeHtml(item.status || 'warn')}">${escapeHtml(item.http_code || item.error || friendlyProxyStatus(item.status))}</span>
+        </div>
+      `).join('');
+      return `
+        <div class="metric-grid">
+          <div class="metric"><div class="metric-label">出口 IP</div><div class="metric-value">${escapeHtml(report.exit_ip || '未知')}</div></div>
+          <div class="metric"><div class="metric-label">位置</div><div class="metric-value">${escapeHtml([identity.country_code, identity.region, identity.city].filter(Boolean).join(' / ') || '未知')}</div></div>
+          <div class="metric"><div class="metric-label">网络/ASN</div><div class="metric-value">${escapeHtml([identity.isp, identity.asn].filter(Boolean).join(' / ') || '未知')}</div></div>
+          <div class="metric"><div class="metric-label">IP 类型</div><div class="metric-value">${escapeHtml(identity.ip_type || '未知')}</div></div>
+          <div class="metric"><div class="metric-label">期望地区</div><div class="metric-value">${escapeHtml(geo.status || 'not_configured')}</div></div>
+          <div class="metric"><div class="metric-label">DNS / IPv6</div><div class="metric-value">${escapeHtml((report.dns_leak && report.dns_leak.status) || 'unknown')} / ${escapeHtml((report.ipv6_leak && report.ipv6_leak.status) || 'unknown')}</div></div>
+        </div>
+	          <div class="muted" style="margin-top:8px">检测用途：${escapeHtml(report.target_profile_label || report.target_profile || 'baseline')}</div>
+        ${targetRows ? `<div style="margin-top:8px">${targetRows}</div>` : ''}
+        ${warnings.length ? `<div class="muted" style="margin-top:8px">${warnings.map(escapeHtml).join('<br>')}</div>` : ''}
+      `;
+    }
+
+    function renderProxyValidation(data) {
+      const check = data.proxy_check || {};
+      const report = data.identity_report || null;
+      const headline = !data.ok ? '验证失败' : ((report && report.status === 'warn') ? '验证有风险' : '验证通过');
+      return `
+        <strong>${headline}</strong>
+        <div>TCP: ${escapeHtml(check.tcp || 'unknown')} · Auth: ${escapeHtml(check.auth || 'unknown')} · HTTP: ${escapeHtml(check.http_code || 0)} · 延迟: ${escapeHtml(check.latency_ms || 0)}ms</div>
+        <div class="muted">${escapeHtml(check.error || check.checked_via || '')}</div>
+        ${report ? `<div style="margin-top:10px"><strong>出口身份与泄漏风险</strong>${renderIdentityReport(report)}</div>` : ''}
+      `;
+    }
+
+    async function validateProxy() {
+      const input = document.getElementById('proxy-input').value;
+      const target = document.getElementById('proxy-result');
+      target.textContent = '正在验证线路连通性和出口身份...';
+      const target_profile = document.getElementById('proxy-target-profile').value || 'baseline';
+      const data = await api('POST', '/proxy/validate', { input, timeout: 10, include_identity: true, target_profile });
+      target.innerHTML = renderProxyValidation(data);
+    }
+
+    async function loadProxyValidationTargets() {
+      const data = await api('GET', '/proxy/validation-targets');
+      const select = document.getElementById('proxy-target-profile');
+      const profiles = data.profiles || [];
+      if (!profiles.length) return;
+      select.innerHTML = profiles.map(profile => `
+        <option value="${escapeHtml(profile.id)}">${escapeHtml(profile.label || profile.id)}</option>
+      `).join('');
+      select.value = profiles.some(profile => profile.id === 'ai_dev') ? 'ai_dev' : (data.default_profile || 'baseline');
+    }
+
+    function renderProxyProfileRow(p) {
+      return `
+        <div class="profile-row">
+          <span>${escapeHtml(p.name || p.id)} · ${escapeHtml(p.protocol)}://${escapeHtml(p.host)}:${escapeHtml(p.port)}${p.last_check ? ' · ' + escapeHtml(friendlyProxyStatus(p.last_check.status || 'unknown')) : ''}</span>
+          <span>
+            <button data-validate-profile="${escapeHtml(p.id)}">验证</button>
+            <button data-monitor-profile="${escapeHtml(p.id)}" aria-label="开始看护">验证并看护</button>
+            <details class="inline-actions">
+              <summary>更多</summary>
+              <div class="toolbar">
+                <button data-replace-profile="${escapeHtml(p.id)}">更新凭据</button>
+                <button data-dry-run="${escapeHtml(p.id)}">预览系统应用</button>
+                <button data-export-profile="${escapeHtml(p.id)}">导出配置</button>
+                <button data-apply-env="${escapeHtml(p.id)}">给命令行使用</button>
+                <button data-apply-system="${escapeHtml(p.id)}">应用到系统</button>
+                <button class="btn-danger" data-delete-profile="${escapeHtml(p.id)}" aria-label="删除线路">删除</button>
+              </div>
+            </details>
+          </span>
+        </div>
+      `;
+    }
+
+    async function loadProxyProfiles() {
+      const data = await api('GET', '/proxy/profiles');
+      const target = document.getElementById('proxy-profiles');
+      const profiles = data.profiles || [];
+      if (!profiles.length) {
+        target.innerHTML = '<div class="muted" style="margin-top:8px">暂无保存的网络线路。</div>';
+        loadProxyMonitor();
+        return;
+      }
+      const visibleProfiles = profiles.slice(0, 5);
+      const hiddenProfiles = profiles.slice(5);
+      const hiddenHtml = hiddenProfiles.length ? `
+        <details style="margin-top:8px" data-legacy-label="查看其余 ${hiddenProfiles.length} 条线路">
+          <summary>查看其余 ${hiddenProfiles.length} 条网络线路</summary>
+          ${hiddenProfiles.map(renderProxyProfileRow).join('')}
+        </details>
+      ` : '';
+      target.innerHTML = `
+        <div class="muted" style="margin-top:8px">已保存 ${profiles.length} 条网络线路${hiddenProfiles.length ? '，默认显示最近 5 条。' : '。'}</div>
+        ${visibleProfiles.map(renderProxyProfileRow).join('')}
+        ${hiddenHtml}
+        <details class="details-block">
+          <summary>恢复网络设置</summary>
+          <div class="muted">这些操作会恢复或影响 macOS 系统网络设置，只在你明确知道后果时使用。</div>
+          <div class="toolbar" style="margin-top:8px">
+            <button onclick="rollbackProxyProfile()">恢复到修改前</button>
+          </div>
+        </details>
+      `;
+      target.querySelectorAll('[data-validate-profile]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          document.getElementById('proxy-result').textContent = '正在验证已保存线路和出口身份...';
+          const target_profile = document.getElementById('proxy-target-profile').value || 'baseline';
+          const res = await api('POST', `/proxy/profiles/${btn.dataset.validateProfile}/validate`, { timeout: 10, include_identity: true, target_profile });
+          document.getElementById('proxy-result').innerHTML = renderProxyValidation(res);
+          loadProxyProfiles();
+        });
+      });
+      target.querySelectorAll('[data-monitor-profile]').forEach(btn => {
+        btn.addEventListener('click', () => startProxyMonitor(btn.dataset.monitorProfile));
+      });
+      target.querySelectorAll('[data-replace-profile]').forEach(btn => {
+        btn.addEventListener('click', () => replaceProxyProfile(btn.dataset.replaceProfile));
+      });
+      target.querySelectorAll('[data-dry-run]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const res = await api('POST', `/proxy/profiles/${btn.dataset.dryRun}/apply-dry-run`, { mode: 'system' });
+          document.getElementById('proxy-result').innerHTML = renderProxyOperation(res, '系统应用预览');
+        });
+      });
+      target.querySelectorAll('[data-export-profile]').forEach(btn => {
+        btn.addEventListener('click', () => exportProxyProfile(btn.dataset.exportProfile));
+      });
+      target.querySelectorAll('[data-apply-env]').forEach(btn => {
+        btn.addEventListener('click', () => applyProxyProfile(btn.dataset.applyEnv, 'app-env'));
+      });
+      target.querySelectorAll('[data-apply-system]').forEach(btn => {
+        btn.addEventListener('click', () => applyProxyProfile(btn.dataset.applySystem, 'system'));
+      });
+      target.querySelectorAll('[data-delete-profile]').forEach(btn => {
+        btn.addEventListener('click', () => deleteProxyProfile(btn.dataset.deleteProfile));
+      });
+      loadProxyMonitor();
+    }
+
+    function renderProxyRepairActions(actions) {
+      const items = Array.isArray(actions) ? actions : [];
+      if (!items.length) return '';
+      const actionButton = action => {
+        const ui = action.ui_action || {};
+        const type = ui.type || '';
+        const profileId = ui.profile_id || '';
+        if (!type) return '';
+        const label = {
+          replace_profile_credentials: '更新凭据',
+          start_monitor: '重启看护',
+          import_preview: '批量预检',
+          validate_profile: '重新验证',
+          export_profile: '导出配置',
+          save_profile: '保存线路',
+        }[type] || '执行';
+        return `<button data-repair-action="${escapeHtml(type)}" data-repair-profile="${escapeHtml(profileId)}" data-repair-id="${escapeHtml(action.id || '')}">${escapeHtml(label)}</button>`;
+      };
+      return `
+        <div class="action-card" style="margin-top:8px">
+          <strong>修复建议</strong>
+          <ol class="manual-list">
+            ${items.map(action => `<li><strong>${escapeHtml(action.label || action.id || '处理')}</strong>：${escapeHtml(action.detail || '')} ${actionButton(action)}</li>`).join('')}
+          </ol>
+        </div>
+      `;
+    }
+
+    function bindProxyRepairActions(root = document) {
+      root.querySelectorAll('[data-repair-action]').forEach(btn => {
+        if (btn.dataset.boundRepairAction === 'true') return;
+        btn.dataset.boundRepairAction = 'true';
+        btn.addEventListener('click', () => {
+          handleProxyRepairAction(btn.dataset.repairAction, btn.dataset.repairProfile, btn.dataset.repairId);
+        });
+      });
+    }
+
+    async function handleProxyRepairAction(type, profileId, actionId) {
+      const target = document.getElementById('proxy-result');
+      if (type === 'replace_profile_credentials') {
+        if (!profileId) {
+          target.textContent = '请先选择要更新的网络线路，并在输入框粘贴新的线路凭据。';
+          document.getElementById('proxy-input').focus();
+          return;
+        }
+        await replaceProxyProfile(profileId);
+        return;
+      }
+      if (type === 'start_monitor') {
+        if (!profileId) {
+          target.textContent = '没有可重启看护的网络线路。';
+          return;
+        }
+        await startProxyMonitor(profileId);
+        return;
+      }
+      if (type === 'import_preview') {
+        await importProxyPreview();
+        return;
+      }
+      if (type === 'validate_profile') {
+        if (!profileId) {
+          await validateProxy();
+          return;
+        }
+        target.textContent = '正在按修复建议重新验证网络线路...';
+        const target_profile = document.getElementById('proxy-target-profile').value || 'baseline';
+        const res = await api('POST', `/proxy/profiles/${profileId}/validate`, { timeout: 10, include_identity: true, target_profile });
+        target.innerHTML = renderProxyValidation(res);
+        await loadProxyProfiles();
+        return;
+      }
+      if (type === 'export_profile') {
+        if (!profileId) {
+          target.textContent = '没有可导出的网络线路。';
+          return;
+        }
+        await exportProxyProfile(profileId);
+        return;
+      }
+      if (type === 'save_profile') {
+        await saveProxyProfile();
+        return;
+      }
+      target.textContent = `未识别的修复动作：${actionId || type}`;
+    }
+
+    function renderProxyReplacement(data) {
+      if (!data.ok) return escapeHtml(data.error || '更新失败');
+      const previous = data.previous_endpoint || {};
+      const next = data.new_endpoint || {};
+      const warnings = (data.warnings || []).map(escapeHtml).join('<br>');
+      return `
+        <strong>线路凭据已更新</strong>
+        <div class="muted">不会修改系统网络设置；新密码已写入系统钥匙串，旧健康检查快照已清理。</div>
+        <div>旧入口：${escapeHtml(previous.protocol || 'proxy')}://${escapeHtml(previous.host || '-')}:${escapeHtml(previous.port || 0)}</div>
+        <div>新入口：${escapeHtml(next.protocol || 'proxy')}://${escapeHtml(next.host || '-')}:${escapeHtml(next.port || 0)}</div>
+        ${data.monitor ? `<div class="muted">看护：${escapeHtml(data.monitor.ok ? '已按当前设置启动/重启' : (data.monitor.error || '启动失败'))}</div>` : ''}
+        ${renderProxyDecision(data.deployment_decision)}
+        ${warnings ? `<div class="muted">${warnings}</div>` : ''}
+      `;
+    }
+
+    async function replaceProxyProfile(profileId) {
+      const target = document.getElementById('proxy-result');
+      const input = document.getElementById('proxy-input').value.trim();
+      if (!input) {
+        target.textContent = '请先在输入框粘贴新的线路凭据，再点击对应线路的更新凭据。';
+        document.getElementById('proxy-input').focus();
+        return;
+      }
+      const ok = confirm('将用输入框里粘贴的新 host/port/user/pass 更新这条网络线路，并写入系统钥匙串；不会修改系统网络设置。继续？');
+      if (!ok) {
+        target.textContent = '已取消更新凭据。';
+        return;
+      }
+      target.textContent = '正在更新线路凭据并刷新看护状态...';
+      const target_profile = document.getElementById('proxy-target-profile').value || 'baseline';
+      const res = await api('POST', `/proxy/profiles/${profileId}/replace`, {
+        input,
+        start_monitor: document.getElementById('proxy-start-monitor-on-save').checked,
+        monitor_interval: 60,
+        timeout: 10,
+        target_profile,
+      });
+      target.innerHTML = renderProxyReplacement(res);
+      await loadProxyProfiles();
+      await loadProxyMonitor();
+    }
+
+    async function applyProxyProfile(profileId, mode) {
+      const target = document.getElementById('proxy-result');
+      const target_profile = document.getElementById('proxy-target-profile').value || 'baseline';
+      if (mode === 'system') {
+        const ok = confirm('将修改 macOS 系统网络设置。Netfix 会先备份当前设置；需要本机转发的线路会通过 127.0.0.1 应用，应用期间需要保持 Netfix 运行。继续？');
+        if (!ok) {
+          target.textContent = '已取消系统网络应用。';
+          return;
+        }
+      }
+      const body = mode === 'system'
+        ? { mode, confirmed: true, confirmation: 'APPLY_PROXY_PROFILE', verify: true, rollback_on_verify_failure: true, target_profile }
+        : { mode, target_profile };
+      const res = await api('POST', `/proxy/profiles/${profileId}/apply`, body);
+      target.innerHTML = renderProxyOperation(res);
+      await loadProxyBridge();
+      if (res.ok && res.status === 'applied') {
+        await startProxyMonitor(profileId);
+      }
+    }
+
+    function renderProxyExport(data) {
+      if (!data.ok) return escapeHtml(data.error || '导出失败');
+      const snippets = data.snippets || {};
+      const pkg = data.package || {};
+      const files = pkg.files || [];
+      const packageHtml = files.length ? `
+        <div class="action-card" data-schema="${escapeHtml(pkg.schema_version || 'netfix_proxy_client_package.v1')}">
+          <div class="action-title">
+            <strong>客户端配置包：${escapeHtml(pkg.name || 'netfix-proxy')}</strong>
+            <span class="badge ok">推荐 ${escapeHtml(pkg.recommended_format || 'url')}</span>
+          </div>
+          <div class="muted">按文件名复制到目标客户端；认证配置仍只包含 &lt;password&gt; 占位符。</div>
+          ${files.map(file => `
+            <div style="margin-top:8px">
+              <strong>${escapeHtml(file.path || file.format || 'file')}</strong>
+              ${file.secret_placeholder ? '<span class="badge warn">需替换 &lt;password&gt;</span>' : '<span class="badge ok">无明文密码</span>'}
+              <div class="action-preview">${escapeHtml(file.content || '')}</div>
+            </div>
+          `).join('')}
+        </div>
+      ` : '';
+      const blocks = Object.entries(snippets).map(([id, snippet]) => `
+        <div class="action-card">
+          <div class="action-title">
+            <strong>${escapeHtml(snippet.label || id)}</strong>
+            ${snippet.secret_placeholder ? '<span class="badge warn">需替换 &lt;password&gt;</span>' : '<span class="badge ok">无明文密码</span>'}
+          </div>
+          <div class="action-preview">${escapeHtml(snippet.content || '')}</div>
+        </div>
+      `).join('');
+      return `
+        <strong>客户端配置导出</strong>
+        <div class="muted">不会返回系统钥匙串中的线路密码；认证配置使用 &lt;password&gt; 占位符。</div>
+        ${packageHtml}
+        ${blocks}
+        <div class="muted">${(data.warnings || []).map(escapeHtml).join('<br>')}</div>
+      `;
+    }
+
+    async function exportProxyProfile(profileId) {
+      const target = document.getElementById('proxy-result');
+      const res = await api('POST', `/proxy/profiles/${profileId}/export`, { format: 'all' });
+      target.innerHTML = renderProxyExport(res);
+    }
+
+    async function deleteProxyProfile(profileId) {
+      const target = document.getElementById('proxy-result');
+      const ok = confirm('删除网络线路会移除本地配置并尝试删除对应钥匙串密码；不会修改系统网络设置。删除后需要重新粘贴才能恢复。继续？');
+      if (!ok) {
+        target.textContent = '已取消删除网络线路。';
+        return;
+      }
+      const res = await api('POST', `/proxy/profiles/${profileId}/delete`, {});
+      const stopped = res.monitor_stopped ? '后台看护已停止。' : '';
+      const persisted = res.monitor_persisted_cleared ? '重启自动恢复配置已清理。' : '';
+      const keychain = res.keychain && res.keychain.ok === false ? ' 钥匙串密码清理失败，请在系统钥匙串中检查。' : '';
+      target.textContent = res.ok ? `删除网络线路完成。${stopped}${persisted}${keychain}` : '删除网络线路失败: ' + (res.error || 'unknown');
+      await loadProxyProfiles();
+      await loadProxyMonitor();
+    }
+
+    async function rollbackProxyProfile() {
+      const target = document.getElementById('proxy-result');
+      const ok = confirm('将恢复上次由 Netfix 应用前备份的系统网络设置。继续？');
+      if (!ok) {
+        target.textContent = '已取消回滚。';
+        return;
+      }
+      const res = await api('POST', '/proxy/profiles/rollback', { confirmed: true, confirmation: 'ROLLBACK_PROXY_PROFILE' });
+      target.innerHTML = renderProxyRollback(res);
+      await loadProxyBridge();
+    }
+
+    async function recoverProxyBridge() {
+      const target = document.getElementById('proxy-result');
+      const ok = confirm('系统网络仍指向上次 Netfix 本机转发，但转发可能已失效。将恢复应用前备份的系统网络设置，继续？');
+      if (!ok) {
+        target.textContent = '已取消本机转发恢复。';
+        return;
+      }
+      const res = await api('POST', '/proxy/bridge/recover', { confirmed: true, confirmation: 'RESTORE_STALE_PROXY_BRIDGE' });
+      target.innerHTML = renderProxyRollback(res);
+      await loadProxyBridge();
+    }
+
+    async function loadProxyBridge() {
+      const data = await api('GET', '/proxy/bridge');
+      const target = document.getElementById('proxy-bridge');
+      const bridges = data.bridges || [];
+      const stale = data.stale_check || {};
+      const staleHtml = stale.recovery_available ? `
+        <div class="event-row" style="margin-top:8px">
+          <span>系统网络仍指向上次 Netfix 本机转发：${escapeHtml(stale.status || 'unknown')}</span>
+          <button onclick="recoverProxyBridge()">恢复网络设置</button>
+        </div>
+      ` : (stale.status && stale.status !== 'no_journal' ? `<div class="muted">本机转发恢复检查：${escapeHtml(stale.status)}</div>` : '');
+      const startupHtml = renderProxyBridgeStartupCheck(data.startup_check);
+      const lifecycleHtml = renderProxyBridgeLifecycle(data.lifecycle);
+      if (!bridges.length) {
+        target.innerHTML = `${startupHtml}${lifecycleHtml || '本机转发未启动。'}${staleHtml}`;
+        return;
+      }
+      const bridgeHtml = bridges.map(b => {
+        const local = `${escapeHtml(b.listen_host || '127.0.0.1')}:${escapeHtml(b.listen_port || '')}`;
+        const upstream = `${escapeHtml(b.upstream_protocol || 'http')}://${escapeHtml(b.upstream_host || '')}:${escapeHtml(b.upstream_port || '')}`;
+        const recent = (b.recent_clients || [])
+          .map(client => `${escapeHtml(client.host || 'local')} ${escapeHtml(client.count || 0)} 次`)
+          .join('，') || '暂无';
+        const idle = b.idle_timeout_s ? ` · 空闲 ${escapeHtml(b.idle_timeout_s)} 秒后自动关闭` : '';
+        return `
+          <div>
+            <strong>本机转发运行中</strong> ${local} -> ${upstream}
+            <div>最近请求 ${escapeHtml(b.request_count || 0)} 次 · 活跃连接 ${escapeHtml(b.active_connections || 0)}${idle}</div>
+            <div class="muted">最近客户端：${recent}。本机其它进程也可能使用该端口；不用时请停止本机转发或恢复系统网络设置。</div>
+          </div>
+        `;
+      }).join('');
+      target.innerHTML = startupHtml + lifecycleHtml + bridgeHtml + staleHtml;
+    }
+
+    async function loadProxyMonitor() {
+      const data = await api('GET', '/proxy/monitor');
+      const monitor = data.monitor || {};
+      const target = document.getElementById('proxy-monitor');
+      const last = monitor.last_event || {};
+      const check = last.proxy_check || {};
+      const repairActions = last.repair_actions || check.repair_actions || [];
+      const persisted = monitor.persisted || {};
+      if (monitor.running) {
+        target.innerHTML = `
+          <strong>后台看护运行中</strong>
+          <div>网络线路: ${escapeHtml(monitor.profile_name || monitor.profile_id || '')} · 间隔: ${escapeHtml(monitor.interval || '')}s · 次数: ${escapeHtml(monitor.run_count || 0)}</div>
+          <div>最近状态: ${escapeHtml(last.status || '等待首次检查')} ${check.latency_ms ? '· ' + escapeHtml(check.latency_ms) + 'ms' : ''}</div>
+          <div class="muted">${persisted.enabled ? '已保存自动恢复配置，Netfix 重启后会继续看护。' : '当前看护仅在本次运行中有效。'}</div>
+          ${renderProxyRepairActions(repairActions)}
+          <div class="toolbar" style="margin-top:6px"><button onclick="stopProxyMonitor()">停止看护</button><button onclick="loadProxyMonitor()">刷新</button></div>
+        `;
+      } else {
+        target.innerHTML = `
+          <strong>后台看护未启动</strong>
+          <div>${escapeHtml(monitor.last_error || (persisted.enabled ? '已保存自动恢复配置，等待 Netfix 本地服务恢复看护。' : '保存网络线路后可启动持续健康检查。'))}</div>
+          ${renderProxyRepairActions(repairActions)}
+          <div class="toolbar" style="margin-top:6px"><button onclick="loadProxyMonitor()">刷新</button></div>
+        `;
+      }
+      bindProxyRepairActions(target);
+    }
+
+    async function startProxyMonitor(profileId) {
+      const target_profile = document.getElementById('proxy-target-profile').value || 'baseline';
+      const res = await api('POST', '/proxy/monitor/start', { profile_id: profileId, interval: 60, timeout: 10, target_profile });
+      document.getElementById('proxy-result').textContent = res.ok ? '验证和持续检查已启动；系统网络设置还没有修改。' : '启动持续检查失败: ' + (res.error || 'unknown');
+      await loadProxyMonitor();
+      setTimeout(loadProxyProfiles, 1200);
+    }
+
+    async function stopProxyMonitor() {
+      const res = await api('POST', '/proxy/monitor/stop', {});
+      document.getElementById('proxy-result').textContent = res.ok ? '后台看护已停止。' : '停止看护失败: ' + (res.error || 'unknown');
+      await loadProxyMonitor();
+    }
+
+    function showFileModeBlocked() {
+      document.body.innerHTML = `
+        <main class="container" style="max-width:760px">
+          <section class="panel" role="alert" style="margin-top:56px">
+            <h1>请从 Netfix App 打开</h1>
+            <p class="subhead">你现在打开的是静态 HTML 文件，不是正在运行的 Netfix 产品。这个页面不能自己启动本地诊断引擎，也不能代表 API 已经接通。</p>
+            <div class="summary" style="margin-top:16px">
+              <div class="headline">普通用户入口</div>
+              <ol style="margin:0; padding-left:20px">
+                <li>打开 <strong>Netfix-0.2.0.dmg</strong>。</li>
+                <li>双击 <strong>Netfix.app</strong>，或拖到 Applications 后从 Launchpad 打开。</li>
+                <li>App 会自动启动本地引擎；正常使用不需要终端、Python 命令或手输 127.0.0.1。</li>
+              </ol>
+            </div>
+            <p class="muted" style="margin-top:14px">如果你已经打开 Netfix App，请在 App 底部点击「控制台」，它会打开正确的本地页面。</p>
+          </section>
+        </main>
+      `;
+    }
+
+    async function boot() {
+      if (window.location.protocol === 'file:') {
+        showFileModeBlocked();
+        return;
+      }
+      await checkApi();
+      await loadProviders();
+      await loadLLMSettings();
+      await loadPrivacySettings();
+      await loadProxyBridgeSettings();
+      await loadProxyValidationTargets();
+      await loadProxyProfiles();
+      await loadProxyBridge();
+      await loadProxyMonitor();
+      await loadLogs();
+    }
+
+    boot();
+  </script>
+</body>
+</html>

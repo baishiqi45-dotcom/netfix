@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.spec
+.pytest_cache/
+build/
+dist/
+
+# netfix runtime
+~/.netfix/
+.netfix/
+
+# Proxy / credential artifacts
+*.proxy-url
+*.shadowrocket.conf
+*.shadowrocket.txt
+*.stash.yaml
+*proxy*qr*.png
+*proxy*.zip
+*v2rayn-package*
+cases/*.raw.json
+cases/*last_report*.json
+cases/*secret*
+
+# macOS
+.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local environment
+.env
+.venv/
+
+# Node modules (if any UI later)
+node_modules/
+.build/
+
+# Local QA/browser automation cache
+.playwright-cli/
+
+# Opencode / other agent artifacts
+.opencode/
+.harness/

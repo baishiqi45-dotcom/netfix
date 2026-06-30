@@ -1,0 +1,325 @@
+{
+  "version": "0.1.0",
+  "symptoms": [
+    {
+      "id": "codex-unreachable",
+      "keywords": ["codex", "openai", "api.openai.com", "chat.openai.com"],
+      "diagnostics": ["codex_api_direct", "codex_api_via_proxy", "proxy_core_status"],
+      "root_causes": [
+        {"id": "direct-blocked", "description": "直连被墙，需要经代理", "confidence": 0.9},
+        {"id": "proxy-down", "description": "代理核心未运行或端口未监听", "confidence": 0.8},
+        {"id": "node-failed", "description": "当前代理节点失效", "confidence": 0.7}
+      ],
+      "fixes": ["check-proxy-core", "flush-dns-cache", "reset-system-proxy"],
+      "manual_steps": ["在 GUI 客户端切换节点并测试延迟"]
+    },
+    {
+      "id": "dns-failure",
+      "keywords": ["DNS_PROBE", "Could not resolve host", "ERR_NAME_NOT_RESOLVED"],
+      "diagnostics": ["dns_local", "dns_public", "dns_cache"],
+      "root_causes": [
+        {"id": "dns-cache-stale", "description": "DNS 缓存过期或污染", "confidence": 0.8},
+        {"id": "doh-bypass", "description": "DoH 绕过 hosts/内网解析", "confidence": 0.6}
+      ],
+      "fixes": ["flush-dns-cache"]
+    },
+    {
+      "id": "proxy-auth-failure",
+      "keywords": ["407", "Proxy Authentication Required", "authentication failed"],
+      "diagnostics": ["proxy_core_status", "codex_api_via_proxy"],
+      "root_causes": [
+        {"id": "wrong-password", "description": "代理用户名/密码错误", "confidence": 0.9}
+      ],
+      "fixes": [],
+      "manual_steps": [
+        "检查 GUI 客户端的代理认证用户名/密码",
+        "确认协议为 SOCKS5/HTTP 与端口一致"
+      ]
+    },
+    {
+      "id": "vpn-node-failure",
+      "keywords": ["timeout", "node", "server", "handshake", "exit ip wrong"],
+      "diagnostics": ["codex_api_via_proxy", "proxy_core_status"],
+      "root_causes": [
+        {"id": "node-blocked", "description": "VPN/代理节点被墙或上游故障", "confidence": 0.85},
+        {"id": "node-misconfigured", "description": "节点地址/端口/协议配置错误", "confidence": 0.6}
+      ],
+      "fixes": ["flush-dns-cache"],
+      "manual_steps": [
+        "在 GUI 客户端切换到其他节点",
+        "检查节点配置地址与端口"
+      ]
+    },
+    {
+      "id": "wifi-gateway-down",
+      "keywords": ["wifi", "gateway", "router", "packet loss", "no internet"],
+      "diagnostics": ["gateway", "dns_local"],
+      "root_causes": [
+        {"id": "gateway-unreachable", "description": "Wi-Fi 信号弱或默认网关不可达", "confidence": 0.85},
+        {"id": "dhcp-no-route", "description": "DHCP 未分配默认路由", "confidence": 0.5}
+      ],
+      "fixes": [],
+      "manual_steps": [
+        "靠近路由器或切换 Wi-Fi 频段",
+        "重启路由器",
+        "在系统设置中忘记网络后重连"
+      ]
+    },
+    {
+      "id": "ssl-cert-error",
+      "keywords": ["ERR_CERT", "SSL_ERROR", "certificate", "authority invalid"],
+      "diagnostics": ["codex_api_direct", "codex_api_via_proxy"],
+      "root_causes": [
+        {"id": "self-signed-cert", "description": "遭遇自签证书或中间人劫持", "confidence": 0.75},
+        {"id": "missing-ca", "description": "系统 CA 证书缺失或过期", "confidence": 0.6}
+      ],
+      "fixes": [],
+      "manual_steps": [
+        "用 openssl s_client -showcerts 检查证书链",
+        "将可信 CA 安装到 macOS Keychain"
+      ]
+    },
+    {
+      "id": "mtu-mismatch",
+      "keywords": ["mtu", "small packet", "large packet", "fragmentation"],
+      "diagnostics": ["mtu_probe"],
+      "root_causes": [
+        {"id": "mtu-too-high", "description": "网卡 MTU 过高导致大包被丢弃", "confidence": 0.8}
+      ],
+      "fixes": [],
+      "manual_steps": ["运行 bin/mtu-tune.sh 探测并设置最佳 MTU"]
+    },
+    {
+      "id": "ipv6-leak",
+      "keywords": ["ipv6", "leak", "AAAA", "dual stack"],
+      "diagnostics": ["ipv6_leak"],
+      "root_causes": [
+        {"id": "ipv6-exposed", "description": "IPv6 流量绕过代理直接暴露", "confidence": 0.85}
+      ],
+      "fixes": ["disable-ipv6"],
+      "manual_steps": ["如果你不想关闭 IPv6，也可以在代理客户端里开启 IPv6 转发或关闭 IPv6。"]
+    },
+    {
+      "id": "system-proxy-not-effective",
+      "keywords": ["system proxy", "scutil", "proxy not set"],
+      "diagnostics": ["system_proxy_state"],
+      "root_causes": [
+        {"id": "system-proxy-off", "description": "系统代理未开启或指向错误端口", "confidence": 0.8}
+      ],
+      "fixes": ["reset-system-proxy"]
+    },
+    {
+      "id": "macos-firewall-block",
+      "keywords": ["firewall", "socketfilterfw", "pfctl", "drop", "block"],
+      "diagnostics": ["codex_api_direct", "codex_api_via_proxy"],
+      "root_causes": [
+        {"id": "app-firewall", "description": "macOS 应用防火墙拦截了代理核心或目标 App", "confidence": 0.7},
+        {"id": "pf-rule", "description": "pf 包过滤规则丢弃流量", "confidence": 0.5}
+      ],
+      "fixes": [],
+      "manual_steps": [
+        "检查系统设置 > 隐私与安全 > 防火墙",
+        "执行 socketfilterfw --add /Applications/YourApp.app",
+        "检查 pfctl -sr 规则"
+      ]
+    },
+    {
+      "id": "ai-service-ip-blocked",
+      "keywords": ["openai", "chatgpt", "claude", "anthropic", "403", "blocked", "风控"],
+      "diagnostics": ["codex_api_via_proxy", "node_reachability"],
+      "root_causes": [
+        {"id": "node-flagged", "description": "当前代理节点 IP 被 AI 服务风控或拉黑", "confidence": 0.8}
+      ],
+      "fixes": [],
+      "manual_steps": [
+        {
+          "id": "switch-node",
+          "description": "切换到其他代理节点",
+          "steps": [
+            "打开你的代理客户端（v2rayN / Clash / Surge）",
+            "选择一个不同地区或类型的节点",
+            "刷新浏览器或重启 AI 应用后重试"
+          ]
+        },
+        {
+          "id": "disable-ipv6",
+          "description": "禁用 IPv6 防止泄漏",
+          "steps": [
+            "系统设置 > 网络 > 当前连接 > 详细信息",
+            "将 IPv6 设为「关闭」或「仅本地链接」",
+            "或在代理客户端开启「IPv6 关闭」选项"
+          ]
+        },
+        {
+          "id": "disable-quic",
+          "description": "关闭浏览器 HTTP/3 QUIC",
+          "steps": [
+            "Chrome/Edge 地址栏输入 chrome://flags/#enable-quic",
+            "将 Experimental QUIC protocol 设为 Disabled",
+            "重启浏览器"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dhcp-misconfig",
+      "keywords": ["dhcp", "169.254", "no router", "self-assigned"],
+      "diagnostics": ["dhcp_state", "interface_state", "ipv4_route"],
+      "root_causes": [
+        {"id": "dhcp-misconfig", "description": "DHCP 未分配有效地址或缺少网关/DNS", "confidence": 0.85}
+      ],
+      "fixes": ["renew-dhcp"],
+      "manual_steps": ["重启路由器", "在系统设置中忘记网络后重连"]
+    },
+    {
+      "id": "dns-leak",
+      "keywords": ["dns leak", "dns 泄漏", "isp dns"],
+      "diagnostics": ["dns_leak", "dns_resolvers"],
+      "root_causes": [
+        {"id": "dns-leak", "description": "代理开启但 DNS 仍走本地/ISP，存在泄漏风险", "confidence": 0.8}
+      ],
+      "fixes": ["flush-dns-cache"],
+      "manual_steps": [
+        "将系统 DNS 改为 1.1.1.1 / 8.8.8.8",
+        "在代理客户端中启用 DNS 劫持",
+        "使用 socks5h:// 让 SOCKS 代理解析"
+      ]
+    },
+    {
+      "id": "ip-reputation-risk",
+      "keywords": ["ip", "risk", "datacenter", "hosting", "blocked"],
+      "diagnostics": ["ip_reputation"],
+      "root_causes": [
+        {"id": "ip-reputation-risk", "description": "出口 IP 被判定为数据中心或高风险地址", "confidence": 0.75}
+      ],
+      "fixes": [],
+      "manual_steps": [
+        "切换到住宅 IP 或移动 IP 节点",
+        "在 AbuseIPDB / proxycheck.io 复核该 IP"
+      ]
+    },
+    {
+      "id": "proxy-auth-required",
+      "keywords": ["407", "Proxy Authentication Required"],
+      "diagnostics": ["proxy_auth_check"],
+      "root_causes": [
+        {"id": "proxy-auth-required", "description": "代理服务器要求输入用户名密码", "confidence": 0.95}
+      ],
+      "fixes": [],
+      "manual_steps": [
+        "在系统设置 > 网络 > 代理中补全用户名和密码",
+        "或检查代理客户端认证配置"
+      ]
+    },
+    {
+      "id": "local-wifi-issue",
+      "keywords": ["wifi", "packet loss", "gateway", "latency"],
+      "diagnostics": ["path_trace", "wifi_signal", "gateway"],
+      "root_causes": [
+        {"id": "local-wifi-issue", "description": "本地第一跳丢包或延迟高，Wi-Fi/网关存在问题", "confidence": 0.8}
+      ],
+      "fixes": [],
+      "manual_steps": [
+        "靠近路由器或切换到 5GHz 频段",
+        "重启路由器",
+        "检查是否有其他设备占用大量带宽"
+      ]
+    }
+  ],
+  "fixes": {
+    "flush-dns-cache": {
+      "tier": 1,
+      "platforms": ["darwin"],
+      "description": "刷新 macOS DNS 缓存",
+      "commands": [
+        "sudo dscacheutil -flushcache",
+        "sudo killall -HUP mDNSResponder"
+      ],
+      "verify": "scutil --dns",
+      "verify_diagnostic": "dns_local",
+      "backup_paths": [],
+      "reverse": []
+    },
+    "reset-system-proxy": {
+      "tier": 2,
+      "platforms": ["darwin"],
+      "description": "重置 macOS 系统代理（先关闭再让 GUI 重新应用）",
+      "commands": [
+        "networksetup -setwebproxystate 'Wi-Fi' off",
+        "networksetup -setsecurewebproxystate 'Wi-Fi' off",
+        "networksetup -setsocksfirewallproxystate 'Wi-Fi' off"
+      ],
+      "verify": "scutil --proxy",
+      "verify_diagnostic": "system_proxy_state",
+      "backup_paths": [],
+      "reverse": [
+        "echo '请手动在 GUI 客户端重新应用系统代理'"
+      ]
+    },
+    "disable-auto-proxy": {
+      "tier": 2,
+      "platforms": ["darwin"],
+      "description": "关闭 macOS PAC/WPAD 自动代理，保留手动代理",
+      "commands": [
+        "networksetup -setautoproxystate 'Wi-Fi' off",
+        "networksetup -setproxyautodiscovery 'Wi-Fi' off"
+      ],
+      "verify": "scutil --proxy",
+      "verify_diagnostic": "system_proxy_state",
+      "backup_paths": [],
+      "reverse": [
+        "networksetup -setautoproxystate 'Wi-Fi' on",
+        "networksetup -setproxyautodiscovery 'Wi-Fi' on"
+      ]
+    },
+    "check-proxy-core": {
+      "tier": 1,
+      "description": "检测代理核心是否运行并监听 mixed 端口",
+      "commands": [
+        "lsof -nP -iTCP:10808 -sTCP:LISTEN"
+      ],
+      "verify": "lsof -nP -iTCP:10808 -sTCP:LISTEN",
+      "backup_paths": [],
+      "reverse": []
+    },
+    "renew-dhcp": {
+      "tier": 1,
+      "platforms": ["darwin"],
+      "description": "强制当前接口重新获取 DHCP 租约",
+      "commands": [
+        "sudo ipconfig set en0 DHCP"
+      ],
+      "verify": "ipconfig getpacket en0",
+      "verify_diagnostic": "dhcp_state",
+      "backup_paths": [],
+      "reverse": []
+    },
+    "disable-ipv6": {
+      "tier": 2,
+      "platforms": ["darwin"],
+      "description": "关闭所有网络服务的 IPv6 以防止泄漏",
+      "commands": [
+        "sudo bash bin/disable_ipv6.sh"
+      ],
+      "verify_diagnostic": "ipv6_leak",
+      "backup_paths": [],
+      "reverse": [
+        "sudo bash bin/enable_ipv6.sh"
+      ]
+    },
+    "set-public-dns": {
+      "tier": 2,
+      "platforms": ["darwin"],
+      "description": "将 Wi-Fi DNS 设置为公共 DNS",
+      "commands": [
+        "networksetup -setdnsservers 'Wi-Fi' 1.1.1.1 8.8.8.8"
+      ],
+      "verify": "scutil --dns",
+      "verify_diagnostic": "dns_leak",
+      "backup_paths": [],
+      "reverse": [
+        "networksetup -setdnsservers 'Wi-Fi' empty"
+      ]
+    }
+  }
+}

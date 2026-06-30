@@ -1,0 +1,19 @@
+{
+  "id": "chatcmpl-deepseek-fixture",
+  "object": "chat.completion",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"schema_version\":\"llm_explanation.v1\",\"headline\":\"DeepSeek text smoke ok\",\"severity\":\"ok\",\"explanation\":\"fixture\",\"actions\":[],\"manual_steps\":[]}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 12,
+    "completion_tokens": 7,
+    "total_tokens": 19
+  }
+}

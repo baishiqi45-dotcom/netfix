@@ -1,0 +1,19 @@
+{
+  "id": "chatcmpl-minimax-fixture",
+  "object": "chat.completion",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"schema_version\":\"llm_explanation.v1\",\"headline\":\"MiniMax image smoke ok\",\"severity\":\"ok\",\"explanation\":\"fixture\",\"actions\":[],\"manual_steps\":[]}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 23,
+    "completion_tokens": 10,
+    "total_tokens": 33
+  }
+}

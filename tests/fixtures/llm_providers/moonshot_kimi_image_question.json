@@ -1,0 +1,19 @@
+{
+  "id": "chatcmpl-kimi-fixture",
+  "object": "chat.completion",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "好的，结果如下：\n{\"schema_version\":\"llm_explanation.v1\",\"headline\":\"Kimi image smoke ok\",\"severity\":\"ok\",\"explanation\":\"fixture\",\"actions\":[],\"manual_steps\":[]}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 21,
+    "completion_tokens": 9,
+    "total_tokens": 30
+  }
+}

@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# vpn-check.sh — VPN / 隧道状态检查
+# 对应 final.md §1 VPN / §7.1 macOS 系统代理
+# 用法：bash bin/vpn-check.sh [--json]
+
+set -uo pipefail
+JSON_MODE=false
+for arg in "$@"; do [[ "$arg" == "--json" ]] && JSON_MODE=true; done
+
+JSON_TMP=""
+HUMAN_LOG=""
+if [[ "$JSON_MODE" == true ]]; then
+  JSON_TMP=$(mktemp)
+  HUMAN_LOG=$(mktemp)
+  exec 3>&1
+  exec 1>"$HUMAN_LOG"
+  exec 2>>"$HUMAN_LOG"
+  trap 'rm -f "$JSON_TMP" "$HUMAN_LOG"' EXIT
+fi
+
+hr() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
+ok() { printf '\033[1;32m[ OK ]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }
+err() { printf '\033[1;31m[FAIL]\033[0m %s\n' "$*"; }
+
+json_escape() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
+add_check() {
+  local name="$1" status="$2" details="$3"
+  if [[ "$JSON_MODE" == true ]]; then
+    printf '{"name":%s,"status":%s,"details":%s}\n' \
+      "$(json_escape "$name")" "$(json_escape "$status")" "$details" >> "$JSON_TMP"
+  fi
+}
+emit_report() {
+  python3 -c "
+import json,sys
+checks=[json.loads(l) for l in open('$JSON_TMP').read().splitlines() if l.strip()]
+script=sys.argv[1]
+status=sys.argv[2]
+summary=sys.argv[3]
+print(json.dumps({'script':script,'status':status,'checks':checks,'summary':summary}, ensure_ascii=False))
+" "$1" "$2" "$3"
+}
+
+OVERALL="ok"
+update_overall() {
+  local s="$1"
+  if [[ "$s" == "fail" ]]; then OVERALL="fail"; fi
+  if [[ "$s" == "warn" && "$OVERALL" == "ok" ]]; then OVERALL="warn"; fi
+}
+
+hr "[1/5] utun 接口（WireGuard / IPSec / 一般 VPN）"
+UTUNS=$(ifconfig 2>/dev/null | grep -E "^utun" | awk '{print $1}' | sed 's/://' | tr '\n' ' ')
+UTUN_STATUS="ok"
+if [[ -z "$UTUNS" ]]; then
+  warn "没有 utun 接口 — VPN 没拨上 或 没装 WireGuard — final.md §1.2"
+  UTUN_STATUS="warn"
+else
+  echo "发现接口: $UTUNS"
+  ifconfig 2>/dev/null | grep -A2 "^utun" | head -30
+fi
+add_check "utun_interfaces" "$UTUN_STATUS" "{\"interfaces\":\"$UTUNS\"}"
+update_overall "$UTUN_STATUS"
+
+hr "[2/5] WireGuard 状态（如果装了）"
+WG_STATUS="ok"
+if command -v wg >/dev/null 2>&1; then
+  WG_OUT=$(sudo -n wg show 2>&1 | head -30 || true)
+  echo "$WG_OUT"
+  if [[ -z "$WG_OUT" ]]; then
+    warn "wg show 需要 sudo 或无输出"
+    WG_STATUS="warn"
+  fi
+else
+  echo "wg 命令不在 PATH — 客户端未装 或 命令行工具未安装"
+  WG_STATUS="warn"
+fi
+add_check "wg_show" "$WG_STATUS" "{\"available\":$(command -v wg >/dev/null 2>&1 && echo true || echo false)}"
+update_overall "$WG_STATUS"
+
+hr "[3/5] 路由表（看 VPN 是否接管默认路由）"
+ROUTE_OUT=$(netstat -nr 2>/dev/null | grep -E "utun|wg|default" | head -15 || route -n get default 2>&1)
+echo "$ROUTE_OUT"
+ROUTE_STATUS="ok"
+WARN_UTUN=$(netstat -nr 2>/dev/null | grep -E "utun.*default" | head -1)
+if [[ -n "$WARN_UTUN" ]]; then
+  warn "VPN 接管了默认路由 — 流量全走隧道 — final.md §1.3 split-tunneling"
+  ROUTE_STATUS="warn"
+fi
+add_check "routing" "$ROUTE_STATUS" "{\"default_via_utun\":$( [[ -n "$WARN_UTUN" ]] && echo true || echo false )}"
+update_overall "$ROUTE_STATUS"
+
+hr "[4/5] macOS 系统代理"
+PROXY_OUT=$(scutil --proxy 2>&1 | head -25 || true)
+echo "$PROXY_OUT"
+add_check "system_proxy" "ok" "{\"collected\":true}"
+
+hr "[5/5] 实际出网测试 — 多源出口 IP 对比"
+EXT_IPS=()
+IP_STATUS="ok"
+for IP_SVC in "https://api.ipify.org" "https://ifconfig.me" "https://ip.sb" "https://api.ip.sb/ip"; do
+  R=$(curl -sS --max-time 5 "$IP_SVC" 2>/dev/null | head -c 60)
+  echo "${IP_SVC}: ${R:-（无响应）}"
+  [[ -n "$R" ]] && EXT_IPS+=("$R")
+done
+
+UNIQUE_IPS=0
+if [[ ${#EXT_IPS[@]} -eq 0 ]]; then
+  err "所有 IP 服务都拿不到出口 — final.md §1.3 拨上但上不了网"
+  echo "  90% 命中：DNS 没在隧道内解析"
+  echo "  修法：wg0.conf [Interface] 加 DNS = 1.1.1.1"
+  IP_STATUS="fail"
+else
+  UNIQUE_IPS=$(printf '%s\n' "${EXT_IPS[@]}" | sort -u | wc -l | tr -d ' ')
+  if [[ "$UNIQUE_IPS" -gt 1 ]]; then
+    warn "多家 IP 服务返回不同结果（${UNIQUE_IPS} 个）— 出口被代理劫持 / DNS 泄漏"
+    IP_STATUS="warn"
+  fi
+  ok "出口 IP 一致 (${EXT_IPS[0]})"
+fi
+add_check "exit_ip_consistency" "$IP_STATUS" "{\"count\":${#EXT_IPS[@]},\"unique\":$UNIQUE_IPS,\"first\":\"${EXT_IPS[0]:-}\"}"
+update_overall "$IP_STATUS"
+
+if [[ "$JSON_MODE" == true ]]; then
+  exec 1>&3
+  SUMMARY="VPN/隧道检查完成"
+  case "$OVERALL" in
+    ok) SUMMARY="VPN/代理状态正常" ;;
+    warn) SUMMARY="VPN/代理存在警告（utun、路由或出口 IP 不一致），请核对 §1/§7" ;;
+    fail) SUMMARY="无法获取出口 IP，隧道可能拨上但无网络，参考 §1.3" ;;
+  esac
+  emit_report "vpn-check" "$OVERALL" "$SUMMARY"
+else
+  printf '\n\033[1;36m== 根因速查 ==\033[0m\n'
+  printf '• 没 utun 接口 → 客户端没拨上（§1.2 Endpoint 写错 90%%）\n'
+  printf '• 有 utun 但 curl 卡 → DNS 没推下来（§1.3）\n'
+  printf '• 大包断流小包通 → MTU 不匹配（§1.4 / §10.3）\n'
+  printf '• 系统代理配了但 App 不走 → §7.1 macOS 系统代理\n'
+fi

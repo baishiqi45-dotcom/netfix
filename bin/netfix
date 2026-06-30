@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Convenience wrapper for the netfix Python CLI.
+# Usage: bash bin/netfix <subcommand> [args...]
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+exec python3 "$REPO_DIR/netfix.py" "$@"

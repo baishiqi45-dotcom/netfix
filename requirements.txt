@@ -1,0 +1,6 @@
+# netfix intentionally uses only the Python standard library.
+# No third-party packages are required for core functionality.
+# Optional dev dependencies:
+#   pytest
+#   ruff
+#   mypy

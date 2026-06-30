@@ -1,0 +1,128 @@
+{
+  "version": "0.2.0",
+  "groups": [
+    {
+      "id": "ai",
+      "name": "AI / 大模型",
+      "services": [
+        {
+          "id": "openai_api",
+          "name": "OpenAI API",
+          "url": "https://api.openai.com",
+          "path": "/v1/models",
+          "expect": 200
+        },
+        {
+          "id": "openai_chat",
+          "name": "ChatGPT",
+          "url": "https://chat.openai.com",
+          "path": "/",
+          "expect": 200
+        },
+        {
+          "id": "anthropic_api",
+          "name": "Claude API",
+          "url": "https://api.anthropic.com",
+          "path": "/v1/models",
+          "expect": 200
+        },
+        {
+          "id": "gemini_api",
+          "name": "Gemini API",
+          "url": "https://generativelanguage.googleapis.com",
+          "path": "/v1beta/models",
+          "expect": 200
+        },
+        {
+          "id": "github_copilot",
+          "name": "GitHub Copilot",
+          "url": "https://api.githubcopilot.com",
+          "path": "/",
+          "expect": 200
+        }
+      ]
+    },
+    {
+      "id": "dev",
+      "name": "开发工具",
+      "services": [
+        {
+          "id": "github",
+          "name": "GitHub",
+          "url": "https://github.com",
+          "path": "/",
+          "expect": 200
+        },
+        {
+          "id": "github_api",
+          "name": "GitHub API",
+          "url": "https://api.github.com",
+          "path": "/",
+          "expect": 200
+        },
+        {
+          "id": "gitlab",
+          "name": "GitLab",
+          "url": "https://gitlab.com",
+          "path": "/",
+          "expect": 200
+        },
+        {
+          "id": "dockerhub",
+          "name": "Docker Hub",
+          "url": "https://hub.docker.com",
+          "path": "/v2/",
+          "expect": 401
+        },
+        {
+          "id": "npm",
+          "name": "npm Registry",
+          "url": "https://registry.npmjs.org",
+          "path": "/-/ping",
+          "expect": 200
+        },
+        {
+          "id": "pypi",
+          "name": "PyPI",
+          "url": "https://pypi.org",
+          "path": "/",
+          "expect": 200
+        }
+      ]
+    },
+    {
+      "id": "common",
+      "name": "常用境外网站",
+      "services": [
+        {
+          "id": "google",
+          "name": "Google",
+          "url": "https://www.google.com",
+          "path": "/generate_204",
+          "expect": 204
+        },
+        {
+          "id": "youtube",
+          "name": "YouTube",
+          "url": "https://www.youtube.com",
+          "path": "/",
+          "expect": 200
+        },
+        {
+          "id": "twitter",
+          "name": "X / Twitter",
+          "url": "https://x.com",
+          "path": "/",
+          "expect": 200
+        },
+        {
+          "id": "telegram",
+          "name": "Telegram",
+          "url": "https://web.telegram.org",
+          "path": "/",
+          "expect": 200
+        }
+      ]
+    }
+  ]
+}

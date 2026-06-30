@@ -1,0 +1,19 @@
+{
+  "id": "chatcmpl-qwen-fixture",
+  "object": "chat.completion",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "```json\n{\"schema_version\":\"llm_explanation.v1\",\"headline\":\"Qwen text smoke ok\",\"severity\":\"ok\",\"explanation\":\"fixture\",\"actions\":[],\"manual_steps\":[]}\n```"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 14,
+    "completion_tokens": 8,
+    "total_tokens": 22
+  }
+}
