@@ -68,9 +68,11 @@ class TestLocalDiagnostics(unittest.TestCase):
     def test_gateway_ok(self):
         outputs = {
             "route -n get": "gateway: 192.168.1.1",
-            "ping -c 3 -W 2000 192.168.1.1": "3 packets transmitted, 3 packets received, 0.0% packet loss",
+            "ping -c 3": "3 packets transmitted, 3 packets received, 0.0% packet loss",
         }
-        with patch("netfix.layers._helpers.run_command", side_effect=self._fake_run(outputs)):
+        fake = self._fake_run(outputs)
+        with patch("netfix.layers._helpers.run_command", side_effect=fake), \
+             patch("netfix.layers.local.run_command", side_effect=fake):
             result = diagnose.run_diagnostic("gateway", {}, None, 10)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["details"]["packet_loss"], 0.0)

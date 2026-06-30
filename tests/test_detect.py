@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from netfix import detect
+from netfix.utils import command_executable
 
 
 SCUTIL_OUTPUT = """
@@ -83,6 +84,11 @@ class TestDetectRunningProxies(unittest.TestCase):
         v2rayn = proxies["v2rayn"]
         self.assertEqual(len(v2rayn), 1)
         self.assertEqual(v2rayn[0]["pid"], "5678")
+
+    def test_command_executable_skips_unreadable_absolute_path(self):
+        command = "/private/var/db/protected.app/Contents/MacOS/protected --flag"
+        with patch("pathlib.Path.is_file", side_effect=PermissionError("denied")):
+            self.assertIsNone(command_executable(command))
 
 
 if __name__ == "__main__":

@@ -142,7 +142,7 @@ ls -la
 python3 -m pytest -q
 cd gui/macos && swift build -c release
 cd /Users/qibaishi/Desktop/网络 && python3 scripts/release_audit.py --json
-cd /Users/qibaishi/Desktop/网络 && rg -n "Tier|root cause|DNS 层|出口身份|user123|pass456|real-secret|direct\\.miyaip|socks5h://[^\\s]+:[^\\s]+@|http://[^\\s]+:[^\\s]+@" gui/macos/Sources docs tests/test_macos_* || true
+cd /Users/qibaishi/Desktop/网络 && rg -n "Tier|root cause|DNS 层|出口身份|user123|pass456|real-secret|direct\\.miyaip|socks5h_auth_url_pattern|http_auth_url_pattern" gui/macos/Sources docs tests/test_macos_* || true
 ```
 
 如果环境允许，再验证：
@@ -259,4 +259,3 @@ NETFIX_REQUIRE_BUNDLED_RUNTIME=true ./scripts/verify_dmg_backend.sh /Users/qibai
 - 要给出产品是否真的好用的判断。
 - 如果产品现在仍然不适合小白用户，请直接说。
 - 如果某些问题已被当前代码修掉，也要说明“已解决，但仍需验证真实用户是否理解”。
-

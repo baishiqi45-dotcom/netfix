@@ -179,12 +179,18 @@ def command_executable(command: str) -> Optional[Path]:
     tokens = command.split()
     if not tokens:
         return None
+    def _is_file(path: Path) -> bool:
+        try:
+            return path.is_file()
+        except OSError:
+            return False
+
     if tokens[0].startswith("/"):
         for i in range(1, len(tokens) + 1):
             candidate = Path(" ".join(tokens[:i]))
-            if candidate.is_file():
+            if _is_file(candidate):
                 return candidate
         first = Path(tokens[0])
-        return first if first.is_file() else None
+        return first if _is_file(first) else None
     exe = shutil.which(tokens[0])
     return Path(exe) if exe else None

@@ -32,7 +32,13 @@ class TestProxySwitchCommand(unittest.TestCase):
     def test_dry_run_lists_candidate(self):
         parser = build_parser()
         args = parser.parse_args(["proxy-switch", "--auto", "--dry-run", "--json", "--timeout", "5"])
-        with patch("builtins.print") as mock_print:
+        core = FakeTier2Core()
+        target = {"id": "backup", "remarks": "backup"}
+        with patch("netfix.cli.detect_environment", return_value={}), \
+                patch("netfix.cli._enrich_env", return_value={}), \
+                patch("netfix.cli.get_core", return_value=core), \
+                patch("netfix.cli._pick_healthy_profile", return_value=target), \
+                patch("builtins.print") as mock_print:
             rc = cmd_proxy_switch(args)
         self.assertEqual(rc, 0)
         calls = [c.args[0] for c in mock_print.call_args_list]
