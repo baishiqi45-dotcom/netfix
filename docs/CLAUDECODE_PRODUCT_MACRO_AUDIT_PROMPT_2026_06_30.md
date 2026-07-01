@@ -1,6 +1,6 @@
 # Claude Code 宏观产品冷审提示 - Netfix
 
-你是 Claude Code。请在 `/Users/qibaishi/Desktop/网络` 里对 Netfix 做一次只读、对抗性、证据优先的宏观产品审计。
+你是 Claude Code。请在 `<repo>` 里对 Netfix 做一次只读、对抗性、证据优先的宏观产品审计。
 
 这不是代码格式检查，也不是泛泛夸奖。目标是判断：这个产品现在到底有没有产品力，普通小白用户能不能安装后直接用，代理部署链路是否真的闭环，技术实现哪里不对，前端交互哪里反人类，成熟度距离可交付还有多远。
 
@@ -141,15 +141,15 @@ pwd
 ls -la
 python3 -m pytest -q
 cd gui/macos && swift build -c release
-cd /Users/qibaishi/Desktop/网络 && python3 scripts/release_audit.py --json
-cd /Users/qibaishi/Desktop/网络 && rg -n "Tier|root cause|DNS 层|出口身份|user123|pass456|real-secret|direct\\.miyaip|socks5h_auth_url_pattern|http_auth_url_pattern" gui/macos/Sources docs tests/test_macos_* || true
+cd <repo> && python3 scripts/release_audit.py --json
+cd <repo> && rg -n "Tier|root cause|DNS 层|出口身份|user123|pass456|real-secret|direct\\.example-proxy|socks5h_auth_url_pattern|http_auth_url_pattern" gui/macos/Sources docs tests/test_macos_* || true
 ```
 
 如果环境允许，再验证：
 
 ```bash
-cd /Users/qibaishi/Desktop/网络
-NETFIX_REQUIRE_BUNDLED_RUNTIME=true ./scripts/verify_dmg_backend.sh /Users/qibaishi/Desktop/网络/Netfix-0.2.0.dmg
+cd <repo>
+NETFIX_REQUIRE_BUNDLED_RUNTIME=true ./scripts/verify_dmg_backend.sh <repo>/Netfix-0.2.0.dmg
 ```
 
 ## 输出格式

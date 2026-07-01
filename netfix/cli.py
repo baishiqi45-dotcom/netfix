@@ -83,6 +83,62 @@ def _normalize_manual_step(item: Any) -> Dict[str, Any]:
     return {"id": str(item), "description": str(item), "steps": []}
 
 
+_DIAGNOSTIC_DISPLAY_NAMES = {
+    "proxy_core_status": "代理软件状态",
+    "system_proxy_state": "系统代理设置",
+    "proxy_http_test": "代理连通性",
+    "proxy_auth_check": "代理账号密码",
+    "proxy_pac_state": "自动代理脚本",
+    "codex_api_direct": "OpenAI 直连",
+    "codex_api_via_proxy": "OpenAI 走代理",
+    "github_direct": "GitHub 直连",
+    "github_via_proxy": "GitHub 走代理",
+    "dns": "DNS 解析",
+    "dns_resolution": "DNS 解析",
+    "wifi_signal": "Wi-Fi 信号",
+    "gateway": "网关连接",
+    "connectivity": "网络连通性",
+    "ssl_cert": "网站证书",
+    "mtu_probe": "网络包大小",
+    "ip_reputation": "出口 IP 类型",
+    "egress_identity": "出口身份",
+    "ipv6_leak": "IPv6 泄漏检查",
+    "local_ipv4": "本机 IPv4",
+    "local_ipv6": "本机 IPv6",
+    "default_route": "默认上网路线",
+    "packet_loss": "丢包情况",
+    "traceroute": "访问路径",
+}
+
+
+def _diagnostic_display_name(item: Dict[str, Any]) -> str:
+    """Return a user-facing name for a diagnostic item."""
+    existing = str(item.get("display_name") or "").strip()
+    if existing:
+        return existing
+    name = str(item.get("name") or "").strip()
+    if not name:
+        return "网络检查"
+    if name in _DIAGNOSTIC_DISPLAY_NAMES:
+        return _DIAGNOSTIC_DISPLAY_NAMES[name]
+    details = item.get("details") if isinstance(item.get("details"), dict) else {}
+    label = str(details.get("label") or details.get("service") or "").strip()
+    if label:
+        return label
+    if name.endswith("_direct"):
+        return f"{name[:-7].replace('_', ' ').title()} 直连"
+    if name.endswith("_via_proxy"):
+        return f"{name[:-10].replace('_', ' ').title()} 走代理"
+    return name.replace("_", " ")
+
+
+def _normalize_diagnostic(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach display_name while preserving diagnostic IDs for rules/tests."""
+    normalized = dict(item)
+    normalized["display_name"] = _diagnostic_display_name(normalized)
+    return normalized
+
+
 def _build_report(
     env: Dict[str, Any],
     diagnostics: List[Dict[str, Any]],
@@ -113,7 +169,7 @@ def _build_report(
             "hostname": platform.node(),
         },
         "environment": env,
-        "diagnostics": diagnostics,
+        "diagnostics": [_normalize_diagnostic(item) for item in diagnostics],
         "root_causes": root_causes,
         "fixes": [_resolve_fix(fid) for fid in sorted(fix_ids)],
         "manual_steps": [_normalize_manual_step(ms) for ms in manual_entries],

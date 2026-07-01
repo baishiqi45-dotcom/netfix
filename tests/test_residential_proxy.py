@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 
+from netfix import residential_proxy
 from netfix.residential_proxy import (
     BRIDGE_RECOVERY_CONFIRMATION,
     BRIDGE_RESTART_CONFIRMATION,
@@ -44,16 +45,19 @@ class TestResidentialProxy(unittest.TestCase):
         self.assertTrue(any("参数类型" in item for item in parsed["warnings"]))
 
     def test_parse_miyaip_like_colon_tuple_defaults_to_http_without_leaking_secret(self):
-        parsed = parse_proxy_input({"input": "direct.example-proxy.test:8001:demo-user:demo-password"})
+        parsed = parse_proxy_input({"input": "direct.miyaip.online:8001:demo-user:demo-password"})
         self.assertTrue(parsed["ok"])
         self.assertEqual(parsed["profile"]["protocol"], "http")
-        self.assertEqual(parsed["profile"]["host"], "direct.example-proxy.test")
+        self.assertEqual(parsed["profile"]["host"], "direct.miyaip.online")
         self.assertEqual(parsed["profile"]["port"], 8001)
         self.assertEqual(parsed["profile"]["username"], "demo-user")
         self.assertTrue(parsed["profile"]["password_set"])
         self.assertIn("demo-user:***@", parsed["redacted_url"])
         self.assertNotIn("demo-password", parsed["redacted_url"])
         self.assertTrue(any("先按 HTTP" in item for item in parsed["warnings"]))
+        self.assertEqual(parsed["deployment_decision"]["status"], "ready")
+        self.assertIn("部署到这台 Mac", parsed["deployment_decision"]["headline"])
+        self.assertEqual(parsed["deployment_decision"]["system_apply"]["status"], "bridge_required")
 
     def test_parse_colon_tuple_can_be_forced_to_socks5h(self):
         parsed = parse_proxy_input({"input": "direct.example-proxy.test:8001:demo-user:demo-password", "protocol": "socks5h"})
@@ -164,6 +168,16 @@ class TestResidentialProxy(unittest.TestCase):
         self.assertTrue(bundle["truncated"])
         self.assertIn("只预检前 5 条", " ".join(bundle["warnings"]))
 
+    def test_save_proxy_profile_invalid_input_never_returns_secret(self):
+        result = residential_proxy.save_proxy_profile({
+            "input": "proxy.example.com:not-a-port:user:super-secret-password",
+        })
+
+        self.assertFalse(result["ok"])
+        encoded = str(result)
+        self.assertNotIn("_secret", result)
+        self.assertNotIn("super-secret-password", encoded)
+
     def test_replace_proxy_profile_preserves_id_and_rotates_keychain_secret(self):
         existing = {
             "id": "p1",
@@ -214,7 +228,7 @@ class TestResidentialProxy(unittest.TestCase):
         self.assertTrue(decision["system_apply"]["requires_netfix_running"])
         self.assertEqual(decision["client_export"]["status"], "available")
         self.assertEqual(decision["monitor"]["status"], "available_after_save")
-        self.assertIn("保存到 Keychain", decision["next_steps"][0])
+        self.assertIn("保存到本机密码库", decision["next_steps"][0])
 
     def test_parse_authenticated_socks_returns_export_first_decision(self):
         parsed = parse_proxy_input({"input": "socks5://user:pass@proxy.example.com:1080"})
@@ -226,7 +240,7 @@ class TestResidentialProxy(unittest.TestCase):
         self.assertEqual(decision["system_apply"]["reason_code"], "authenticated_socks_bridge_required")
         self.assertTrue(decision["system_apply"]["requires_netfix_running"])
         self.assertEqual(decision["client_export"]["status"], "available")
-        self.assertIn("本地桥接", " ".join(decision["next_steps"]))
+        self.assertIn("本机转发", " ".join(decision["next_steps"]))
 
     def test_parse_unauthenticated_socks_returns_system_apply_decision(self):
         parsed = parse_proxy_input({"input": "socks5://proxy.example.com:1080"})
@@ -258,7 +272,8 @@ class TestResidentialProxy(unittest.TestCase):
         self.assertTrue(plan["requires_confirmation"])
         self.assertEqual(plan["status"], "dry_run")
         self.assertEqual(plan["deployment_decision"]["system_apply"]["status"], "bridge_required")
-        self.assertIn("Keychain", " ".join(plan["warnings"]))
+        self.assertTrue(any("IPv6" in step.get("label", "") for step in plan["steps"]))
+        self.assertIn("本机密码库", " ".join(plan["warnings"]))
 
     def test_apply_app_env_returns_redacted_environment_without_secret(self):
         parsed = parse_proxy_input({"input": "http://user:pass@proxy.example.com:8000"})
@@ -311,7 +326,7 @@ class TestResidentialProxy(unittest.TestCase):
 
         self.assertTrue(exported["ok"])
         self.assertIn("远程 DNS", warnings)
-        self.assertNotIn("Keychain", warnings)
+        self.assertNotIn("本机密码库", warnings)
         self.assertFalse(exported["package"]["secret_placeholder"])
         self.assertNotIn("<password>", str(exported["package"]))
 
@@ -327,6 +342,23 @@ class TestResidentialProxy(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["status"], "pending_confirmation")
         self.assertEqual(result["confirmation"], SYSTEM_APPLY_CONFIRMATION)
+
+    def test_choose_network_service_prefers_default_route_device(self):
+        services = {"stdout": "Wi-Fi\nEthernet\n"}
+        hardware = {"stdout": "Hardware Port: Wi-Fi\nDevice: en0\n\nHardware Port: Ethernet\nDevice: en7\n"}
+        route = Mock(returncode=0, stdout="interface: en7\n")
+        with patch("netfix.residential_proxy.sys.platform", "darwin"), \
+                patch("netfix.residential_proxy.subprocess.run", return_value=route), \
+                patch("netfix.residential_proxy._run_networksetup", side_effect=[services, hardware]):
+            self.assertEqual(residential_proxy.choose_network_service(), "Ethernet")
+
+    def test_choose_network_service_falls_back_when_default_route_unknown(self):
+        services = {"stdout": "Wi-Fi\nEthernet\n"}
+        route = Mock(returncode=1, stdout="")
+        with patch("netfix.residential_proxy.sys.platform", "darwin"), \
+                patch("netfix.residential_proxy.subprocess.run", return_value=route), \
+                patch("netfix.residential_proxy._run_networksetup", return_value=services):
+            self.assertEqual(residential_proxy.choose_network_service(), "Wi-Fi")
 
     def test_system_apply_uses_bridge_for_authenticated_http_proxy(self):
         parsed = parse_proxy_input({"input": "http://user:pass@proxy.example.com:8000"})
@@ -432,6 +464,51 @@ class TestResidentialProxy(unittest.TestCase):
         self.assertIn(["-setautoproxystate", "Wi-Fi", "off"], calls)
         self.assertIn(["-setwebproxy", "Wi-Fi", "proxy.example.com", "8000"], calls)
         self.assertIn(["-setsecurewebproxy", "Wi-Fi", "proxy.example.com", "8000"], calls)
+
+    def test_system_apply_disables_restorable_ipv6_and_records_state(self):
+        parsed = parse_proxy_input({"input": "http://proxy.example.com:8000"})
+        backup = {
+            "service": "Wi-Fi",
+            "web": {"enabled": False, "authenticated": False},
+            "secure": {"enabled": False, "authenticated": False},
+            "socks": {"enabled": False, "authenticated": False},
+            "auto_proxy_url": {"enabled": False},
+            "auto_discovery": {"enabled": False},
+            "ipv6": {"mode": "automatic", "enabled": True, "restorable": True},
+        }
+        with patch("netfix.residential_proxy.choose_network_service", return_value="Wi-Fi"), \
+                patch("netfix.residential_proxy._capture_system_proxy_backup", return_value=backup), \
+                patch("netfix.residential_proxy._run_networksetup", return_value={"ok": True}) as networksetup, \
+                patch("netfix.residential_proxy.validate_proxy_profile", return_value={"ok": True, "proxy_check": {"status": "ok"}}), \
+                patch("netfix.residential_proxy._write_apply_journal"):
+            result = apply_proxy_profile(
+                parsed["profile"],
+                mode="system",
+                confirmed=True,
+                confirmation=SYSTEM_APPLY_CONFIRMATION,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["ipv6"], {"disabled_during_apply": True, "backup_mode": "automatic"})
+        calls = [call.args[0] for call in networksetup.call_args_list]
+        self.assertIn(["-setv6off", "Wi-Fi"], calls)
+
+    def test_restore_system_proxy_backup_restores_ipv6_automatic(self):
+        backup = {
+            "service": "Wi-Fi",
+            "web": {"enabled": False, "authenticated": False},
+            "secure": {"enabled": False, "authenticated": False},
+            "socks": {"enabled": False, "authenticated": False},
+            "auto_proxy_url": {"enabled": False},
+            "auto_discovery": {"enabled": False},
+            "ipv6": {"mode": "automatic", "restorable": True},
+        }
+        with patch("netfix.residential_proxy._run_networksetup", return_value={"ok": True}) as networksetup:
+            result = residential_proxy._restore_system_proxy_backup(backup)
+
+        self.assertTrue(result["ok"])
+        calls = [call.args[0] for call in networksetup.call_args_list]
+        self.assertIn(["-setv6automatic", "Wi-Fi"], calls)
 
     def test_rollback_last_proxy_apply_requires_confirmation(self):
         with patch("netfix.residential_proxy._read_apply_journal", return_value={"last_apply": {"id": "j1", "profile_id": "p1", "network_service": "Wi-Fi"}}), \
@@ -922,8 +999,29 @@ class TestResidentialProxy(unittest.TestCase):
 
         self.assertEqual(report["exit_ip"], "198.51.100.20")
         self.assertEqual(report["dns_leak"]["status"], "warn")
-        self.assertEqual(report["ipv6_leak"]["status"], "unknown")
+        self.assertIn(report["ipv6_leak"]["status"], {"unknown", "ok", "warn"})
         self.assertIn("无法可靠判断", " ".join(report["warnings"]))
+
+    def test_ipv6_leak_assessment_checks_macos_ipv6_enabled_state(self):
+        parsed = parse_proxy_input({"input": "http://proxy.example.com:8000"})
+        getinfo = "IPv6: Automatic\nIPv6 IP address: 2001:db8::1\nIPv6 Router: 2001:db8::ff\n"
+        with patch("netfix.residential_proxy.sys.platform", "darwin"), \
+                patch("netfix.residential_proxy.choose_network_service", return_value="Wi-Fi"), \
+                patch("netfix.residential_proxy._run_networksetup", return_value={"stdout": getinfo}):
+            result = residential_proxy._ipv6_leak_assessment(parsed["profile"])
+        self.assertEqual(result["status"], "warn")
+        self.assertTrue(result["system_ipv6_enabled"])
+        self.assertEqual(result["network_service"], "Wi-Fi")
+
+    def test_ipv6_leak_assessment_marks_disabled_macos_ipv6_ok(self):
+        parsed = parse_proxy_input({"input": "http://proxy.example.com:8000"})
+        getinfo = "IPv6: Off\n"
+        with patch("netfix.residential_proxy.sys.platform", "darwin"), \
+                patch("netfix.residential_proxy.choose_network_service", return_value="Wi-Fi"), \
+                patch("netfix.residential_proxy._run_networksetup", return_value={"stdout": getinfo}):
+            result = residential_proxy._ipv6_leak_assessment(parsed["profile"])
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["system_ipv6_enabled"])
 
     def test_validate_proxy_tcp_timeout(self):
         parsed = parse_proxy_input({"input": "http://proxy.example.com:8000"})

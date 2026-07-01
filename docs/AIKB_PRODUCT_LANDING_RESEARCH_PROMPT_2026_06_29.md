@@ -3,7 +3,7 @@
 Copy this into AIKB / knowledge-base oriented dialogue.
 
 ```text
-你现在作为 AIKB 参与 `/Users/qibaishi/Desktop/网络` 的 Netfix 产品落地闭环审计。你的角色不是写代码冲进主仓库乱改，而是做“宏观产品判断 + 证据优先研究 + 可执行落地设计”，为后续 Codex/工程线程执行铺路。
+你现在作为 AIKB 参与 `<repo>` 的 Netfix 产品落地闭环审计。你的角色不是写代码冲进主仓库乱改，而是做“宏观产品判断 + 证据优先研究 + 可执行落地设计”，为后续 Codex/工程线程执行铺路。
 
 ## 核心目标
 
@@ -24,21 +24,21 @@ Copy this into AIKB / knowledge-base oriented dialogue.
 
 先做内部检索，不要凭记忆判断。至少阅读或检索这些文件：
 
-1. `/Users/qibaishi/Desktop/网络/README.md`
-2. `/Users/qibaishi/Desktop/网络/docs/PRODUCT_AUDIT_AND_ROADMAP_2026_06.md`
-3. `/Users/qibaishi/Desktop/网络/docs/PRODUCTIZATION_PLAN_2026_06_24.md`
-4. `/Users/qibaishi/Desktop/网络/docs/RELEASE_CANDIDATE_SPRINT_2026_06_24.md`
-5. `/Users/qibaishi/Desktop/网络/docs/NEXT_DIALOGUE_START_PROMPT_PRODUCT_COLD_AUDIT_2026_06_25.md`
-6. `/Users/qibaishi/Desktop/网络/netfix/residential_proxy.py`
-7. `/Users/qibaishi/Desktop/网络/netfix/proxy_bridge.py`
-8. `/Users/qibaishi/Desktop/网络/netfix/api.py`
-9. `/Users/qibaishi/Desktop/网络/gui/macos/Sources/Views/SettingsView.swift`
-10. `/Users/qibaishi/Desktop/网络/gui/macos/Sources/Views/DashboardView.swift`
-11. `/Users/qibaishi/Desktop/网络/gui/macos/Sources/Views/ProxySetupView.swift`
-12. `/Users/qibaishi/Desktop/网络/tests/test_residential_proxy.py`
-13. `/Users/qibaishi/Desktop/网络/tests/test_macos_proxy_export_ui.py`
-14. `/Users/qibaishi/Desktop/网络/scripts/release_readiness.py`
-15. `/Users/qibaishi/Desktop/网络/scripts/marketing_claims_check.py`
+1. `<repo>/README.md`
+2. `<repo>/docs/PRODUCT_AUDIT_AND_ROADMAP_2026_06.md`
+3. `<repo>/docs/PRODUCTIZATION_PLAN_2026_06_24.md`
+4. `<repo>/docs/RELEASE_CANDIDATE_SPRINT_2026_06_24.md`
+5. `<repo>/docs/NEXT_DIALOGUE_START_PROMPT_PRODUCT_COLD_AUDIT_2026_06_25.md`
+6. `<repo>/netfix/residential_proxy.py`
+7. `<repo>/netfix/proxy_bridge.py`
+8. `<repo>/netfix/api.py`
+9. `<repo>/gui/macos/Sources/Views/SettingsView.swift`
+10. `<repo>/gui/macos/Sources/Views/DashboardView.swift`
+11. `<repo>/gui/macos/Sources/Views/ProxySetupView.swift`
+12. `<repo>/tests/test_residential_proxy.py`
+13. `<repo>/tests/test_macos_proxy_export_ui.py`
+14. `<repo>/scripts/release_readiness.py`
+15. `<repo>/scripts/marketing_claims_check.py`
 
 内部检索必须回答：
 - 当前已支持哪些代理输入格式？

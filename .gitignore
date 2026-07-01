@@ -6,6 +6,9 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+Netfix-*.dmg
+Netfix-*.zip
+open-source-export/
 
 # netfix runtime
 ~/.netfix/

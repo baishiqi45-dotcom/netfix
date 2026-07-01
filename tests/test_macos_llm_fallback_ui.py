@@ -82,7 +82,7 @@ def test_macos_ai_settings_exposes_llm_budget_controls():
     assert "persistUsageLedger: llmBudgetPersistLedger" in view
     assert "persistUsageLedger: Bool" in client
     assert '"persist_usage_ledger": persistUsageLedger' in client
-    assert "跨重启保留本地预算计数" in view
+    assert "记住我的使用次数" in view
     assert "remainingRequests" in models
     assert "remainingImageRequests" in models
     assert "budgetEnabled: llmBudgetEnabled" in view

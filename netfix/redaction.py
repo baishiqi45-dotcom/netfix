@@ -38,6 +38,11 @@ IP_RE = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b", re.IGNORECASE)
 LONG_TOKEN_RE = re.compile(r"\b[A-Za-z0-9_\-]{24,}\b")
+SECRET_WORD_RE = re.compile(
+    r"\b[A-Za-z0-9_.:\-]*(?:password|passwd|secret|token|api[_-]?key)[A-Za-z0-9_.:\-]*\b",
+    re.IGNORECASE,
+)
+NON_SECRET_TOKEN_WORD_RE = re.compile(r"^(?:max_.*tokens?|.*tokens?_field|.*completion_tokens?)$", re.IGNORECASE)
 
 
 def _hash(value: str, length: int = 12) -> str:
@@ -98,6 +103,14 @@ def _redact_string(value: str, audit: Dict[str, int]) -> str:
     out = URL_RE.sub(lambda m: _redact_url(m.group(0), audit), value)
     if out == value:
         out = _redact_url(value, audit)
+    def _secret_word(match: re.Match[str]) -> str:
+        word = match.group(0)
+        if NON_SECRET_TOKEN_WORD_RE.match(word):
+            return word
+        _audit_inc(audit, "secret")
+        return "[redacted_secret]"
+
+    out = SECRET_WORD_RE.sub(_secret_word, out)
     out = IP_RE.sub(lambda m: _redact_ip(m, audit), out)
     if EMAIL_RE.search(out):
         _audit_inc(audit, "email", len(EMAIL_RE.findall(out)))

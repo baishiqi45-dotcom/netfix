@@ -1,4 +1,5 @@
 import json
+import stat
 import tempfile
 import threading
 import time
@@ -140,6 +141,23 @@ class TestAPI(unittest.TestCase):
         self.assertFalse(data["ok"])
         self.assertIn("token", data["error"])
 
+    def test_api_token_file_is_private_and_chmod_failure_is_fatal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token_file = Path(tmp) / "api-token.txt"
+            with patch("netfix.api._API_TOKEN_FILE", token_file), \
+                    patch("netfix.api._API_TOKEN", "test-token"):
+                written = api._write_api_token_file()
+            self.assertEqual(written, token_file)
+            self.assertEqual(token_file.read_text(encoding="utf-8"), "test-token\n")
+            self.assertEqual(stat.S_IMODE(token_file.stat().st_mode), 0o600)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            token_file = Path(tmp) / "api-token.txt"
+            with patch("netfix.api._API_TOKEN_FILE", token_file), \
+                    patch("netfix.api.os.chmod", side_effect=OSError("denied")):
+                with self.assertRaises(RuntimeError):
+                    api._write_api_token_file()
+
     def test_capabilities(self):
         data = self._get("/capabilities")
         self.assertIn("commands", data)
@@ -242,7 +260,7 @@ class TestAPI(unittest.TestCase):
             "provider": "deepseek",
             "api_key_account": "deepseek",
             "key_name": "DS_API_KEY",
-            "env_path": "/Users/qibaishi/Desktop/mess/.env",
+            "env_path": "/Users/alice/Desktop/mess/.env",
             "model": "deepseek-v4-pro",
             "llm_enabled": True,
             "api_key_set": True,
@@ -489,6 +507,42 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(kwargs["env"], {"ok": True})
         run.assert_called_once_with(["codex", "--json", "--timeout", "9"], timeout=9)
 
+    def test_confirmed_fix_endpoint_explains_verification_failure(self):
+        failed_result = {
+            "ok": False,
+            "status": "failed",
+            "fix_id": "disable-ipv6",
+            "verification_failed": True,
+            "verify_diagnostic": {
+                "name": "ipv6_leak",
+                "display_name": "IPv6 泄漏检查",
+                "status": "warn",
+                "details": {
+                    "reason": "proxy active and IPv6 default route present; no public IPv6 observed",
+                },
+            },
+        }
+        with patch("netfix.api.detect_environment", return_value={"ok": True}), \
+                patch("netfix.api.get_core", return_value=None), \
+                patch("netfix.api.FixEngine") as engine_cls:
+            engine = engine_cls.return_value
+            engine.execute.return_value = failed_result
+            data = self._post_json_error(
+                "/fixes/execute",
+                {
+                    "fix_id": "disable-ipv6",
+                    "confirmed": True,
+                    "confirmation": api.SYSTEM_FIX_CONFIRMATION,
+                    "timeout": 9,
+                },
+                400,
+            )
+
+        self.assertEqual(data["reason_code"], "fix_verification_failed")
+        self.assertIn("修复命令已执行", data["error"])
+        self.assertIn("IPv6 泄漏检查", data["error"])
+        self.assertNotEqual(data["error"], "failed")
+
     def test_run_allows_plain_rollback(self):
         with patch("netfix.api.run_cli", return_value={"ok": True, "result": {"diagnostics": [], "root_causes": [], "fixes": [], "manual_steps": []}}) as run:
             data = self._post_json("/run", {"command": ["rollback"], "timeout": 5})
@@ -572,17 +626,38 @@ class TestAPI(unittest.TestCase):
         self.assertNotIn("pass@proxy", encoded)
 
     def test_proxy_parse_colon_tuple_defaults_to_http_without_returning_secret(self):
-        data = self._post_json("/proxy/parse", {"input": "direct.example-proxy.test:8001:demo-user:demo-password"})
+        data = self._post_json("/proxy/parse", {"input": "direct.miyaip.online:8001:demo-user:demo-password"})
 
         self.assertTrue(data["ok"])
         self.assertEqual(data["profile"]["protocol"], "http")
-        self.assertEqual(data["profile"]["host"], "direct.example-proxy.test")
+        self.assertEqual(data["profile"]["host"], "direct.miyaip.online")
         self.assertEqual(data["profile"]["port"], 8001)
         self.assertEqual(data["profile"]["username"], "demo-user")
         self.assertTrue(data["profile"]["password_set"])
+        self.assertEqual(data["deployment_decision"]["status"], "ready")
+        self.assertEqual(data["deployment_decision"]["system_apply"]["status"], "bridge_required")
         encoded = json.dumps(data, ensure_ascii=False)
         self.assertIn("demo-user:***@", encoded)
+        self.assertIn("部署到这台 Mac", encoded)
         self.assertIn("先按 HTTP", encoded)
+        self.assertNotIn("demo-password", encoded)
+        self.assertNotIn("_secret", encoded)
+
+    def test_proxy_import_preview_accepts_single_host_port_user_password_line(self):
+        data = self._post_json(
+            "/proxy/import-preview",
+            {"input": "direct.miyaip.online:8001:demo-user:demo-password"},
+        )
+
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["schema_version"], "netfix_proxy_import_preview.v1")
+        self.assertEqual(data["summary"]["valid_count"], 1)
+        self.assertEqual(data["summary"]["ready_count"], 1)
+        self.assertEqual(data["recommendation"]["line_number"], 1)
+        encoded = json.dumps(data, ensure_ascii=False)
+        self.assertIn("direct.miyaip.online", encoded)
+        self.assertIn("demo-user:***@", encoded)
+        self.assertIn("部署到这台 Mac", encoded)
         self.assertNotIn("demo-password", encoded)
         self.assertNotIn("_secret", encoded)
 
@@ -787,6 +862,23 @@ class TestAPI(unittest.TestCase):
         self.assertFalse(data["ok"])
         save.assert_called_once()
         start.assert_not_called()
+
+    def test_proxy_profile_save_failure_strips_internal_secret_payload(self):
+        failure = {
+            "ok": False,
+            "error": "bad proxy",
+            "_secret": {"password": "super-secret"},
+            "errors": ["格式不完整"],
+        }
+        with patch("netfix.api.residential_proxy.save_proxy_profile", return_value=failure):
+            data = self._post_json_error("/proxy/profiles", {
+                "input": "proxy.example.com:8000:user:super-secret",
+            }, 400)
+
+        encoded = json.dumps(data, ensure_ascii=False)
+        self.assertFalse(data["ok"])
+        self.assertNotIn("_secret", data)
+        self.assertNotIn("super-secret", encoded)
 
     def test_proxy_profile_replace_can_restart_matching_monitor_without_system_apply(self):
         replaced = {
@@ -1240,6 +1332,62 @@ class TestAPI(unittest.TestCase):
         self.assertFalse(data["events_exists"])
         self.assertEqual(data["latest_report_summary"], {})
         self.assertEqual(data["events"], [])
+
+    def test_support_bundle_requires_token_and_redacts_report_and_events(self):
+        missing_token = self._get_error("/support/bundle", 403)
+        self.assertFalse(missing_token["ok"])
+
+        report = {
+            "meta": {"timestamp": "2026-07-01T00:00:00+00:00", "hostname": "author-mac"},
+            "environment": {
+                "system_proxy": "http://demo-user:demo-password@proxy.example.com:8000",
+                "active_profile": {"name": "work", "host": "proxy.example.com", "password": "demo-password"},
+                "profiles": [{"name": "work", "host": "proxy.example.com"}],
+            },
+            "diagnostics": [
+                {"name": "proxy", "error": "failed with sk-live-secret-token-1234567890"},
+            ],
+            "root_causes": [{"id": "proxy-auth", "description": "代理认证失败 demo-password"}],
+            "explanation": {"headline": "代理认证失败"},
+            "fixes": [{"id": "replace_proxy_credentials", "tier": 2}],
+        }
+        events = {
+            "events": [
+                {
+                    "timestamp": "2026-07-01T00:01:00+00:00",
+                    "headline": "重试失败 demo-password",
+                    "root_cause": "bad API key sk-live-secret-token-1234567890",
+                }
+            ]
+        }
+        with patch("netfix.api._load_latest_report", return_value=(200, report)), \
+                patch("netfix.api.logs.load_events", return_value=events), \
+                patch("netfix.api.logs.load_logs", return_value={
+                    "ok": True,
+                    "latest_report_exists": True,
+                    "events_exists": True,
+                    "latest_report_path": "/Users/someone/.netfix/last_report.json",
+                    "events_path": "/Users/someone/.netfix/events.jsonl",
+                    "journal_dir": "/Users/someone/.netfix",
+                    "privacy": {"log_retention_days": 7},
+                }), \
+                patch("netfix.api._environment_summary", return_value={
+                    "ok": True,
+                    "system_proxy": "socks5://demo-user:demo-password@proxy.example.com:1080",
+                }):
+            data = self._get("/support/bundle")
+
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["schema_version"], "netfix_support_bundle.v1")
+        self.assertTrue(data["latest_report"]["exists"])
+        self.assertIn("redacted_report_hash", data["latest_report"])
+        self.assertEqual(data["events"]["count"], 1)
+        encoded = json.dumps(data, ensure_ascii=False)
+        self.assertNotIn("demo-password", encoded)
+        self.assertNotIn("sk-live-secret-token", encoded)
+        self.assertNotIn("/Users/someone", encoded)
+        self.assertIn("support_text", data)
+        self.assertIn("代理认证失败", data["support_text"])
 
     def test_logs_prune_removes_expired_events(self):
         with tempfile.TemporaryDirectory() as tmp:

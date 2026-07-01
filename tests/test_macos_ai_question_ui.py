@@ -13,12 +13,16 @@ def test_macos_dashboard_has_consent_gated_ai_question_sheet_with_image_picker()
     models = MODELS.read_text(encoding="utf-8")
 
     assert "AIQuestionSheet" in source
-    assert "看不懂诊断？让 AI 解释一下" in source
+    assert "看不懂结果？让 AI 解释一下" in source
     assert "aiAssistantSection" not in source
     assert ".buttonStyle(.borderless)" in source
     assert "下一步怎么处理？" in source
     assert "怎么看出来的？" in source
     assert "是不是代理没生效？" in source
+    assert "这个代理能用吗？" in source
+    assert "粘贴格式对吗？" in source
+    assert "为什么 SOCKS5 失败？" in source
+    assert "AIQuestionContext" in source
     assert "为什么是这个根因？" not in source
     assert "NSOpenPanel()" in source
     assert "allowedContentTypes" in source
@@ -48,10 +52,12 @@ def test_macos_dashboard_surfaces_proxy_deployment_without_ai_api_requirement():
     source = DASHBOARD.read_text(encoding="utf-8")
 
     assert "proxyDeploySection" in source
-    assert 'Label("让这台 Mac 用上你的代理", systemImage: "point.3.connected.trianglepath.dotted")' in source
-    assert "AI 可不填" in source
-    assert "复制整行，不要只复制出口 IP" in source
-    assert 'Label("开始部署代理", systemImage: "square.and.arrow.down")' in source
+    assert 'Label("粘贴你已有的代理参数", systemImage: "point.3.connected.trianglepath.dotted")' in source
+    assert "不需要 API Key 也能用" in source
+    assert "Netfix 不卖 IP，也不能只靠出口 IP 部署" in source
+    assert 'Label("去粘贴并部署", systemImage: "square.and.arrow.down")' in source
+    assert 'Label("问 AI", systemImage: "sparkles")' in source
+    assert "aiQuestionContext = .proxy" in source
     assert 'Button("我该复制什么？")' not in source
     assert "openProxySettings()" in source
 
@@ -87,7 +93,7 @@ def test_macos_privacy_settings_can_disable_persisted_proxy_identity_reports():
     api_client = API_CLIENT.read_text(encoding="utf-8")
 
     assert "@State private var persistProxyIdentityReport = false" in settings
-    assert 'Toggle("保存完整代理身份报告", isOn: $persistProxyIdentityReport)' in settings
+    assert 'Toggle("保存完整出口检测报告", isOn: $persistProxyIdentityReport)' in settings
     assert "persistProxyIdentityReport = privacy.persistProxyIdentityReport" in settings
     assert "persistProxyIdentityReport: persistProxyIdentityReport" in settings
     assert "let persistProxyIdentityReport: Bool" in models

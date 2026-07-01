@@ -103,12 +103,46 @@ actor APIClient {
               let dict = object as? [String: Any] else {
             return nil
         }
-        for key in ["error", "reason_code", "status", "message"] {
-            if let value = dict[key] as? String, !value.isEmpty {
-                return value
+        let errorValue = (dict["error"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let value = errorValue, !value.isEmpty,
+           !["failed", "fail", "error"].contains(value.lowercased()) {
+            return value
+        }
+        if let value = dict["message"] as? String, !value.isEmpty {
+            return value
+        }
+        if let values = dict["errors"] as? [String], !values.isEmpty {
+            return values.joined(separator: "；")
+        }
+        if let value = dict["reason_code"] as? String, !value.isEmpty {
+            return friendlyReasonCode(value)
+        }
+        if let value = errorValue, !value.isEmpty {
+            if ["failed", "fail", "error"].contains(value.lowercased()) {
+                return "操作没有完成。请点“查看日志”，把最近一次失败记录拿来排查。"
             }
+            return value
+        }
+        if let value = dict["status"] as? String, !value.isEmpty {
+            if ["failed", "fail", "partial", "rollback_failed", "recovery_failed"].contains(value.lowercased()) {
+                return "操作没有完成。请点“查看日志”，把最近一次失败记录拿来排查。"
+            }
+            return value
         }
         return nil
+    }
+
+    private static func friendlyReasonCode(_ code: String) -> String {
+        switch code {
+        case "fix_verification_failed":
+            return "修复命令已执行，但复查还没通过。请重新诊断；如果同一项仍然异常，按日志里的建议继续处理。"
+        case "fix_command_failed":
+            return "修复命令没有跑完。请点“查看日志”看最近一次失败原因。"
+        case "fix_cancelled":
+            return "你取消了这次修复，系统设置没有改变。"
+        default:
+            return code
+        }
     }
 
     private func sessionToken() async throws -> String {
@@ -349,7 +383,7 @@ actor APIClient {
         body["monitor_interval"] = 60
         body["timeout"] = 10
         body["target_profile"] = targetProfile
-        return try await post(
+        return try await postDecodingClientError(
             path: "proxy/profiles",
             body: body,
             timeout: 20
@@ -474,18 +508,6 @@ actor APIClient {
         let response: APIRunResponse = try await post(
             path: "run",
             body: ["command": ["services", "--group", group], "timeout": timeout],
-            timeout: timeout
-        )
-        if let report = response.result {
-            return report
-        }
-        throw APIError.runFailed(response.error ?? "未知错误")
-    }
-
-    func fix(timeout: Int = 120) async throws -> NetfixReport {
-        let response: APIRunResponse = try await post(
-            path: "run",
-            body: ["command": ["fix", "--all", "--yes", "--report"], "timeout": timeout],
             timeout: timeout
         )
         if let report = response.result {

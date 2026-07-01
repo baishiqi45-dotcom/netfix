@@ -21,7 +21,6 @@ def default_env_paths() -> list[Path]:
     if explicit:
         paths.append(Path(explicit).expanduser())
     paths.append(Path.home() / "Desktop/mess/.env")
-    paths.append(Path("/Users/qibaishi/Desktop/mess/.env"))
     deduped: list[Path] = []
     seen = set()
     for path in paths:

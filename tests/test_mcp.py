@@ -1,10 +1,14 @@
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from netfix import mcp_server
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestMCPServer(unittest.TestCase):
@@ -90,6 +94,26 @@ class TestMCPServer(unittest.TestCase):
             annotations = tool.get("annotations", {})
             self.assertEqual(annotations.get("readOnlyHint"), False, name)
             self.assertEqual(annotations.get("destructiveHint"), True, name)
+
+    def test_mcp_script_bootstraps_repo_root_when_started_from_other_cwd(self):
+        script = ROOT / "netfix" / "mcp_server.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = subprocess.Popen(
+                [sys.executable, str(script)],
+                cwd=tmp,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            stdout, stderr = proc.communicate(
+                input=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}) + "\n",
+                timeout=30,
+            )
+
+        self.assertEqual(proc.returncode, 0, f"stderr: {stderr}")
+        response = json.loads(stdout.splitlines()[0])
+        self.assertEqual(response["result"]["serverInfo"]["name"], "netfix")
 
     def test_mutating_agent_tools_route_through_fix_engine_cli(self):
         with patch("netfix.mcp_server.run_cli", return_value={"ok": True}) as mock_run, \

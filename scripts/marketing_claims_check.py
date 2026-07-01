@@ -33,8 +33,11 @@ EXCLUDED_PARTS = {
     "cases",
     "tests",
     "fixtures",
-    "iphone-v2rayn-package-2026-06-14",
 }
+EXCLUDED_PART_PATTERNS: Sequence[re.Pattern[str]] = (
+    re.compile(r".*v2rayn-package.*", re.I),
+    re.compile(r".*proxy-package.*", re.I),
+)
 
 RESIDENTIAL_PROXY_PATTERNS: Sequence[re.Pattern[str]] = (
     re.compile(r"\bclean\s+residential(?:\s+ip)?\b", re.I),
@@ -90,7 +93,12 @@ class Finding:
 
 
 def _is_excluded(path: Path) -> bool:
-    return any(part in EXCLUDED_PARTS or part.endswith(".zip") for part in path.parts)
+    return any(
+        part in EXCLUDED_PARTS
+        or part.endswith(".zip")
+        or any(pattern.match(part) for pattern in EXCLUDED_PART_PATTERNS)
+        for part in path.parts
+    )
 
 
 def _is_text_surface(path: Path) -> bool:

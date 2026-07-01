@@ -32,6 +32,6 @@ def test_readme_documents_mcp_domestic_llm_image_gate():
 def test_readme_documents_authenticated_socks_bridge_support():
     text = README.read_text(encoding="utf-8")
 
-    assert "认证 HTTP/HTTPS/SOCKS 上游通过本地 127.0.0.1 桥接应用" in text
-    assert "认证 SOCKS 通过本地桥接系统应用" in text
+    assert "有账号密码的 HTTP/HTTPS/SOCKS 代理会由 Netfix 本机转发" in text
+    assert "部署到这台 Mac" in text
     assert "认证 SOCKS 不承诺一键系统应用" not in text

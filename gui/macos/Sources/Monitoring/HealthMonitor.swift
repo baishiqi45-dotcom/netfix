@@ -123,9 +123,12 @@ final class HealthMonitor: ObservableObject {
         if let last = lastAutoFix, Date().timeIntervalSince(last) < autoFixCooldown {
             return
         }
-        // 只有当报告中存在低风险可自动修复项时才执行。
-        let hasTier1 = report.fixes.contains { ($0.tier ?? 3) == 1 }
-        guard hasTier1 else { return }
+        // 只有报告解释层明确给出低风险、无需确认的 action 时才执行。
+        let allActions = [report.explanation?.primaryAction].compactMap { $0 } + (report.explanation?.actions ?? [])
+        let autoFixAction = allActions.first { action in
+            action.tier == 1 && !action.needsConfirm
+        }
+        guard let action = autoFixAction else { return }
 
         autoFixInProgress = true
         defer {
@@ -133,13 +136,13 @@ final class HealthMonitor: ObservableObject {
             lastAutoFix = Date()
         }
         do {
-            let fixed = try await client.fix()
+            let fixed = try await client.executeFix(fixId: action.id)
             lastReport = fixed
             let fixedStatus = fixed.overallStatus
             let event = HealthEvent(
                 timestamp: Date(),
                 status: fixedStatus,
-                headline: "已自动修复：\(fixed.explanation?.headline ?? fixed.summaryHeadline)",
+                headline: "已自动处理：\(action.label)",
                 rootCause: fixed.firstRootCause
             )
             events.append(event)

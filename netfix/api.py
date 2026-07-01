@@ -5,6 +5,7 @@ import json
 import os
 import secrets
 import signal
+import stat
 import sys
 import threading
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ from netfix import deepseek_sidecar, keychain, llm_budget, llm_explain, llm_prov
 from netfix.constants import JOURNAL_DIR, REPO_ROOT, RULES_DIR, VERSION
 from netfix.detect import detect_environment, get_core
 from netfix.fix_engine import FixEngine
+from netfix.redaction import redact_report, redact_text
 from netfix.safety import FixTier
 from netfix.service_runner import cancel_job, get_job, run_cli, start_job
 from netfix.utils import ensure_private_dir
@@ -52,8 +54,11 @@ def _write_api_token_file() -> Path:
         handle.write(_API_TOKEN + "\n")
     try:
         os.chmod(_API_TOKEN_FILE, 0o600)
-    except OSError:
-        pass
+    except OSError as exc:
+        raise RuntimeError("failed to secure local API token file permissions") from exc
+    mode = stat.S_IMODE(os.stat(_API_TOKEN_FILE).st_mode)
+    if mode != 0o600:
+        raise RuntimeError(f"local API token file has unsafe permissions: {oct(mode)}")
     return _API_TOKEN_FILE
 
 
@@ -550,6 +555,79 @@ def _load_latest_report() -> Tuple[int, Any]:
         return 500, {"ok": False, "error": f"failed to read report: {exc}"}
 
 
+def _support_bundle() -> Dict[str, Any]:
+    """Return a redacted local support bundle for user-approved sharing."""
+    generated_at = _utc_now()
+    status, report = _load_latest_report()
+    latest_report: Dict[str, Any] = {"exists": False, "status": status}
+    headline = ""
+    if status == 200 and isinstance(report, dict):
+        redacted = redact_report(report, level="strict")
+        redacted_report = redacted.get("redacted_report") if isinstance(redacted.get("redacted_report"), dict) else {}
+        explanation = redacted_report.get("explanation") if isinstance(redacted_report.get("explanation"), dict) else {}
+        headline = str(explanation.get("headline") or "")
+        latest_report = {
+            "exists": True,
+            "status": 200,
+            "timestamp": (redacted_report.get("meta") or {}).get("timestamp") if isinstance(redacted_report.get("meta"), dict) else None,
+            "headline": headline,
+            "root_causes": redacted_report.get("root_causes", [])[:5] if isinstance(redacted_report.get("root_causes"), list) else [],
+            "fixes": redacted_report.get("fixes", [])[:5] if isinstance(redacted_report.get("fixes"), list) else [],
+            "redacted_report_hash": redacted.get("redacted_report_hash"),
+            "redaction_audit": redacted.get("redaction_audit") or {},
+        }
+    elif isinstance(report, dict):
+        latest_report = {"exists": False, "status": status, "error": redact_text(str(report.get("error") or "no latest report"))}
+
+    events_payload = logs.load_events(limit=30, hours=24 * 7)
+    events = events_payload.get("events") if isinstance(events_payload.get("events"), list) else []
+    redacted_events = redact_report({"events": events}, level="strict")
+    safe_events = (redacted_events.get("redacted_report") or {}).get("events", [])
+
+    log_meta = logs.load_logs()
+    privacy = log_meta.get("privacy") if isinstance(log_meta.get("privacy"), dict) else settings.get_privacy_settings()
+    environment = redact_report({"environment": _environment_summary()}, level="strict").get("redacted_report", {}).get("environment", {})
+
+    next_steps: List[str] = []
+    if not latest_report.get("exists"):
+        next_steps.append("先在 Netfix App 里点一键诊断，再复制支持包。")
+    else:
+        next_steps.append("把 support_text 或整份 JSON 发给技术人员；不要再附原始代理密码、API Key 或未脱敏截图。")
+    next_steps.append("如果问题和代理有关，优先在代理设置里重新粘贴供应商给的完整 host/port/user/password。")
+
+    support_text_lines = [
+        "Netfix support bundle",
+        f"generated_at: {generated_at}",
+        f"version: {VERSION}",
+        f"latest_report: {'yes' if latest_report.get('exists') else 'no'}",
+    ]
+    if headline:
+        support_text_lines.append(f"headline: {redact_text(headline)}")
+    support_text_lines.append(f"events_count: {len(safe_events)}")
+    support_text_lines.append(f"redacted_report_hash: {latest_report.get('redacted_report_hash') or '-'}")
+
+    return {
+        "ok": True,
+        "schema_version": "netfix_support_bundle.v1",
+        "generated_at": generated_at,
+        "version": VERSION,
+        "latest_report": latest_report,
+        "events": {
+            "count": len(safe_events),
+            "items": safe_events,
+            "error": redact_text(str(events_payload.get("error") or "")) if events_payload.get("error") else None,
+        },
+        "logs": {
+            "latest_report_exists": bool(log_meta.get("latest_report_exists")),
+            "events_exists": bool(log_meta.get("events_exists")),
+            "privacy": privacy,
+        },
+        "environment": environment,
+        "next_steps": next_steps,
+        "support_text": "\n".join(support_text_lines),
+    }
+
+
 def _proxy_identity_persistence_summary(identity_report: Dict[str, Any]) -> Dict[str, Any]:
     """Return a low-detail saved identity summary without raw exit IP."""
     identity = identity_report.get("identity") if isinstance(identity_report.get("identity"), dict) else {}
@@ -737,6 +815,83 @@ def _run_fresh_codex_report(timeout: int) -> Dict[str, Any]:
     return run_cli(["codex", "--json", "--timeout", str(timeout)], timeout=timeout)
 
 
+def _strip_internal_secrets(value: Any) -> Any:
+    """Drop internal secret carriers before returning local API payloads."""
+    if isinstance(value, dict):
+        return {
+            key: _strip_internal_secrets(item)
+            for key, item in value.items()
+            if key != "_secret"
+        }
+    if isinstance(value, list):
+        return [_strip_internal_secrets(item) for item in value]
+    return value
+
+
+def _friendly_diagnostic_status(status: Any) -> str:
+    value = str(status or "").strip().lower()
+    return {
+        "ok": "正常",
+        "warn": "仍有风险",
+        "fail": "失败",
+        "failed": "失败",
+        "timeout": "超时",
+    }.get(value, value or "未通过")
+
+
+def _first_failed_command_reason(result: Dict[str, Any]) -> str:
+    for item in result.get("executed", []) or []:
+        if not isinstance(item, dict) or item.get("ok", True):
+            continue
+        text = str(item.get("stderr") or item.get("stdout") or item.get("reason") or "").strip()
+        lower = text.lower()
+        if "用户取消" in text or "user canceled" in lower or "[-128]" in lower:
+            return "你取消了 macOS 管理员授权，系统网络设置没有改变。"
+        if "no such file" in lower or "not found" in lower:
+            return "修复脚本没有找到。请重新安装 Netfix 后再试。"
+        if "permission" in lower or "not permitted" in lower or "privilege" in lower or "authorization" in lower:
+            return "macOS 没有授予 Netfix 修改网络设置的权限。请重新点处理，并在系统弹窗里授权。"
+        if text:
+            return f"系统命令返回错误：{text[:180]}"
+    return ""
+
+
+def _with_user_facing_fix_error(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure failed fix responses never surface only status='failed' to the app."""
+    if result.get("ok", True) or result.get("error"):
+        return result
+
+    if result.get("verification_failed"):
+        diagnostic = result.get("verify_diagnostic") if isinstance(result.get("verify_diagnostic"), dict) else {}
+        name = diagnostic.get("display_name") or diagnostic.get("name") or "复查项"
+        status = _friendly_diagnostic_status(diagnostic.get("status"))
+        details = diagnostic.get("details") if isinstance(diagnostic.get("details"), dict) else {}
+        reason = details.get("reason") or details.get("error") or diagnostic.get("error") or ""
+        message = f"修复命令已执行，但复查还没通过：{name} {status}。"
+        if reason:
+            message += f" 看到的情况：{str(reason)[:180]}"
+        message += " 请重新诊断；如果仍然提示同一项，说明系统或路由器侧还保留了这条网络路径，需要继续按建议处理。"
+        result["error"] = message
+        result["reason_code"] = "fix_verification_failed"
+        return result
+
+    status = str(result.get("status") or "").lower()
+    command_reason = _first_failed_command_reason(result)
+    if status == "cancelled" or "取消" in command_reason:
+        result["error"] = command_reason or "你取消了这次修复，系统设置没有改变。"
+        result["reason_code"] = "fix_cancelled"
+        return result
+
+    if command_reason:
+        result["error"] = f"修复没有跑完：{command_reason}"
+        result["reason_code"] = "fix_command_failed"
+        return result
+
+    result["error"] = "修复没有完成，但后端没有给出明确原因。请点“查看日志”，把最近一次修复日志拿来排查。"
+    result["reason_code"] = f"fix_{status}" if status else "fix_failed"
+    return result
+
+
 def _execute_confirmed_fix(body: Dict[str, Any]) -> Tuple[int, Any]:
     fix_id = str(body.get("fix_id") or body.get("issue") or "").strip()
     if not fix_id:
@@ -774,7 +929,7 @@ def _execute_confirmed_fix(body: Dict[str, Any]) -> Tuple[int, Any]:
     if body.get("dry_run"):
         return 200, result
     if not result.get("ok", True):
-        return 400, result
+        return 400, _with_user_facing_fix_error(result)
 
     report = _run_fresh_codex_report(timeout)
     if not report.get("ok"):
@@ -898,6 +1053,9 @@ class APIRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/logs":
             return 200, logs.load_logs()
+
+        if path == "/support/bundle":
+            return 200, _support_bundle()
 
         if path == "/environment":
             return 200, _environment_summary()
@@ -1169,6 +1327,7 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                     if not isinstance(result.get("warnings"), list):
                         result["warnings"] = []
                     result["warnings"].append("profile_saved_but_monitor_start_failed")
+            result = _strip_internal_secrets(result)
             return (200 if result.get("ok") else 400), result
 
         if path == "/proxy/monitor/start":

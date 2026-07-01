@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-labelledby="title desc">
+  <title id="title">Netfix 用户路径</title>
+  <desc id="desc">五步路径：诊断、粘贴、预检、部署、维护。</desc>
+  <rect width="1280" height="360" rx="28" fill="#f8fafc"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,PingFang SC,Microsoft YaHei,sans-serif">
+    <text x="56" y="70" fill="#0f172a" font-size="32" font-weight="850">从“连不上”到“知道怎么处理”</text>
+    <text x="56" y="108" fill="#475569" font-size="18">Netfix 优化的是普通用户路径：少敲命令，少看黑话，所有改动都能回退。</text>
+  </g>
+  <g transform="translate(64 168)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,PingFang SC,Microsoft YaHei,sans-serif">
+    <g>
+      <rect width="180" height="104" rx="18" fill="#0f766e"/>
+      <text x="22" y="39" fill="#ecfeff" font-size="20" font-weight="850">1. 诊断</text>
+      <text x="22" y="70" fill="#ccfbf1" font-size="14">DNS / 代理 / IPv6 / TLS</text>
+    </g>
+    <path d="M196 52 H244" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M234 42 L248 52 L234 62" fill="none" stroke="#94a3b8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(264)">
+      <rect width="180" height="104" rx="18" fill="#ffffff" stroke="#cbd5e1"/>
+      <text x="22" y="39" fill="#0f172a" font-size="20" font-weight="850">2. 粘贴</text>
+      <text x="22" y="70" fill="#475569" font-size="14">host:port:user:pass</text>
+    </g>
+    <path d="M460 52 H508" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M498 42 L512 52 L498 62" fill="none" stroke="#94a3b8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(528)">
+      <rect width="180" height="104" rx="18" fill="#ffffff" stroke="#cbd5e1"/>
+      <text x="22" y="39" fill="#0f172a" font-size="20" font-weight="850">3. 预检</text>
+      <text x="22" y="70" fill="#475569" font-size="14">可达性 / 出口 / 泄漏</text>
+    </g>
+    <path d="M724 52 H772" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M762 42 L776 52 L762 62" fill="none" stroke="#94a3b8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(792)">
+      <rect width="180" height="104" rx="18" fill="#111827"/>
+      <text x="22" y="39" fill="#f8fafc" font-size="20" font-weight="850">4. 部署</text>
+      <text x="22" y="70" fill="#cbd5e1" font-size="14">确认 / 备份 / 应用</text>
+    </g>
+    <path d="M988 52 H1036" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M1026 42 L1040 52 L1026 62" fill="none" stroke="#94a3b8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(1056)">
+      <rect width="180" height="104" rx="18" fill="#dcfce7" stroke="#86efac"/>
+      <text x="22" y="39" fill="#14532d" font-size="20" font-weight="850">5. 维护</text>
+      <text x="22" y="70" fill="#166534" font-size="14">监控 / 解释 / 恢复</text>
+    </g>
+  </g>
+</svg>

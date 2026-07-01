@@ -14,12 +14,12 @@ struct WelcomeView: View {
                 .foregroundStyle(.blue)
 
             VStack(spacing: 8) {
-                Text("AI 开发工具断线急救")
+                Text("网络出问题了？我帮你看看")
                     .font(.title2)
                     .fontWeight(.semibold)
                     .multilineTextAlignment(.center)
 
-                Text("Netfix 会检查 Wi-Fi、DNS、代理和目标服务，\n先告诉你哪里坏了，再给出可以直接点的处理动作。")
+                Text("Netfix 会看你的网络，告诉你哪里坏了、怎么修。\n有代理账号时，也可以直接粘贴，让这台 Mac 用它上网。")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -28,7 +28,7 @@ struct WelcomeView: View {
             Spacer()
 
             VStack(spacing: 12) {
-                Button("检查我的网络") {
+                Button("开始看我的网络") {
                     onStart()
                 }
                 .buttonStyle(.borderedProminent)

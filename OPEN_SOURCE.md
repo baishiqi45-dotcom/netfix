@@ -1,55 +1,86 @@
-# netfix 开源/产品化计划
+# Netfix Open-Source Release Guide
 
-## 1. 开源定位
+Netfix is intended to be published as a source-first open-source project before it is distributed as a signed macOS binary. The source release must be easy to read, safe to audit, and free of local credentials, local reports, generated binaries, or private planning notes.
 
-- **仓库名**：`netfix`（或 `netfix-macos`）
-- **目标用户**：macOS 上依赖海外 AI/开发/常用服务的普通用户与开发者，尤其是中国大陆网络环境。
-- **核心卖点**：离线可用、小白能用的菜单栏 App、国产 Agent 一句话调用。
-- **License**：MIT（宽松，便于二次开发）。
+## Public Positioning
 
-## 2. 首次开源 Checklist
+- Name: `netfix` or `netfix-macos`.
+- One-line description: local-first macOS network triage for AI and developer tools.
+- License: MIT.
+- Primary user: macOS users who rely on Codex, ChatGPT, GitHub, API clients, and proxy-based developer workflows.
+- Primary promise: diagnose the broken layer first, explain it plainly, and apply reversible fixes only after confirmation.
 
-1. 注册 GitHub 仓库，push 当前代码。
-2. 完善 README 中英文双语（目前中文为主，补充英文版或至少英文 Quick Start）。
-3. 添加 `CONTRIBUTING.md`：
-   - 如何新增症状规则（`rules/symptoms.json`）
-   - 如何新增 core 适配器（`netfix/cores/`）
-   - 如何新增服务分组（`rules/services.json`）
-   - 如何提交 case（`cases/`）
-4. 配置 GitHub Actions CI：
-   - `python3 -m py_compile`
-   - `python3 -m unittest discover tests`
-   - CLI / API / MCP / Web 仪表盘 smoke tests
-   - SwiftUI menu bar app build on macOS runners
-   - 已添加 `.github/workflows/ci.yml`
-5. 添加本地开发入口：
-   - `Makefile`：`make lint/test/smoke/api-smoke/mcp-smoke/app/case`
-   - `CONTRIBUTING.md`
-6. 发布 v0.2.0 tag，提供四种使用方式：
-   - `git clone` + 浏览器打开 Web 仪表盘
-   - `git clone` + `python3 netfix.py`
-   - `pipx install .` 生成 `netfix` 全局命令
-   - 自行编译 SwiftUI 菜单栏 App（`cd gui/macos && swift build`）
+Do not position Netfix as a proxy seller, access provider, account workaround, or guaranteed route-quality product.
 
-## 3. 社区运营
+## Publishable Units
 
-- 用 GitHub Issues 收集真实故障场景，标签化：`client:v2rayN`、`client:clash`、`dns`、`mtu`、`wi-fi`、`gui`、`agent`。
-- 鼓励用户提交 `cases/YYYY-MMDD-<关键词>.md`，反哺规则库。
-- 每季度根据 case 数量决定是否新增 specialist subcommand（如 `netfix dns`、`netfix proxy`）。
+There are two different release states:
 
-## 4. 产品化路径（可选）
-
-| 阶段 | 产物 | 商业模式 |
+| Unit | Status meaning | How to publish |
 |---|---|---|
-| v0.1 | 开源 CLI | 免费 |
-| v0.2 | CLI + Web 仪表盘 + SwiftUI 菜单栏原型 + MCP | 免费 / GitHub Sponsors |
-| v0.5 | 签名/公证的 `.app` 安装包、节点健康监控 + cron 自动体检 | 捐赠 / GitHub Sponsors |
-| v1.0 | 带 onboarding 的 macOS App Store 应用 | App Store 付费 / 订阅 |
-| 企业版 | 审计日志、集中报表、LDAP/SSO | 按席位授权 |
+| Clean source export | Public source snapshot passed audit | Publish `open-source-export/Netfix-0.2.0-source` or its zip |
+| Current development workspace | Local working tree may contain QA artifacts | Publish only if workspace audit is clean |
+| Download QA package | Unsigned candidate package passed smoke checks | Share only as QA artifact |
+| Paid external macOS release | Signed, notarized, legally reviewed, clean-machine tested | Publish only after all paid-release blockers are clear |
 
-## 5. 风险与边界
+The safe default is the clean source export. It is generated from the current tree but excludes local proxy packages, generated DMG/ZIP artifacts, build outputs, runtime state, private cases, and internal docs.
 
-- 不实现/不鼓励新的翻墙协议，只做诊断和本地修复。
-- 不收集用户代理凭据，所有配置读取在本地完成。
-- 对 GUI 客户端的自动切换能力受限（如 v2rayN 无外置 API），需在文档中明确；App 中通过 AppleScript 重启 GUI 作为折中。
-- 签名/公证需要 Apple Developer Program，开源仓库只提供未签名构建指引。
+## Required Checks
+
+Run these before source publication:
+
+```bash
+python3 -m pytest -q
+python3 scripts/source_export.py --zip --json
+python3 scripts/release_audit.py --scope workspace --root open-source-export/Netfix-0.2.0-source
+python3 scripts/release_audit.py --scope workspace --root .
+python3 scripts/release_preflight.py --with-dmg-smoke
+python3 scripts/release_preflight.py --with-dmg-smoke --json
+python3 scripts/release_preflight.py --with-dmg-smoke \
+  --write-record gui/macos/.build/release-export/Netfix-0.2.0-macos/download-qa-preflight.json
+(cd gui/macos/.build/release-export/Netfix-0.2.0-macos && python3 verify-download.py --require-recorded-preflight)
+```
+
+If `release_audit` reports `tracked-release-artifact`, remove generated release files from the git index without deleting local QA files:
+
+```bash
+git ls-files 'Netfix-*.dmg' 'Netfix-*.zip'
+git rm --cached Netfix-0.2.0.dmg Netfix-0.2.0-macos.zip
+python3 scripts/release_audit.py --scope workspace --root .
+```
+
+CI must treat `python3 scripts/release_audit.py --scope workspace --root .` as a hard gate.
+
+## GitHub Checklist
+
+- Add `README.md` and `README.en.md` with matching Chinese/English first screens.
+- Add visual assets under `assets/github/` in both `.zh` and `.en` variants.
+- Add `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue templates, and PR template.
+- Set repository topics from `.github/repository.yml`.
+- Use `docs/github/STAR_GUIDE.md` for the public launch checklist.
+- Use `docs/github/SCREENSHOTS.md` to track real App screenshots and GIFs before a binary release.
+
+## Binary Release Boundary
+
+Unsigned local App candidates are useful for development and QA, but they are not the public product. A public macOS binary release must have:
+
+- Developer ID signing.
+- Apple notarization.
+- Clean-machine install and launch evidence.
+- Local backend smoke evidence from the packaged app.
+- Legal review of privacy policy and EULA drafts.
+- Live provider smoke evidence for optional cloud AI paths.
+
+Until those are complete, public docs should say “build from source” or “source release”, not “download the finished app”.
+
+## Community Contributions
+
+Good contributions are small, reproducible, and sanitized:
+
+- new symptom rules in `rules/symptoms.json`
+- new service definitions in `rules/services.json`
+- new proxy-core adapters in `netfix/cores/`
+- sanitized cases in `cases/`
+- clearer app copy, docs, and screenshots
+
+GitHub Issues and PRs must not include real proxy passwords, API keys, QR codes, cookies, bearer tokens, screenshots with visible secrets, or raw diagnostic reports.

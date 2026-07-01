@@ -69,6 +69,13 @@ class TestDeepSeekSidecarImport(unittest.TestCase):
         self.assertEqual(result["reason_code"], "sidecar_key_missing")
         set_secret.assert_not_called()
 
+    def test_default_env_paths_do_not_include_author_absolute_path(self):
+        with patch("netfix.deepseek_sidecar.Path.home", return_value=Path("/Users/alice")):
+            paths = [str(path) for path in deepseek_sidecar.default_env_paths()]
+
+        self.assertNotIn("/Users/local-author/Desktop/mess/.env", paths)
+        self.assertIn("/Users/alice/Desktop/mess/.env", paths)
+
 
 if __name__ == "__main__":
     unittest.main()

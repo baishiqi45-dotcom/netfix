@@ -334,6 +334,7 @@
           <div id="backend-log" class="muted" role="status" aria-live="polite" style="margin-top:8px;font-size:12px;">正在读取运行记录...</div>
           <div class="toolbar">
             <button id="btn-refresh-logs" onclick="loadLogs()">刷新记录</button>
+            <button id="btn-copy-support-bundle" onclick="copySupportBundle()">复制支持包</button>
             <button onclick="clearLogs()">清理记录</button>
           </div>
           <details id="local-data-danger-settings" class="details-block">
@@ -1305,6 +1306,28 @@
       `;
     }
 
+    async function copySupportBundle() {
+      const target = document.getElementById('backend-log');
+      target.textContent = '正在生成脱敏支持包...';
+      let data = {};
+      try {
+        data = await api('GET', '/support/bundle');
+      } catch (err) {
+        target.textContent = '生成支持包失败: ' + (err.message || err);
+        return;
+      }
+      if (!data.ok || data.schema_version !== 'netfix_support_bundle.v1') {
+        target.textContent = '生成支持包失败: ' + (data.error || '返回格式不正确');
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+        target.textContent = '已复制脱敏支持包。可以发给技术人员；不要再附代理密码、API Key 或未脱敏截图。';
+      } catch (err) {
+        target.textContent = '复制支持包失败: ' + (err.message || err);
+      }
+    }
+
     async function clearLogs() {
       if (!confirm('只删除最近检查结果和运行记录，不删除设置或系统钥匙串。继续？')) return;
       const data = await api('POST', '/logs/clear', { latest_report: true, events: true });
@@ -1864,8 +1887,8 @@
       if (data.ok) {
         const monitor = data.monitor || {};
         const monitorCopy = monitor.ok
-          ? '已保存并开始持续检查。系统网络设置还没有修改；需要改系统设置时，请到高级操作里预览后确认。'
-          : (data.monitor ? '已保存，但持续检查未启动。系统网络设置还没有修改。' : '已保存。系统网络设置还没有修改。');
+          ? '已保存并开始持续检查。系统网络设置还没有修改；要开始使用，请在“已保存线路”里点“部署到这台 Mac”。'
+          : (data.monitor ? '已保存，但持续检查未启动。系统网络设置还没有修改；要开始使用，请在“已保存线路”里点“部署到这台 Mac”。' : '已保存。系统网络设置还没有修改；要开始使用，请在“已保存线路”里点“部署到这台 Mac”。');
         target.textContent = monitorCopy;
       } else {
         target.textContent = '保存失败: ' + (data.error || (data.errors || []).join(' / '));
@@ -2080,7 +2103,7 @@
               <summary>更多</summary>
               <div class="toolbar">
                 <button data-replace-profile="${escapeHtml(p.id)}">更新凭据</button>
-                <button data-dry-run="${escapeHtml(p.id)}">预览系统应用</button>
+                <button data-dry-run="${escapeHtml(p.id)}">部署前预览</button>
                 <button data-export-profile="${escapeHtml(p.id)}">导出配置</button>
                 <button data-apply-env="${escapeHtml(p.id)}">给命令行使用</button>
                 <button data-apply-system="${escapeHtml(p.id)}">应用到系统</button>
@@ -2139,7 +2162,7 @@
       target.querySelectorAll('[data-dry-run]').forEach(btn => {
         btn.addEventListener('click', async () => {
           const res = await api('POST', `/proxy/profiles/${btn.dataset.dryRun}/apply-dry-run`, { mode: 'system' });
-          document.getElementById('proxy-result').innerHTML = renderProxyOperation(res, '系统应用预览');
+          document.getElementById('proxy-result').innerHTML = renderProxyOperation(res, '部署前预览');
         });
       });
       target.querySelectorAll('[data-export-profile]').forEach(btn => {

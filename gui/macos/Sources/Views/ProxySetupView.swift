@@ -16,6 +16,9 @@ struct ProxySetupView: View {
     @State private var proxyProtocolHint = "auto"
     @State private var proxyPreview: ProxyImportPreviewResponse?
     @State private var proxySaveStatus: String?
+    @State private var savedProxyProfile: ProxyProfile?
+    @State private var proxyDeployPlan: ProxyApplyPlan?
+    @State private var showProxyDeployConfirmation = false
     @State private var isProxyWorking = false
 
     var body: some View {
@@ -25,7 +28,7 @@ struct ProxySetupView: View {
                 .foregroundStyle(.blue)
 
             VStack(spacing: 10) {
-                Text("添加代理参数")
+                Text("添加你的代理")
                     .font(.title2)
                     .fontWeight(.semibold)
 
@@ -40,30 +43,30 @@ struct ProxySetupView: View {
                                 .multilineTextAlignment(.center)
                         }
                         if let port = env.port {
-                            Text("检测到本机代理端口：\(port)")
+                            Text("发现你电脑里有代理软件，端口：\(port)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
                 } else if backend.isReady {
-                    Text("未识别到常见代理客户端，你可以先跳过，稍后在设置里配置。")
+                    Text("没看到你电脑里有代理软件。没关系，可以直接粘贴你买到的代理账号。")
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 } else {
-                    Text("正在等待 Netfix 准备好…")
+                    Text("正在准备…")
                         .font(.body)
                         .foregroundStyle(.secondary)
                 }
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("有供应商给你的代理参数？直接粘贴")
+                Text("你有代理账号吗？有的话复制粘贴")
                     .font(.headline)
-                Text("去代理服务商后台复制整行 HTTP/SOCKS 连接参数，不是只复制出口 IP。需要地址、端口、用户名和密码；密码保存到本机密码库。")
+                Text("去你买代理的网站后台，复制一整行连接信息。通常需要地址、端口、用户名和密码；密码保存到本机密码库。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("示例：proxy.example.com:8001:username:password，或 host,port,username,password。没有这类参数也可以跳过，先做基础诊断。")
+                Text("复制下来大概是：地址:端口:用户名:密码 这种样子。不要只复制出口 IP。没有这类参数也可以先跳过。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Picker("参数类型", selection: $proxyProtocolHint) {
@@ -80,12 +83,12 @@ struct ProxySetupView: View {
                             .stroke(Color.secondary.opacity(0.25))
                     )
                 HStack {
-                    Button("预检") {
+                    Button("检查这行参数") {
                         Task { await previewProxyInput() }
                     }
                     .disabled(!backend.isReady || proxyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProxyWorking)
 
-                    Button("保存到这台 Mac") {
+                    Button("保存到本机") {
                         Task { await saveProxyInput() }
                     }
                     .buttonStyle(.borderedProminent)
@@ -106,14 +109,17 @@ struct ProxySetupView: View {
                         .font(.caption)
                         .foregroundStyle(proxySaveStatus.hasPrefix("失败") ? Color.red : Color.secondary)
                 }
-                if proxySaveStatus?.contains("还没影响浏览器") == true {
+                if let profile = savedProxyProfile {
                     HStack {
-                        Button("去部署到这台 Mac") {
-                            NSApp.sendAction(#selector(AppDelegate.showProxySettings), to: nil, from: nil)
+                        Button {
+                            Task { await prepareProxyDeployment(profile) }
+                        } label: {
+                            Label("部署到这台 Mac", systemImage: "exclamationmark.triangle.fill")
                         }
                         .buttonStyle(.borderedProminent)
+                        .disabled(!backend.isReady || isProxyWorking)
 
-                        Button("继续诊断") {
+                        Button("进入主界面") {
                             onContinue()
                         }
                     }
@@ -162,12 +168,23 @@ struct ProxySetupView: View {
             bindClient()
             Task { await loadEnvironment() }
         }
+        .confirmationDialog("部署到这台 Mac？", isPresented: $showProxyDeployConfirmation, titleVisibility: .visible) {
+            Button("确认部署到这台 Mac", role: .destructive) {
+                if let profile = savedProxyProfile {
+                    Task { await applySavedProxyProfile(profile) }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(proxyDeploymentConfirmationText())
+        }
     }
 
     private func previewProxyInput() async {
         guard let client = client else { return }
         isProxyWorking = true
         proxySaveStatus = nil
+        savedProxyProfile = nil
         do {
             proxyPreview = try await client.importProxyPreview(input: proxyInput, limit: 20, protocolHint: proxyProtocolHint)
         } catch {
@@ -180,12 +197,14 @@ struct ProxySetupView: View {
         guard let client = client else { return }
         isProxyWorking = true
         proxySaveStatus = "正在保存到本机密码库并启动健康监控…"
+        savedProxyProfile = nil
         do {
             let response = try await client.saveProxyProfile(input: proxyInput, startMonitor: true, targetProfile: "ai_dev", protocolHint: proxyProtocolHint)
             if response.ok {
+                savedProxyProfile = response.profile
                 proxySaveStatus = response.monitor?.running == true
-                    ? "已保存并启动健康监控，但还没影响浏览器。要开始使用，请点“去部署到这台 Mac”。"
-                    : "已保存，但还没影响浏览器。密码已写入本机密码库；可以去部署到这台 Mac。"
+                    ? "已保存并启动健康监控。点下面“部署到这台 Mac”开始用它上网。"
+                    : "已保存到本机，密码已写入本机密码库。点下面“部署到这台 Mac”开始用它上网。"
             } else {
                 proxySaveStatus = "失败：\(response.error ?? "无法保存代理")"
             }
@@ -193,6 +212,58 @@ struct ProxySetupView: View {
             proxySaveStatus = "失败：\(error.localizedDescription)"
         }
         isProxyWorking = false
+    }
+
+    private func prepareProxyDeployment(_ profile: ProxyProfile) async {
+        guard let client = client else { return }
+        isProxyWorking = true
+        proxySaveStatus = "正在生成部署预览，不会修改网络设置…"
+        do {
+            proxyDeployPlan = try await client.applyProxyDryRun(profileID: profile.id, mode: "system")
+            proxySaveStatus = nil
+            showProxyDeployConfirmation = true
+        } catch {
+            proxyDeployPlan = nil
+            proxySaveStatus = "失败：无法生成部署预览。\(error.localizedDescription)"
+        }
+        isProxyWorking = false
+    }
+
+    private func applySavedProxyProfile(_ profile: ProxyProfile) async {
+        guard let client = client else { return }
+        isProxyWorking = true
+        proxySaveStatus = "正在部署到这台 Mac。会先备份原来的网络设置…"
+        do {
+            let response = try await client.applyProxyProfile(profileID: profile.id, mode: "system", confirmed: true, targetProfile: "ai_dev")
+            if response.ok && response.status == "applied" {
+                if response.applied?.scope == "loopback_bridge" {
+                    let port = response.bridge?.listenPort.map(String.init) ?? "?"
+                    proxySaveStatus = "已部署，本机转发端口 \(port)。请保持 Netfix 打开；不用时到设置里点“恢复原来的网络设置”。"
+                } else {
+                    let service = response.networkService ?? "当前网络服务"
+                    proxySaveStatus = "已部署到 \(service)。不用时到设置里点“恢复原来的网络设置”。"
+                }
+            } else if response.status == "pending_confirmation" {
+                proxySaveStatus = "还需要确认。请再点一次“部署到这台 Mac”。"
+            } else {
+                proxySaveStatus = "失败：\(response.friendlyFailureMessage)"
+            }
+        } catch {
+            proxySaveStatus = "失败：\(error.localizedDescription)"
+        }
+        isProxyWorking = false
+    }
+
+    private func proxyDeploymentConfirmationText() -> String {
+        var lines = [
+            "Netfix 会先备份当前网络设置。",
+            "部署后，浏览器和大多数 App 会使用这组代理。",
+        ]
+        if proxyDeployPlan?.steps?.contains(where: { ($0.safePreview ?? "").contains("127.0.0.1") || ($0.label ?? "").contains("桥接") }) == true {
+            lines.append("这组代理需要 Netfix 保持打开，用来安全代管账号密码。")
+        }
+        lines.append("不用时可以到设置里点“恢复原来的网络设置”。")
+        return lines.joined(separator: "\n")
     }
 
     private func bindClient() {

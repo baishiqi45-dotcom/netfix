@@ -14,20 +14,20 @@ struct PrivacyDisclosureView: View {
                 .foregroundStyle(.blue)
 
             VStack(spacing: 8) {
-                Text("先说明 netfix 会看什么")
+                Text("先说明 Netfix 会看什么")
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                Text("netfix 是本地优先的诊断工具。它不会内置节点，也不会替你购买住宅 IP。")
+                Text("Netfix 是本地优先的网络工具。它不会内置节点，也不会替你购买住宅 IP。")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                disclosureRow("network", "读取本机网络状态", "网络代理设置、DNS、网关、本地监听端口、代理核心状态。")
+                disclosureRow("network", "查看你的网络", "比如 Wi-Fi、DNS、上网用的代理，以及 Netfix 自己的本地状态。")
                 disclosureRow("doc.text.magnifyingglass", "保存本地报告和事件", "最近报告与事件日志保存在 ~/.netfix，可在设置里关闭或清理。")
-                disclosureRow("sparkles", "云端 AI 默认关闭", "开启后先脱敏，再发送到你配置的 DeepSeek/Kimi/MiniMax/Qwen 等供应商。")
+                disclosureRow("sparkles", "AI 看报告默认是关的", "开启后先脱敏，再发送到你配置的 DeepSeek/Kimi/MiniMax/Qwen 等供应商。")
                 disclosureRow("lock.shield", "修改前先问你", "会改系统网络设置的操作必须确认；应用代理前会先展示预览。")
             }
             .padding(.vertical, 4)

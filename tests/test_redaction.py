@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from netfix.redaction import redact_report
+from netfix.redaction import redact_report, redact_text
 
 
 class TestRedaction(unittest.TestCase):
@@ -31,6 +31,19 @@ class TestRedaction(unittest.TestCase):
         self.assertNotIn("203.0.113.10", encoded)
         self.assertNotIn("stdout", encoded)
         self.assertGreater(redacted["redaction_audit"].get("secret", 0), 0)
+
+    def test_redacts_secret_like_words_in_free_text(self):
+        text = "代理认证失败 demo-password；bad API key sk-live-secret-token-1234567890"
+        redacted = redact_text(text)
+        self.assertNotIn("demo-password", redacted)
+        self.assertNotIn("sk-live-secret-token", redacted)
+        self.assertIn("[redacted_secret]", redacted)
+
+    def test_keeps_non_secret_token_field_names_readable(self):
+        text = "max_tokens_field uses max_completion_tokens"
+        redacted = redact_text(text)
+        self.assertIn("max_tokens_field", redacted)
+        self.assertIn("max_completion_tokens", redacted)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # Netfix 产品力与架构升级报告（2026-06）
 
-> 本文档由 agent team 对 `/Users/qibaishi/Desktop/网络/` 进行对抗性产品与工程审计后整理。
+> 本文档由 agent team 对 `<repo>/` 进行对抗性产品与工程审计后整理。
 > 目标：回答“为什么产品看起来会卡住、修不好、不好用”，并给出从“止血”到“LLM Agent”的演进路线。
 
 ---
@@ -85,7 +85,7 @@ Netfix 已经具备了一个网络自救工具所需的**基础骨架**：本地
 | 问题 | 严重度 | 位置 | 现象 | 根因 |
 |---|---|---|---|---|
 | 登录项失败无提示 | P0 | `SettingsView.swift:242-255` | Toggle 被默默拨回 | catch 里只回退状态 |
-| 服务 Tab 硬编码开发路径 | P1 | `SettingsView.swift:225` | 其他 Mac 上服务列表加载失败 | 回退路径 `/Users/qibaishi/Desktop/网络/...` |
+| 服务 Tab 硬编码开发路径 | P1 | `SettingsView.swift:225` | 其他 Mac 上服务列表加载失败 | 回退路径 `<repo>/...` |
 | 通知 Toggle 不同步真实授权 | P1 | `SettingsView.swift:55-60` | 系统拒绝后 UI 仍显示开启 | 未在 onChange 后读取授权结果 |
 | 图标样式切换不生效 | P1 | `SettingsView.swift:64-67` + `AppDelegate.swift` | 切换后菜单栏图标不变 | `updateStatusIcon` 未读取 `iconStyle`（已部分修复） |
 | 服务分组开关是死开关 | P1 | `SettingsView.swift:81-113` | 用户点了无效 | 使用 `.constant(true)` |

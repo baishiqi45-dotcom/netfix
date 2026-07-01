@@ -1,4 +1,5 @@
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -113,7 +114,7 @@ class TestReleaseExport(unittest.TestCase):
     def test_export_excludes_sensitive_workspace_and_writes_checksums(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            sensitive = root / "iphone-v2rayn-package-2026-06-14" / "cc-http.proxy-url"
+            sensitive = root / "private-proxy-package-2026-06-14" / "private.proxy-url"
             sensitive.parent.mkdir()
             sensitive.write_text("http://real-user:real-secret@proxy.example.net:8000", encoding="utf-8")
             bundle = _write_bundle(root)
@@ -129,30 +130,102 @@ class TestReleaseExport(unittest.TestCase):
             self.assertTrue((export_root / "Netfix-0.2.0.dmg").exists())
             self.assertTrue((export_root / "release-manifest.json").exists())
             self.assertTrue((export_root / "release-readiness.json").exists())
+            self.assertTrue((export_root / "download-qa-preflight.json").exists())
+            self.assertTrue((export_root / "verify-download.py").exists())
             self.assertTrue((export_root / "export-manifest.json").exists())
             self.assertTrue((export_root / "README-FIRST.md").exists())
             self.assertTrue((export_root / "SHA256SUMS.txt").exists())
-            self.assertFalse((export_root / "iphone-v2rayn-package-2026-06-14").exists())
+            self.assertFalse((export_root / "private-proxy-package-2026-06-14").exists())
 
             export_manifest = json.loads((export_root / "export-manifest.json").read_text(encoding="utf-8"))
             readiness = json.loads((export_root / "release-readiness.json").read_text(encoding="utf-8"))
             first_readme = (export_root / "README-FIRST.md").read_text(encoding="utf-8")
+            download_qa_preflight = json.loads((export_root / "download-qa-preflight.json").read_text(encoding="utf-8"))
             checksum_text = (export_root / "SHA256SUMS.txt").read_text(encoding="utf-8")
+            exported_json_text = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in [
+                    export_root / "export-manifest.json",
+                    export_root / "release-readiness.json",
+                    export_root / "download-qa-preflight.json",
+                ]
+            )
+            self.assertNotIn(str(root), exported_json_text)
+            self.assertNotIn(str(bundle), exported_json_text)
+            self.assertNotIn(str(dmg), exported_json_text)
             self.assertEqual(export_manifest["artifact_scope"], "downloadable-dmg-plus-metadata")
             self.assertFalse(export_manifest["source_workspace_included"])
-            self.assertEqual(readiness["paths"]["root"], str(export_root))
+            self.assertIn("source_workspace_findings_summary", export_manifest)
+            self.assertIn("sensitive-filename", export_manifest["source_workspace_findings_summary"]["kinds"])
+            self.assertIn("private-proxy-package-2026-06-14", export_manifest["source_workspace_findings_summary"]["roots"])
+            self.assertIn("next_steps_by_kind", export_manifest["source_workspace_findings_summary"])
+            self.assertIn("download-qa-preflight.json", export_manifest["artifacts"])
+            self.assertIn("verify-download.py", export_manifest["artifacts"])
+            self.assertEqual(download_qa_preflight["schema_version"], "netfix_release_preflight.v1")
+            self.assertEqual(download_qa_preflight["status"], "not_run")
+            self.assertFalse(download_qa_preflight["download_qa_ready"])
+            self.assertEqual(readiness["paths"]["root"], ".")
             self.assertIn("internal QA candidate", first_readme)
             self.assertIn("release-readiness.json", first_readme)
+            self.assertIn("download-qa-preflight.json", first_readme)
+            self.assertIn("verify-download.py", first_readme)
+            self.assertIn("status: not_run", first_readme)
+            self.assertIn("macOS 下载包", first_readme)
+            self.assertIn("普通使用不需要命令行", first_readme)
+            self.assertIn("粘贴代理怎么用", first_readme)
+            self.assertIn("复制支持包", first_readme)
             self.assertIn("Double-click `Netfix.app`", first_readme)
-            self.assertIn("No terminal command", first_readme)
-            self.assertIn("not part of the ordinary first-run flow", first_readme)
-            self.assertIn("legally obtained proxy credentials", first_readme)
-            self.assertIn("batch-preflight a supplier list", first_readme)
-            self.assertIn("replace credentials", first_readme)
+            self.assertIn("未签名 QA 包说明", first_readme)
+            self.assertIn("right-click `Netfix.app`", first_readme)
+            self.assertIn("Open Anyway", first_readme)
+            self.assertIn("Developer ID signing, notarization, stapling, and clean-machine QA", first_readme)
+            self.assertIn("不是普通用户第一次使用必须做的事", first_readme)
+            self.assertIn("host:port:username:password", first_readme)
+            self.assertIn("预检", first_readme)
+            self.assertIn("保存并监控", first_readme)
+            self.assertIn("部署到这台 Mac", first_readme)
+            self.assertIn("Restore original network settings", first_readme)
+            self.assertIn("上次部署前保存的本机备份", first_readme)
+            self.assertIn("没有可回滚记录", first_readme)
             self.assertIn("DeepSeek text setup", first_readme)
+            self.assertIn("Copy for Codex", first_readme)
+            self.assertIn("MCP 不保存 API Key 或代理密码", first_readme)
+            self.assertIn("Settings -> Agent", first_readme)
+            self.assertIn("Copy for Codex", first_readme)
+            self.assertIn("诊断、查报告、查知识库和代理预检", first_readme)
+            self.assertIn("源码开源阻塞项", first_readme)
+            self.assertIn("Finding kinds:", first_readme)
+            self.assertIn("Root paths/artifacts:", first_readme)
+            self.assertIn("源码公开前必须处理", first_readme)
+            self.assertIn("After explicit owner approval", first_readme)
             self.assertIn("Netfix-0.2.0.dmg", checksum_text)
+            self.assertIn("download-qa-preflight.json", checksum_text)
+            self.assertIn("verify-download.py", checksum_text)
             self.assertIn("README-FIRST.md", checksum_text)
             self.assertIn("export-manifest.json", checksum_text)
+
+            basic = subprocess.run(
+                ["python3", "verify-download.py", "--json"],
+                cwd=str(export_root),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(basic.returncode, 0, basic.stderr)
+            basic_data = json.loads(basic.stdout)
+            self.assertTrue(basic_data["ok"])
+            self.assertEqual(basic_data["preflight_status"], "not_run")
+            strict = subprocess.run(
+                ["python3", "verify-download.py", "--require-recorded-preflight", "--json"],
+                cwd=str(export_root),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(strict.returncode, 0)
+            strict_data = json.loads(strict.stdout)
+            self.assertFalse(strict_data["ok"])
+            self.assertIn("preflight-not-recorded", strict_data["errors"])
 
     def test_signed_notarized_fixture_exports_as_paid_candidate(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -167,6 +240,20 @@ class TestReleaseExport(unittest.TestCase):
             export_root = Path(result["export_root"])
             export_manifest = json.loads((export_root / "export-manifest.json").read_text(encoding="utf-8"))
             readiness = json.loads((export_root / "release-readiness.json").read_text(encoding="utf-8"))
+            exported_json_text = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in [
+                    export_root / "export-manifest.json",
+                    export_root / "release-readiness.json",
+                    export_root / "release-evidence.json",
+                    export_root / "evidence" / "clean_machine_qa_record.json",
+                    export_root / "evidence" / "legal_review_record.json",
+                    export_root / "evidence" / "live_provider_smoke_record.json",
+                ]
+            )
+            self.assertNotIn(str(root), exported_json_text)
+            self.assertNotIn(str(bundle), exported_json_text)
+            self.assertNotIn(str(dmg), exported_json_text)
             self.assertTrue(result["paid_release_ready"])
             self.assertEqual(export_manifest["distribution_status"], "paid_external_candidate")
             self.assertTrue((export_root / "release-evidence.json").exists())
@@ -190,7 +277,7 @@ class TestReleaseExport(unittest.TestCase):
             self.assertIn("evidence/live_provider_smoke_record.json", export_manifest["artifacts"])
             self.assertIn("evidence/clean_machine_qa_record.json", result["files"])
             self.assertTrue(readiness["release_ready"])
-            self.assertEqual(readiness["paths"]["evidence_file"], str(export_root / "release-evidence.json"))
+            self.assertEqual(readiness["paths"]["evidence_file"], "release-evidence.json")
 
 
 if __name__ == "__main__":

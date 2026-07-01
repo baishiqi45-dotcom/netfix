@@ -3,7 +3,7 @@
 Copy this into a fresh Codex/GPT dialogue.
 
 ```text
-你现在接手 `/Users/qibaishi/Desktop/网络` 的 netfix 产品化目标。不要从“工程功能已经很多”这个角度自嗨，要从普通小白客户、会骂人的产品经理、顶级工程师和愿不愿意掏钱的真实市场视角冷审核、重构和落地。
+你现在接手 `<repo>` 的 netfix 产品化目标。不要从“工程功能已经很多”这个角度自嗨，要从普通小白客户、会骂人的产品经理、顶级工程师和愿不愿意掏钱的真实市场视角冷审核、重构和落地。
 
 ## 终极目标
 
@@ -25,22 +25,22 @@ Copy this into a fresh Codex/GPT dialogue.
 
 先读这些文件，不要凭记忆改：
 
-1. `/Users/qibaishi/Desktop/网络/docs/PRODUCT_SEED_USER_WORDS_2026_06_24.md`
-2. `/Users/qibaishi/Desktop/网络/output/playwright/netfix-local-audit/audit-notes.md`
-3. `/Users/qibaishi/Desktop/网络/gui/web/index.html`
-4. `/Users/qibaishi/Desktop/网络/gui/macos/Sources/Views/DashboardView.swift`
-5. `/Users/qibaishi/Desktop/网络/gui/macos/Sources/Views/SettingsView.swift`
-6. `/Users/qibaishi/Desktop/网络/netfix/api.py`
-7. `/Users/qibaishi/Desktop/网络/netfix/llm_explain.py`
-8. `/Users/qibaishi/Desktop/网络/netfix/deepseek_sidecar.py`
-9. `/Users/qibaishi/Desktop/网络/README.md`
+1. `<repo>/docs/PRODUCT_SEED_USER_WORDS_2026_06_24.md`
+2. `<repo>/output/playwright/netfix-local-audit/audit-notes.md`
+3. `<repo>/gui/web/index.html`
+4. `<repo>/gui/macos/Sources/Views/DashboardView.swift`
+5. `<repo>/gui/macos/Sources/Views/SettingsView.swift`
+6. `<repo>/netfix/api.py`
+7. `<repo>/netfix/llm_explain.py`
+8. `<repo>/netfix/deepseek_sidecar.py`
+9. `<repo>/README.md`
 
 然后运行或确认：
 
 ```bash
 python3 netfix.py server --host 127.0.0.1 --port 0
 python3 -m pytest -q
-swift build  # cwd: /Users/qibaishi/Desktop/网络/gui/macos
+swift build  # cwd: <repo>/gui/macos
 ```
 
 ## 当前已验证事实

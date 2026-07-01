@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">Netfix macOS 本地网络急诊工具</title>
+  <desc id="desc">一张 GitHub 首页头图，展示 Netfix 在本地诊断 Codex、ChatGPT、GitHub、代理、DNS 和 IPv6 问题。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1b1e"/>
+      <stop offset="0.52" stop-color="#14333a"/>
+      <stop offset="1" stop-color="#26343e"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbfdff"/>
+      <stop offset="1" stop-color="#dce8ed"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000" flood-opacity="0.30"/>
+    </filter>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <path d="M0 506 C200 446 298 584 492 516 C706 442 806 500 996 424 C1128 372 1212 386 1280 336 L1280 640 L0 640 Z" fill="#315059" opacity="0.62"/>
+  <path d="M862 0 C814 90 858 164 972 196 C1088 228 1164 298 1160 390 C1156 488 1068 548 984 640 H1280 V0 Z" fill="#0f766e" opacity="0.24"/>
+
+  <g transform="translate(72 78)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,PingFang SC,Microsoft YaHei,sans-serif">
+    <text x="0" y="0" fill="#a7f3d0" font-size="22" font-weight="800">NETFIX</text>
+    <text x="0" y="58" fill="#f8fafc" font-size="50" font-weight="850">AI 工具连不上？</text>
+    <text x="0" y="116" fill="#f8fafc" font-size="50" font-weight="850">先看卡在哪一层</text>
+    <text x="0" y="170" fill="#dbe7ee" font-size="24">Codex / ChatGPT / GitHub / 代理 / DNS / IPv6</text>
+    <text x="0" y="208" fill="#dbe7ee" font-size="24">本地诊断，人话解释，确认后修复，随时恢复。</text>
+
+    <g transform="translate(0 282)">
+      <rect width="148" height="44" rx="22" fill="#14b8a6"/>
+      <text x="28" y="29" fill="#042f2e" font-size="16" font-weight="850">本地优先</text>
+      <rect x="166" width="148" height="44" rx="22" fill="#e2e8f0"/>
+      <text x="193" y="29" fill="#0f172a" font-size="16" font-weight="850">MIT 开源</text>
+      <rect x="332" width="190" height="44" rx="22" fill="#fde68a"/>
+      <text x="358" y="29" fill="#422006" font-size="16" font-weight="850">不售卖代理</text>
+    </g>
+  </g>
+
+  <g transform="translate(628 70)" filter="url(#shadow)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,PingFang SC,Microsoft YaHei,sans-serif">
+    <rect width="560" height="468" rx="28" fill="url(#panel)"/>
+    <rect width="560" height="58" rx="28" fill="#e8f0f4"/>
+    <circle cx="34" cy="29" r="8" fill="#ff5f57"/>
+    <circle cx="62" cy="29" r="8" fill="#ffbd2e"/>
+    <circle cx="90" cy="29" r="8" fill="#28c840"/>
+    <text x="126" y="37" fill="#334155" font-size="17" font-weight="800">Netfix</text>
+
+    <g transform="translate(36 88)">
+      <rect width="488" height="78" rx="16" fill="#0f766e"/>
+      <text x="24" y="33" fill="#ecfeff" font-size="20" font-weight="850">一键诊断</text>
+      <text x="24" y="61" fill="#ccfbf1" font-size="15">先判断 DNS、代理核心、TLS、目标服务哪一层失败。</text>
+      <circle cx="440" cy="39" r="18" fill="#14b8a6"/>
+      <path d="M431 39 l7 7 l14 -16" fill="none" stroke="#ecfeff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <g transform="translate(36 188)">
+      <rect width="232" height="104" rx="16" fill="#ffffff"/>
+      <text x="18" y="32" fill="#0f172a" font-size="18" font-weight="850">粘贴代理参数</text>
+      <text x="18" y="60" fill="#475569" font-family="SFMono-Regular,Menlo,monospace" font-size="13">host:port:user:pass</text>
+      <text x="18" y="84" fill="#64748b" font-size="14">预检、保存、部署、恢复</text>
+    </g>
+    <g transform="translate(292 188)">
+      <rect width="232" height="104" rx="16" fill="#ffffff"/>
+      <text x="18" y="32" fill="#0f172a" font-size="18" font-weight="850">接入 Agent</text>
+      <text x="18" y="60" fill="#475569" font-size="14">Codex / Kimi MCP</text>
+      <text x="18" y="84" fill="#64748b" font-size="14">结构化 JSON，不让模型瞎猜</text>
+    </g>
+
+    <g transform="translate(36 320)">
+      <rect width="488" height="94" rx="16" fill="#111827"/>
+      <text x="22" y="34" fill="#f8fafc" font-size="18" font-weight="850">健康维护</text>
+      <text x="22" y="63" fill="#cbd5e1" font-size="15">监控路由，解释失败，必要时一键恢复原网络设置。</text>
+      <rect x="372" y="26" width="82" height="34" rx="17" fill="#22c55e"/>
+      <text x="398" y="49" fill="#052e16" font-size="14" font-weight="850">正常</text>
+    </g>
+  </g>
+</svg>

@@ -5,7 +5,7 @@ from netfix import keychain
 
 
 class TestKeychain(unittest.TestCase):
-    def test_set_secret_uses_macos_security_password_argument_without_output(self):
+    def test_set_secret_uses_macos_security_password_prompt_without_argv_secret(self):
         proc = Mock(returncode=0, stderr="", stdout="")
         with patch("netfix.keychain.is_available", return_value=True), \
                 patch("netfix.keychain.subprocess.run", return_value=proc) as run:
@@ -14,9 +14,24 @@ class TestKeychain(unittest.TestCase):
         self.assertTrue(result["ok"])
         args, kwargs = run.call_args
         cmd = args[0]
-        self.assertEqual(cmd[-2:], ["-w", "sk-secret"])
+        self.assertEqual(cmd[-1], "-w")
+        self.assertNotIn("sk-secret", cmd)
+        self.assertEqual(kwargs["input"], "sk-secret\n")
         self.assertTrue(kwargs["capture_output"])
-        self.assertNotIn("input", kwargs)
+
+    def test_set_secret_limits_keychain_item_to_trusted_app_when_available(self):
+        proc = Mock(returncode=0, stderr="", stdout="")
+        with patch("netfix.keychain.is_available", return_value=True), \
+                patch.dict("os.environ", {"NETFIX_KEYCHAIN_TRUSTED_APP": "/Applications/Netfix.app/Contents/MacOS/netfix-backend"}, clear=True), \
+                patch("netfix.keychain.os.path.exists", return_value=True), \
+                patch("netfix.keychain.subprocess.run", return_value=proc) as run:
+            result = keychain.set_secret(keychain.PROXY_SERVICE, "p1", "proxy-password")
+
+        self.assertTrue(result["ok"])
+        cmd = run.call_args.args[0]
+        self.assertIn("-T", cmd)
+        self.assertIn("/Applications/Netfix.app/Contents/MacOS/netfix-backend", cmd)
+        self.assertNotIn("proxy-password", cmd)
 
     def test_llm_env_override_is_provider_scoped(self):
         with patch.dict(

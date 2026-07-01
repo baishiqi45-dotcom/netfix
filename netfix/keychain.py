@@ -6,6 +6,7 @@ import platform
 import shutil
 import subprocess
 import re
+import sys
 from typing import Any, Dict, Optional
 
 
@@ -18,14 +19,21 @@ def is_available() -> bool:
     return platform.system() == "Darwin" and shutil.which("security") is not None
 
 
+def _trusted_app_path() -> str:
+    candidate = (os.environ.get("NETFIX_KEYCHAIN_TRUSTED_APP") or sys.executable or "").strip()
+    if candidate and os.path.exists(candidate):
+        return candidate
+    return ""
+
+
 def set_secret(service: str, account: str, secret: str) -> Dict[str, Any]:
     """Store or update a secret in Keychain."""
     if not secret:
         return {"ok": False, "error": "empty secret"}
     if not is_available():
         return {"ok": False, "error": "macOS Keychain is unavailable"}
-    # The macOS security CLI requires the password as the -w argument for
-    # non-interactive writes. Capture output and never log the command.
+    # Put -w last without a value so security prompts on stdin. Passing the
+    # secret as the -w argument exposes it in process lists.
     cmd = [
         "security",
         "add-generic-password",
@@ -34,10 +42,12 @@ def set_secret(service: str, account: str, secret: str) -> Dict[str, Any]:
         "-s",
         service,
         "-U",
-        "-w",
-        secret,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    trusted_app = _trusted_app_path()
+    if trusted_app:
+        cmd.extend(["-T", trusted_app])
+    cmd.append("-w")
+    proc = subprocess.run(cmd, input=f"{secret}\n", capture_output=True, text=True, timeout=15)
     if proc.returncode != 0:
         return {"ok": False, "error": (proc.stderr or proc.stdout).strip()}
     return {"ok": True, "service": service, "account": account}

@@ -18,7 +18,7 @@ struct OnboardingView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                Text("netfix 需要检测你的网关、DNS、本地代理端口和局域网连接状态。\n默认只保存在本机；云端 AI 解释需要你在设置里主动开启。")
+                Text("Netfix 需要查看你的网络设置，才能判断哪里连不上。\n默认只保存在本机；AI 看报告需要你在设置里主动开启。")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -38,7 +38,7 @@ struct OnboardingView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "checkmark.circle")
                         .foregroundStyle(.green)
-                    Text("判断代理节点是否可用")
+                    Text("检查你用的代理能不能上网")
                 }
             }
             .font(.callout)
@@ -77,4 +77,3 @@ struct OnboardingView: View {
         }
     }
 }
-

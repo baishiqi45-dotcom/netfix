@@ -3,7 +3,13 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+if __package__ in {None, ""}:
+    repo_root = Path(__file__).resolve().parents[1]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
 
 from netfix import agent_tools, keychain, llm_explain, llm_provider, residential_proxy, settings
 from netfix.constants import VERSION

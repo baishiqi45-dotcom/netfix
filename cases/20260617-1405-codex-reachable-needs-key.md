@@ -4,7 +4,7 @@
 
 - **日期**：2026-06-17T14:05:34.598759+08:00
 - **客户端**：v2rayN (v2rayN)
-- **活动节点**：cc-http
+- **活动节点**：example-http
 - **症状**：OpenAI API 网络可达，返回 401 是因为缺少/无效 API key，不是网络故障
 
 ## 关键诊断
@@ -155,26 +155,26 @@
         "active_reachable": true,
         "profiles": [
           {
-            "remarks": "cc",
-            "address": "direct.miyaip.online",
+            "remarks": "example",
+            "address": "proxy.example.com",
             "port": 8001,
             "reachable": true
           },
           {
-            "remarks": "cc3",
-            "address": "63.124.160.52",
+            "remarks": "example-socks",
+            "address": "203.0.113.52",
             "port": 8022,
             "reachable": true
           },
           {
-            "remarks": "cc-http",
-            "address": "direct.miyaip.online",
+            "remarks": "example-http",
+            "address": "proxy.example.com",
             "port": 8001,
             "reachable": true
           },
           {
-            "remarks": "cc2",
-            "address": "direct.miyaip.online",
+            "remarks": "example-backup",
+            "address": "proxy.example.com",
             "port": 8001,
             "reachable": true
           }

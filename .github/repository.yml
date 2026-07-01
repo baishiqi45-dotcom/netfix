@@ -1,0 +1,28 @@
+repository:
+  name: netfix
+  description: "Offline-first macOS network triage for AI/dev tools: diagnose DNS, proxy, node, TLS, and service issues locally."
+  private: false
+  has_issues: true
+  has_projects: false
+  has_wiki: false
+  default_branch: main
+  topics:
+    - macos
+    - network-diagnostics
+    - network-triage
+    - proxy-diagnostics
+    - dns
+    - tls
+    - openai
+    - chatgpt
+    - codex
+    - github
+    - developer-tools
+    - mcp-server
+    - offline-first
+    - privacy
+    - swiftui
+    - python
+    - clash
+    - mihomo
+    - sing-box

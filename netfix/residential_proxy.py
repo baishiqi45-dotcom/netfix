@@ -368,7 +368,7 @@ def export_client_profile(profile: Dict[str, Any], fmt: str = "all") -> Dict[str
     selected = snippets if fmt == "all" else {fmt: snippets[fmt]}
     warnings = []
     if username:
-        warnings.append("导出内容不会包含 Keychain 中的代理密码；需要在客户端里把 <password> 替换为供应商密码。")
+        warnings.append("导出内容不会包含本机密码库里的代理密码；需要在客户端里把 <password> 替换为供应商密码。")
     if protocol == "socks5h":
         warnings.append("socks5h:// 的远程 DNS 语义不一定被每个客户端保留；请在目标客户端里启用远程 DNS/规则 DNS。")
     slug = _client_export_slug(profile)
@@ -497,18 +497,18 @@ def deployment_decision(profile: Dict[str, Any], errors: Optional[List[str]] = N
     if protocol in {"http", "https"} and has_auth:
         base.update({
             "status": "ready",
-            "headline": "可系统应用：认证 HTTP/HTTPS 会通过本地桥接保护密码",
+            "headline": "可以部署到这台 Mac：有账号密码的 HTTP/HTTPS 代理会由 Netfix 本机转发",
             "primary_action": "save_validate_apply_system",
             "system_apply": {
                 "status": "bridge_required",
                 "reason_code": "authenticated_http_bridge_required",
-                "label": "保存到 Keychain 后，可通过 127.0.0.1 本地桥接应用到系统代理",
+                "label": "保存到本机密码库后，可以部署到这台 Mac；系统先连 127.0.0.1，再由 Netfix 带着账号密码转发到供应商代理",
                 "requires_confirmation": True,
                 "requires_netfix_running": True,
             },
             "next_steps": [
-                "保存到 Keychain 后验证出口身份和地区。",
-                "验证通过后可应用到系统代理；桥接期间需要保持 Netfix 运行。",
+                "保存到本机密码库后验证出口身份和地区。",
+                "验证通过后点“部署到这台 Mac”；使用期间需要保持 Netfix 运行。",
                 "启动后台监控，失效时提示回滚或恢复桥接。",
             ],
         })
@@ -517,18 +517,18 @@ def deployment_decision(profile: Dict[str, Any], errors: Optional[List[str]] = N
     if protocol in {"http", "https"}:
         base.update({
             "status": "ready",
-            "headline": "可系统应用：HTTP/HTTPS 无认证代理可直接写入 macOS 系统代理",
+            "headline": "可以部署到这台 Mac：无账号密码的 HTTP/HTTPS 代理可直接写入系统代理",
             "primary_action": "save_validate_apply_system",
             "system_apply": {
                 "status": "supported",
                 "reason_code": "system_http_supported_without_auth",
-                "label": "验证通过后可直接应用到系统 Web/Secure Web 代理",
+                "label": "验证通过后，可以部署到这台 Mac 的 Web/Secure Web 代理",
                 "requires_confirmation": True,
                 "requires_netfix_running": False,
             },
             "next_steps": [
                 "保存并验证出口身份。",
-                "验证通过后应用到系统代理并启动监控。",
+                "验证通过后点“部署到这台 Mac”，再启动健康监控。",
             ],
         })
         return base
@@ -536,21 +536,21 @@ def deployment_decision(profile: Dict[str, Any], errors: Optional[List[str]] = N
     if protocol in {"socks5", "socks5h"} and has_auth:
         base.update({
             "status": "ready",
-            "headline": "可系统应用：认证 SOCKS 会通过本地桥接保护密码",
+            "headline": "可以部署到这台 Mac：有账号密码的 SOCKS 代理会由 Netfix 本机转发",
             "primary_action": "save_validate_apply_system",
             "system_apply": {
                 "status": "bridge_required",
                 "reason_code": "authenticated_socks_bridge_required",
-                "label": "保存到 Keychain 后，可通过 127.0.0.1 本地桥接把系统 Web/Secure Web 代理转到认证 SOCKS 上游",
+                "label": "保存到本机密码库后，可以部署到这台 Mac；系统先连 127.0.0.1，再由 Netfix 转发到 SOCKS 代理",
                 "requires_confirmation": True,
                 "requires_netfix_running": True,
             },
             "warnings": [
-                "认证 SOCKS 系统应用会使用本地 HTTP 桥接承接系统 Web/Secure Web 代理流量；需要保持 Netfix 运行。",
+                "有账号密码的 SOCKS 代理会走 Netfix 本机转发；使用期间需要保持 Netfix 运行。",
             ],
             "next_steps": [
-                "保存到 Keychain 后验证出口身份。",
-                "验证通过后可应用到系统代理；Netfix 会启动 127.0.0.1 本地桥接向 SOCKS 上游注入认证。",
+                "保存到本机密码库后验证出口身份。",
+                "验证通过后点“部署到这台 Mac”；Netfix 会启动 127.0.0.1 本机转发并使用已保存的账号密码。",
                 "启动后台监控，失效时提示回滚或恢复桥接；也可以导出 Mihomo/sing-box/Clash 配置作为备用。",
             ],
         })
@@ -558,7 +558,7 @@ def deployment_decision(profile: Dict[str, Any], errors: Optional[List[str]] = N
 
     base.update({
         "status": "ready",
-        "headline": "可系统应用：无认证 SOCKS 可写入 macOS 系统 SOCKS 代理",
+        "headline": "可以部署到这台 Mac：无账号密码的 SOCKS 代理可写入系统 SOCKS 代理",
         "primary_action": "save_validate_apply_system",
         "system_apply": {
             "status": "supported",
@@ -569,7 +569,7 @@ def deployment_decision(profile: Dict[str, Any], errors: Optional[List[str]] = N
         },
         "next_steps": [
             "保存并验证出口身份。",
-            "验证通过后应用到系统 SOCKS 代理并启动监控。",
+            "验证通过后点“部署到这台 Mac”，再启动健康监控。",
         ],
     })
     if protocol == "socks5":
@@ -649,6 +649,36 @@ def _parse_autodiscovery_state(output: str) -> Dict[str, Any]:
     return {"raw": output, "enabled": _truthy(value)}
 
 
+def _parse_ipv6_state(output: str) -> Dict[str, Any]:
+    fields = _parse_networksetup_fields(output)
+    mode_raw = fields.get("ipv6", "")
+    mode = mode_raw.strip().lower()
+    address = fields.get("ipv6 ip address", "")
+    router = fields.get("ipv6 router", "")
+    prefix = fields.get("ipv6 prefix length", "") or fields.get("prefix length", "")
+    if "off" in mode or "disabled" in mode:
+        normalized = "off"
+    elif "automatic" in mode or "auto" in mode:
+        normalized = "automatic"
+    elif "manual" in mode:
+        normalized = "manual"
+    else:
+        normalized = "unknown"
+    restorable = normalized in {"off", "automatic"} or (
+        normalized == "manual" and bool(address and prefix and router)
+    )
+    return {
+        "raw": output,
+        "mode": normalized,
+        "mode_raw": mode_raw,
+        "enabled": normalized not in {"off", "unknown"},
+        "address": address,
+        "router": router,
+        "prefix_length": prefix,
+        "restorable": restorable,
+    }
+
+
 def list_network_services() -> List[str]:
     """Return configured macOS network services."""
     result = _run_networksetup(["-listallnetworkservices"])
@@ -661,6 +691,50 @@ def list_network_services() -> List[str]:
     return services
 
 
+def _default_route_interface() -> str:
+    if sys.platform != "darwin":
+        return ""
+    try:
+        result = subprocess.run(
+            ["route", "-n", "get", "default"],
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    for line in result.stdout.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        if key.strip() == "interface":
+            return value.strip()
+    return ""
+
+
+def _network_service_for_device(device: str, services: List[str]) -> str:
+    if not device:
+        return ""
+    try:
+        output = _run_networksetup(["-listallhardwareports"])["stdout"]
+    except Exception:
+        return ""
+    current_port = ""
+    for line in output.splitlines():
+        item = line.strip()
+        if item.startswith("Hardware Port:"):
+            current_port = item.split(":", 1)[1].strip()
+            continue
+        if item.startswith("Device:"):
+            current_device = item.split(":", 1)[1].strip()
+            if current_device == device and current_port in services:
+                return current_port
+    return ""
+
+
 def choose_network_service(requested: str = "") -> str:
     """Choose a likely active macOS network service without mutating state."""
     services = list_network_services()
@@ -668,6 +742,9 @@ def choose_network_service(requested: str = "") -> str:
         if requested not in services:
             raise RuntimeError(f"network service not found: {requested}")
         return requested
+    active_service = _network_service_for_device(_default_route_interface(), services)
+    if active_service:
+        return active_service
     for preferred in ("Wi-Fi", "USB 10/100/1000 LAN", "Ethernet"):
         if preferred in services:
             return preferred
@@ -682,6 +759,7 @@ def _capture_system_proxy_backup(service: str) -> Dict[str, Any]:
     socks = _parse_proxy_state(_run_networksetup(["-getsocksfirewallproxy", service])["stdout"])
     auto_url = _parse_auto_proxy_url_state(_run_networksetup(["-getautoproxyurl", service])["stdout"])
     autodiscovery = _parse_autodiscovery_state(_run_networksetup(["-getproxyautodiscovery", service])["stdout"])
+    ipv6 = _parse_ipv6_state(_run_networksetup(["-getinfo", service])["stdout"])
     return {
         "service": service,
         "web": web,
@@ -689,6 +767,7 @@ def _capture_system_proxy_backup(service: str) -> Dict[str, Any]:
         "socks": socks,
         "auto_proxy_url": auto_url,
         "auto_discovery": autodiscovery,
+        "ipv6": ipv6,
     }
 
 
@@ -718,6 +797,30 @@ def _restore_proxy_kind(service: str, kind: str, state: Dict[str, Any]) -> List[
     return commands
 
 
+def _restore_ipv6_commands(service: str, state: Dict[str, Any]) -> List[List[str]]:
+    mode = str(state.get("mode") or "")
+    if mode == "off":
+        return [["-setv6off", service]]
+    if mode == "automatic":
+        return [["-setv6automatic", service]]
+    if mode == "manual" and state.get("address") and state.get("prefix_length") and state.get("router"):
+        return [[
+            "-setv6manual",
+            service,
+            str(state["address"]),
+            str(state["prefix_length"]),
+            str(state["router"]),
+        ]]
+    return []
+
+
+def _disable_ipv6_commands(service: str, backup: Dict[str, Any]) -> List[List[str]]:
+    state = backup.get("ipv6") if isinstance(backup.get("ipv6"), dict) else {}
+    if not state or state.get("mode") == "off" or not state.get("restorable"):
+        return []
+    return [["-setv6off", service]]
+
+
 def _restore_system_proxy_backup(backup: Dict[str, Any]) -> Dict[str, Any]:
     service = str(backup.get("service") or "")
     if not service:
@@ -740,6 +843,7 @@ def _restore_system_proxy_backup(backup: Dict[str, Any]) -> Dict[str, Any]:
         commands.append(["-setautoproxystate", service, "off"])
 
     commands.append(["-setproxyautodiscovery", service, "on" if backup.get("auto_discovery", {}).get("enabled") else "off"])
+    commands.extend(_restore_ipv6_commands(service, backup.get("ipv6", {})))
 
     executed = []
     for command in commands:
@@ -1050,7 +1154,7 @@ def parse_proxy_bundle(payload: Dict[str, Any]) -> Dict[str, Any]:
     limited = [item for item in valid if (item.get("deployment_decision") or {}).get("status") == "limited"]
     recommendation = ready[0] if ready else (valid[0] if valid else None)
     warnings = [
-        "批量预检不会保存代理密码；选择某一行保存时才会写入 Keychain。",
+        "批量预检不会保存代理密码；选择某一行保存时才会写入本机密码库。",
         "预检结果只返回脱敏 URL 和部署决策，不会回显供应商密码。",
     ]
     if truncated:
@@ -1083,6 +1187,7 @@ def save_proxy_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Save a non-secret proxy profile and store its password in Keychain."""
     parsed = parse_proxy_input(payload)
     if not parsed.get("ok"):
+        parsed.pop("_secret", None)
         return parsed
     profile = dict(parsed["profile"])
     password = parsed.get("_secret", {}).get("password")
@@ -1318,13 +1423,53 @@ def _dns_leak_assessment(profile: Dict[str, Any]) -> Dict[str, Any]:
 
 def _ipv6_leak_assessment(profile: Dict[str, Any]) -> Dict[str, Any]:
     protocol = str(profile.get("protocol") or "")
+    if protocol not in SUPPORTED_PROTOCOLS:
+        return {
+            "status": "unknown",
+            "confidence": "none",
+            "risk": "unsupported profile protocol",
+        }
+    if sys.platform != "darwin":
+        return {
+            "status": "unknown",
+            "confidence": "not_applicable",
+            "risk": "system-wide IPv6 fallback checks are implemented for macOS network services",
+        }
+    try:
+        service = choose_network_service("")
+        state = _parse_ipv6_state(_run_networksetup(["-getinfo", service])["stdout"])
+    except Exception as exc:
+        return {
+            "status": "unknown",
+            "confidence": "local_check_failed",
+            "error": str(exc),
+            "risk": "could not read the active macOS network service IPv6 state",
+        }
+
+    enabled = bool(state.get("enabled"))
+    mode = str(state.get("mode") or "unknown")
+    if enabled:
+        return {
+            "status": "warn",
+            "confidence": "local_system_check",
+            "network_service": service,
+            "system_ipv6_enabled": True,
+            "mode": mode,
+            "risk": (
+                "current macOS network service still has IPv6 enabled; system proxy apply will try to disable "
+                "restorable IPv6 and record rollback data"
+            ),
+        }
     return {
-        "status": "unknown",
-        "confidence": "not_tested",
+        "status": "ok" if mode == "off" else "unknown",
+        "confidence": "local_system_check",
+        "network_service": service,
+        "system_ipv6_enabled": False,
+        "mode": mode,
         "risk": (
-            "profile validation proves this proxy path only; system-wide IPv6 fallback requires a live system apply check"
-            if protocol in SUPPORTED_PROTOCOLS
-            else "unsupported profile protocol"
+            "current macOS network service IPv6 is off"
+            if mode == "off"
+            else "macOS returned an IPv6 state that Netfix could not classify"
         ),
     }
 
@@ -1628,8 +1773,13 @@ def apply_dry_run(profile: Dict[str, Any], mode: str = "system") -> Dict[str, An
             "label": "设置 macOS 当前 Network Service 的 Web/SOCKS 代理",
             "safe_preview": f"{protocol}://{host}:{port}",
         })
+        steps.append({
+            "tier": 2,
+            "label": "备份当前 IPv6 状态；可安全恢复时临时关闭 IPv6，避免绕过代理",
+            "safe_preview": "networksetup -getinfo <service> -> optional -setv6off <service>",
+        })
         if profile.get("credential_ref"):
-            warnings.append("系统认证代理涉及密码，正式执行必须从 Keychain 读取，不能拼进命令字符串。")
+            warnings.append("系统认证代理涉及密码，正式执行必须从本机密码库读取，不能拼进命令字符串。")
         if _has_auth(profile):
             if protocol in {"http", "https", "socks5", "socks5h"}:
                 steps.append({
@@ -1828,8 +1978,16 @@ def apply_proxy_profile(
         for command in _apply_system_proxy_commands(effective_profile, service):
             _run_networksetup(command)
             executed.append({"args": ["networksetup", *command]})
+        ipv6_commands = _disable_ipv6_commands(service, backup)
+        for command in ipv6_commands:
+            _run_networksetup(command)
+            executed.append({"args": ["networksetup", *command]})
         entry["applied_at"] = _utc_now()
         entry["commands"] = executed
+        entry["ipv6"] = {
+            "disabled_during_apply": bool(ipv6_commands),
+            "backup_mode": (backup.get("ipv6") or {}).get("mode") if isinstance(backup.get("ipv6"), dict) else None,
+        }
         _write_apply_journal(entry)
     except Exception as exc:
         restore = _restore_system_proxy_backup(backup)
@@ -1891,6 +2049,7 @@ def apply_proxy_profile(
         "redacted_url": entry["redacted_url"],
         "bridge": bridge_started,
         "applied": {"scope": "loopback_bridge", "requires_netfix_running": True} if bridge_started else {"scope": "system_proxy"},
+        "ipv6": entry.get("ipv6"),
         "verify": verify_result,
         "deployment_decision": plan.get("deployment_decision"),
         "rollback_available": True,
@@ -2104,7 +2263,7 @@ def bridge_lifecycle(bridges: List[Dict[str, Any]], stale_check: Dict[str, Any])
                 "audit": audit,
                 "next_steps": [
                     "保持 Netfix 运行，让系统代理继续通过本地桥接访问认证 HTTP/HTTPS 上游。",
-                    "不用时点击回滚系统应用，避免系统代理停留在本地桥接端口。",
+                    "不用时点击恢复原来的网络设置，避免系统代理停留在本机转发端口。",
                 ],
             }
         return {
@@ -2128,7 +2287,7 @@ def bridge_lifecycle(bridges: List[Dict[str, Any]], stale_check: Dict[str, Any])
             "status": "not_in_use",
             "headline": "系统当前未使用 Netfix 桥接",
             "primary_action": "none",
-            "next_steps": ["需要认证 HTTP/HTTPS 系统代理时，先保存并验证代理 Profile，再确认应用。"],
+            "next_steps": ["需要把有账号密码的代理部署到这台 Mac 时，先保存并验证代理参数，再确认部署。"],
         }
 
     return {
@@ -2136,7 +2295,7 @@ def bridge_lifecycle(bridges: List[Dict[str, Any]], stale_check: Dict[str, Any])
         "status": "stopped",
         "headline": "本地桥接未启动",
         "primary_action": "none",
-        "next_steps": ["认证 HTTP/HTTPS 代理确认系统应用后，桥接状态会显示在这里。"],
+        "next_steps": ["有账号密码的 HTTP/HTTPS 代理确认部署到这台 Mac 后，本机转发状态会显示在这里。"],
     }
 
 

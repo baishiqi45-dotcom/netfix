@@ -33,6 +33,7 @@ struct SettingsView: View {
     @State private var llmMaxImageRequestsPerHour = 12
     @State private var llmImageQuestionEnabled = false
     @State private var aiStatus: String?
+    @State private var mcpStatus: String?
     @State private var showLLMProviderTestConfirmation = false
     @State private var showLLMChainTestConfirmation = false
     @State private var proxyProfiles: [ProxyProfile] = []
@@ -84,11 +85,11 @@ struct SettingsView: View {
                 }
                 .tag("proxy")
 
-            servicesTab
+            agentTab
                 .tabItem {
-                    Label("服务", systemImage: "list.bullet.rectangle")
+                    Label("Agent", systemImage: "terminal")
                 }
-                .tag("services")
+                .tag("agent")
 
             aiTab
                 .tabItem {
@@ -208,11 +209,15 @@ struct SettingsView: View {
                         }
                     }
 
-                Toggle("自动处理低风险问题", isOn: $autoFixTier1)
+                Toggle("自动修复不用动系统设置的小问题", isOn: $autoFixTier1)
 
                 Picker("菜单栏图标样式", selection: $iconStyle) {
                     Text("彩色状态灯").tag(0)
                     Text("单色图标").tag(1)
+                }
+
+                DisclosureGroup("高级：服务分组") {
+                    serviceGroupsBlock
                 }
             }
 
@@ -228,6 +233,12 @@ struct SettingsView: View {
     // MARK: - Services
 
     private var servicesTab: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            serviceGroupsBlock
+        }
+    }
+
+    private var serviceGroupsBlock: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let error = loadError {
                 Text(error)
@@ -261,6 +272,86 @@ struct SettingsView: View {
                     .padding(.bottom, 8)
             }
         }
+    }
+
+    // MARK: - Agent / MCP
+
+    private var agentTab: some View {
+        Form {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "terminal")
+                            .foregroundStyle(.blue)
+                        Text("把 Netfix 接进 Agent")
+                            .font(.headline)
+                        Spacer()
+                        Text(mcpServerExists ? "已就绪" : "缺少 MCP 文件")
+                            .font(.caption2)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background((mcpServerExists ? Color.green : Color.orange).opacity(0.14))
+                            .foregroundStyle(mcpServerExists ? Color.green : Color.orange)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+
+                    Text("已下载 App 的用户不用找仓库脚本。Codex 可以直接复制注册命令；Kimi 如果当前版本没有 MCP 注册入口，就复制通用 stdio 配置给支持 MCP 的宿主。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("复制注册命令") {
+                HStack {
+                    Button {
+                        copyMCPCommand(kind: .codex)
+                    } label: {
+                        Label("复制给 Codex", systemImage: "doc.on.doc")
+                    }
+                    .disabled(!mcpServerExists)
+
+                    Button {
+                        copyMCPCommand(kind: .kimi)
+                    } label: {
+                        Label("复制 Kimi/通用配置", systemImage: "doc.on.doc")
+                    }
+                    .disabled(!mcpServerExists)
+
+                    Button {
+                        copyMCPCommand(kind: .all)
+                    } label: {
+                        Label("复制全部", systemImage: "square.on.square")
+                    }
+                    .disabled(!mcpServerExists)
+                }
+
+                Text(mcpCommandPreview)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+
+                if let mcpStatus {
+                    Text(mcpStatus)
+                        .font(.caption)
+                        .foregroundStyle(mcpStatus.hasPrefix("失败") ? Color.red : Color.secondary)
+                } else {
+                    Text("MCP 不保存 API Key 或代理密码；部署系统代理和保存密钥仍回到 Netfix App 里确认。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("如果复制后不能用") {
+                Button("在 Finder 里显示 MCP 文件") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: mcpServerPath)])
+                }
+                .disabled(!mcpServerExists)
+
+                Text("确认 Netfix.app 没有被移走；如果你重新安装了 App，需要重新复制注册命令。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding()
     }
 
     // MARK: - AI
@@ -300,7 +391,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Picker("AI 供应商", selection: $llmProvider) {
+                Picker("AI 服务", selection: $llmProvider) {
                     ForEach(llmProviders) { provider in
                         Text(provider.label).tag(provider.id)
                     }
@@ -319,15 +410,15 @@ struct SettingsView: View {
                     .textFieldStyle(.roundedBorder)
                     .help("只写入本机密码库，不会进入诊断报告、日志或导出文件。")
 
-                Picker("脱敏级别", selection: $redactionLevel) {
-                    Text("均衡").tag("balanced")
+                Picker("隐私保护", selection: $redactionLevel) {
+                    Text("默认").tag("balanced")
                     Text("严格").tag("strict")
                 }
 
-                Picker("上传确认", selection: $uploadConsent) {
-                    Text("每次询问").tag("ask_each_time")
-                    Text("始终允许").tag("always")
-                    Text("永不上传").tag("never")
+                Picker("发报告前", selection: $uploadConsent) {
+                    Text("每次问我").tag("ask_each_time")
+                    Text("总是发送").tag("always")
+                    Text("从不发送").tag("never")
                 }
 
                 Toggle("允许带截图问 AI", isOn: $llmImageQuestionEnabled)
@@ -357,7 +448,7 @@ struct SettingsView: View {
                         llmChainReadinessBlock
 
                         Toggle("启用本地请求预算", isOn: $llmBudgetEnabled)
-                        Toggle("跨重启保留本地预算计数", isOn: $llmBudgetPersistLedger)
+                        Toggle("记住我的使用次数", isOn: $llmBudgetPersistLedger)
                         Stepper("每小时云端请求上限：\(llmMaxRequestsPerHour)", value: $llmMaxRequestsPerHour, in: 0...10_000)
                         Stepper("每小时图片问诊上限：\(llmMaxImageRequestsPerHour)", value: $llmMaxImageRequestsPerHour, in: 0...10_000)
                         Text("持久化预算账本只记录供应商、模式、时间戳和冷却状态；关闭持久化或关闭预算会删除旧账本。这不是供应商账单硬上限。")
@@ -745,7 +836,7 @@ struct SettingsView: View {
                 Toggle("保留最近诊断报告", isOn: $saveLatestReport)
                 Toggle("自动裁剪事件日志", isOn: $logRetentionEnabled)
                 Stepper("事件日志保留 \(logRetentionDays) 天", value: $logRetentionDays, in: 1...365)
-                Toggle("保存完整代理身份报告", isOn: $persistProxyIdentityReport)
+                Toggle("保存完整出口检测报告", isOn: $persistProxyIdentityReport)
                 Text("关闭时，配置只保留出口摘要，不长期保存完整出口 IP、运营商信息和每个检测目标明细。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -835,6 +926,65 @@ struct SettingsView: View {
 
     private var canUseNotifications: Bool {
         Bundle.main.bundlePath.hasSuffix(".app")
+    }
+
+    private enum MCPCommandKind {
+        case codex
+        case kimi
+        case all
+    }
+
+    private var mcpServerPath: String {
+        if let resourceURL = Bundle.main.resourceURL {
+            let bundled = resourceURL.appendingPathComponent("netfix/mcp_server.py").path
+            if FileManager.default.fileExists(atPath: bundled) {
+                return bundled
+            }
+        }
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("netfix/mcp_server.py")
+            .path
+    }
+
+    private var mcpServerExists: Bool {
+        FileManager.default.fileExists(atPath: mcpServerPath)
+    }
+
+    private var codexMCPCommand: String {
+        "codex mcp add netfix -- python3 \(shellQuote(mcpServerPath))"
+    }
+
+    private var kimiMCPCommand: String {
+        """
+        # Kimi Code 当前 CLI 如果没有 `mcp add`，不要粘贴旧命令。
+        # 在支持 MCP stdio 的 Kimi/Agent 宿主里填：
+        name: netfix
+        command: python3
+        args: \(shellQuote(mcpServerPath))
+        """
+    }
+
+    private var mcpCommandPreview: String {
+        [codexMCPCommand, kimiMCPCommand].joined(separator: "\n")
+    }
+
+    private func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private func copyMCPCommand(kind: MCPCommandKind) {
+        let text: String
+        switch kind {
+        case .codex:
+            text = codexMCPCommand
+        case .kimi:
+            text = kimiMCPCommand
+        case .all:
+            text = mcpCommandPreview
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        mcpStatus = "已复制。Codex 粘贴命令后重启 Agent；Kimi 用通用 stdio 配置，前提是宿主支持 MCP。"
     }
 
     private func refreshNotificationStatus() async {
@@ -2119,15 +2269,14 @@ struct SettingsView: View {
                 return
             }
             if response.reasonCode == "bridge_unsupported_upstream_protocol" {
-                proxyStatus = "这类代理暂不能直接部署到整台 Mac。可以导出客户端配置，或给终端工具使用。"
+                proxyStatus = response.friendlyFailureMessage
                 return
             }
             if response.ok && response.status == "pending_confirmation" {
-                proxyStatus = "需要确认短语：\(response.confirmation ?? "APPLY_PROXY_PROFILE")"
+                proxyStatus = "还需要确认。请重新点“部署到这台 Mac”，并在中文确认框里确认。"
                 return
             }
-            let reason = response.reasonCode ?? response.error ?? "无法应用"
-            proxyStatus = "失败：\(reason)"
+            proxyStatus = "失败：\(response.friendlyFailureMessage)"
         } catch {
             pendingSystemProxyProfile = nil
             pendingSystemProxyPlan = nil

@@ -14,6 +14,7 @@ struct DashboardView: View {
     @State private var showRollbackConfirmation = false
     @State private var showLogsSheet = false
     @State private var showAIQuestionSheet = false
+    @State private var aiQuestionContext: AIQuestionContext = .diagnosis
 
     var body: some View {
         VStack(spacing: 0) {
@@ -97,6 +98,7 @@ struct DashboardView: View {
         .sheet(isPresented: $showAIQuestionSheet) {
             AIQuestionSheet(
                 isWorking: viewModel.isWorking,
+                context: aiQuestionContext,
                 onOpenAISettings: {
                     NSApp.sendAction(#selector(AppDelegate.showAISettings), to: nil, from: nil)
                 }
@@ -199,7 +201,7 @@ struct DashboardView: View {
             if !items.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(items.prefix(3)) { item in
-                        Text("• \(item.name)")
+                        Text("• \(item.displayTitle)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -378,10 +380,10 @@ struct DashboardView: View {
     private func friendlyErrorMessage(_ message: String) -> String {
         let lower = message.lowercased()
         if lower.contains("command timed out") || lower.contains("timed out") {
-            return "操作耗时过长，可能是网络质量差或代理无响应。请检查代理客户端是否正常工作，或稍后重试。"
+            return "网络太慢或代理没响应。可以重试一次，或者点“去粘贴并部署”换一组代理。"
         }
         if lower.contains("could not connect") || lower.contains("connection refused") {
-            return "无法连接到 Netfix，本地服务可能正在启动或已异常退出。请稍后重试，或尝试重启 Netfix。"
+            return "Netfix 自己暂时连不上。等几秒再重试；如果还不行，退出 App 后重新打开。"
         }
         if lower.contains("decode") || lower.contains("解析失败") {
             return "App 与后端返回的数据格式不匹配，可能是版本不一致。请尝试重启应用。"
@@ -407,10 +409,10 @@ struct DashboardView: View {
     private var proxyDeploySection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("让这台 Mac 用上你的代理", systemImage: "point.3.connected.trianglepath.dotted")
+                Label("粘贴你已有的代理参数", systemImage: "point.3.connected.trianglepath.dotted")
                     .font(.headline)
                 Spacer()
-                Text("AI 可不填")
+                Text("不需要 API Key 也能用")
                     .font(.caption2)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -419,18 +421,29 @@ struct DashboardView: View {
                     .cornerRadius(6)
             }
 
-            Text("把代理服务商后台给你的整行连接信息粘贴进来，Netfix 会测试、保存，再让浏览器和其他 App 使用它。复制整行，不要只复制出口 IP。")
+            Text("从你购买代理的网站后台复制完整一行：地址、端口、用户名、密码。Netfix 不卖 IP，也不能只靠出口 IP 部署。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Button {
-                openProxySettings()
-            } label: {
-                Label("开始部署代理", systemImage: "square.and.arrow.down")
-                    .frame(maxWidth: .infinity)
+            HStack(spacing: 8) {
+                Button {
+                    openProxySettings()
+                } label: {
+                    Label("去粘贴并部署", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!backend.isReady)
+
+                Button {
+                    aiQuestionContext = .proxy
+                    showAIQuestionSheet = true
+                } label: {
+                    Label("问 AI", systemImage: "sparkles")
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.isWorking)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(!backend.isReady)
         }
         .padding()
         .background(Color(NSColor.controlBackgroundColor))
@@ -463,9 +476,10 @@ struct DashboardView: View {
 
             if viewModel.llmExplanation == nil {
                 Button {
+                    aiQuestionContext = .diagnosis
                     showAIQuestionSheet = true
                 } label: {
-                    Label("看不懂诊断？让 AI 解释一下", systemImage: "message")
+                    Label("看不懂结果？让 AI 解释一下", systemImage: "message")
                 }
                 .buttonStyle(.borderless)
                 .disabled(viewModel.isWorking)
@@ -475,8 +489,15 @@ struct DashboardView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(report.diagnostics) { item in
                         HStack {
-                            Text(item.name)
-                                .font(.body)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.displayTitle)
+                                    .font(.body)
+                                if item.displayTitle != item.name {
+                                    Text(item.name)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                             Spacer()
                             let status = DiagnosticStatus(item.status)
                             StatusIconView(status: status, label: statusLabel(status))
@@ -715,6 +736,13 @@ struct DashboardView: View {
     // MARK: - 底部操作栏
 
     private var actionToolbar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            primaryActionToolbar
+            secondaryActionToolbar
+        }
+    }
+
+    private var primaryActionToolbar: some View {
         HStack(spacing: 12) {
             Button("一键诊断") {
                 Task {
@@ -724,31 +752,38 @@ struct DashboardView: View {
             .buttonStyle(.borderedProminent)
             .disabled(!backend.isReady || viewModel.isWorking)
 
-            Button("一键修复") {
-                Task {
-                    await viewModel.fix()
+            Button("处理建议") {
+                if let action = viewModel.recommendedAction {
+                    requestAction(action)
                 }
             }
             .buttonStyle(.bordered)
-            .disabled(!backend.isReady || viewModel.isWorking || viewModel.report == nil)
+            .disabled(!backend.isReady || viewModel.isWorking || viewModel.recommendedAction == nil)
+            .help(viewModel.recommendedAction == nil ? "先诊断；Netfix 找到明确建议后才能处理。" : "按上方报告里的建议处理。")
 
             Button("撤销") {
                 showRollbackConfirmation = true
             }
             .buttonStyle(.borderless)
             .disabled(!backend.isReady || viewModel.isWorking)
+        }
+    }
 
-            Spacer()
-
-            Toggle("自动修复", isOn: $autoFixTier1)
+    private var secondaryActionToolbar: some View {
+        HStack(spacing: 10) {
+            Toggle("自动处理低风险问题", isOn: $autoFixTier1)
                 .toggleStyle(.switch)
+                .fixedSize()
                 .help("只自动处理不会改系统网络设置的低风险问题")
 
-            Button("部署代理") {
+            Spacer(minLength: 8)
+
+            Button("代理") {
                 openProxySettings()
             }
             .buttonStyle(.borderless)
             .disabled(!backend.isReady)
+            .help("粘贴代理账号并部署到这台 Mac")
 
             Button("日志") {
                 showLogsSheet = true
@@ -763,7 +798,9 @@ struct DashboardView: View {
                 NSApp.sendAction(#selector(AppDelegate.showSettings), to: nil, from: nil)
             }
             .buttonStyle(.borderless)
+            .disabled(!backend.isReady)
         }
+        .lineLimit(1)
     }
 }
 
@@ -774,8 +811,32 @@ private struct AIQuestionImage: Identifiable, Equatable {
     let preview: NSImage?
 }
 
+private enum AIQuestionContext {
+    case diagnosis
+    case proxy
+
+    var prompts: [String] {
+        switch self {
+        case .diagnosis:
+            return ["下一步怎么处理？", "怎么看出来的？", "是不是代理没生效？"]
+        case .proxy:
+            return ["这个代理能用吗？", "粘贴格式对吗？", "为什么 SOCKS5 失败？"]
+        }
+    }
+
+    var placeholder: String {
+        switch self {
+        case .diagnosis:
+            return "留空也可以，Netfix 会直接解释当前诊断报告；也可以补一句你现在遇到什么。"
+        case .proxy:
+            return "可以问代理怎么粘贴、HTTP 和 SOCKS5 怎么选、部署失败下一步怎么办。"
+        }
+    }
+}
+
 private struct AIQuestionSheet: View {
     let isWorking: Bool
+    let context: AIQuestionContext
     let onOpenAISettings: () -> Void
     let onSend: (String, [String]) -> Void
 
@@ -814,7 +875,7 @@ private struct AIQuestionSheet: View {
                             .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
                     )
                 if question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("留空也可以，Netfix 会直接解释当前诊断报告；也可以补一句你现在遇到什么。")
+                    Text(context.placeholder)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 8)
@@ -886,7 +947,7 @@ private struct AIQuestionSheet: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
-                ForEach(["下一步怎么处理？", "怎么看出来的？", "是不是代理没生效？"], id: \.self) { prompt in
+                ForEach(context.prompts, id: \.self) { prompt in
                     Button(prompt) {
                         question = prompt
                     }
@@ -982,6 +1043,10 @@ final class DashboardViewModel: ObservableObject {
     @Published var llmError: String?
     @Published var activeJobID: String?
 
+    var recommendedAction: Action? {
+        report?.explanation?.primaryAction ?? report?.explanation?.actions.first
+    }
+
     private var client: APIClient?
     private var progressTimer: Timer?
     private var progressIndex = 0
@@ -1041,23 +1106,14 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func fix() async {
-        guard let client = client else { return }
         errorMessage = nil
-        lastOperation = .fix
-        startWork(steps: [
-            "正在执行修复…",
-            "正在刷新 DNS 缓存…",
-            "正在重新检测…",
-        ])
-        do {
-            let report = try await client.fix(timeout: 90)
-            self.report = report
-            headline = report.explanation?.headline ?? report.summaryHeadline
-        } catch {
-            errorMessage = error.localizedDescription
-            headline = "修复失败"
+        guard recommendedAction != nil else {
+            headline = "没有可直接处理的建议"
+            errorMessage = "先点“一键诊断”。只有 Netfix 找到明确建议后，才会出现可处理按钮。"
+            return
         }
-        stopWork()
+        headline = "请选择上方的处理建议"
+        errorMessage = "这一步需要按报告里的具体建议处理；如果会改系统网络设置，Netfix 会先弹出确认。"
     }
 
     func executeAction(_ action: Action) async {
@@ -1084,13 +1140,35 @@ final class DashboardViewModel: ObservableObject {
         errorMessage = nil
         lastOperation = .rollback
         startWork(steps: [
-            "正在撤销上次修复…",
+            "正在检查是否有代理部署需要恢复…",
             "正在重新检测…",
         ])
         do {
-            let result = try await client.rollback(timeout: 30)
-            self.report = result
-            headline = "已撤销"
+            let proxyRollback = try await client.rollbackProxyProfile(confirmed: true)
+            if proxyRollback.ok {
+                headline = "已恢复代理部署前网络"
+                do {
+                    let fresh = try await client.diagnose(timeout: 60)
+                    self.report = fresh
+                    headline = fresh.explanation?.headline ?? fresh.summaryHeadline
+                } catch {
+                    errorMessage = "已恢复代理部署前网络，但重新检测失败：\(error.localizedDescription)"
+                }
+                stopWork()
+                return
+            }
+            if proxyRollback.status == "no_journal" {
+                let result = try await client.rollback(timeout: 30)
+                self.report = result
+                headline = "已撤销"
+                stopWork()
+                return
+            } else {
+                headline = "恢复代理部署失败"
+                errorMessage = proxyRollback.error ?? "代理回滚没有完成，请查看日志。"
+                stopWork()
+                return
+            }
         } catch {
             errorMessage = error.localizedDescription
             headline = "撤销失败"

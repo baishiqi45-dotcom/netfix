@@ -23,7 +23,7 @@ done
 
 echo "== Python syntax =="
 cd "${ROOT}"
-python3 -m py_compile scripts/release_audit.py scripts/release_readiness.py scripts/release_export.py scripts/release_evidence.py scripts/clean_machine_qa.py scripts/legal_release_review.py scripts/marketing_claims_check.py scripts/provider_contract_check.py scripts/provider_smoke_check.py netfix/*.py
+python3 -m py_compile scripts/release_audit.py scripts/release_readiness.py scripts/release_export.py scripts/release_preflight.py scripts/release_evidence.py scripts/clean_machine_qa.py scripts/legal_release_review.py scripts/marketing_claims_check.py scripts/provider_contract_check.py scripts/provider_smoke_check.py netfix/*.py
 
 echo "== Provider contracts =="
 python3 scripts/provider_contract_check.py

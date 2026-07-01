@@ -10,8 +10,9 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, List
 
@@ -42,12 +43,23 @@ TEXT_SUFFIXES = {
     ".yml",
 }
 
+TRACKED_RELEASE_ARTIFACT_PATTERNS = (
+    "Netfix-*.dmg",
+    "Netfix-*.zip",
+)
+
 SKIP_DIR_NAMES = {
     ".git",
+    ".build",
+    ".netfix",
     ".pytest_cache",
     ".swiftpm",
-    "node_modules",
     "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "open-source-export",
+    "release-export",
 }
 
 
@@ -57,6 +69,25 @@ class Finding:
     kind: str
     path: str
     message: str
+    next_steps: List[str] = field(default_factory=list)
+
+
+SENSITIVE_ARTIFACT_NEXT_STEPS = [
+    "Do not publish this source workspace while the artifact is present.",
+    "If it contains live credentials, rotate those credentials with the provider first.",
+    "After explicit owner approval, remove the old proxy package/artifact from the source workspace and rerun release_audit.",
+]
+
+TRACKED_RELEASE_ARTIFACT_NEXT_STEPS = [
+    "Keep generated DMG/ZIP files in release-export or build output, not in source control.",
+    "Run: git rm --cached Netfix-0.2.0.dmg Netfix-0.2.0-macos.zip",
+    "Rerun: python3 scripts/release_audit.py --scope workspace --root .",
+]
+
+MISSING_BUNDLE_FILE_NEXT_STEPS = [
+    "Rebuild the macOS app bundle with gui/macos/build_app.sh.",
+    "Rerun bundle release_audit against the generated Netfix.app.",
+]
 
 
 def _iter_files(root: Path) -> Iterable[Path]:
@@ -91,10 +122,27 @@ def _scan_text_file(path: Path, rel: str) -> List[Finding]:
                     kind="secret-like-text",
                     path=rel,
                     message="Secret-like proxy credential or token text found.",
+                    next_steps=SENSITIVE_ARTIFACT_NEXT_STEPS,
                 )
             )
             break
     return findings
+
+
+def _git_tracked_release_artifacts(root: Path) -> List[str]:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "ls-files", *TRACKED_RELEASE_ARTIFACT_PATTERNS],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return []
+    if proc.returncode != 0:
+        return []
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
 
 def audit(root: Path, scope: str) -> List[Finding]:
@@ -109,11 +157,24 @@ def audit(root: Path, scope: str) -> List[Finding]:
                     kind="sensitive-filename",
                     path=rel,
                     message="Proxy credential/config artifact must not be present in release scope.",
+                    next_steps=SENSITIVE_ARTIFACT_NEXT_STEPS,
                 )
             )
         # Bundle artifacts should be stricter. Workspace scans still look at
         # obvious text secrets, but filename blockers carry most of the signal.
         findings.extend(_scan_text_file(path, rel))
+
+    if scope == "workspace":
+        for rel in _git_tracked_release_artifacts(root):
+            findings.append(
+                Finding(
+                    severity="blocker",
+                    kind="tracked-release-artifact",
+                    path=rel,
+                    message="Generated DMG/ZIP release artifact is tracked by git; remove it from the index before source release.",
+                    next_steps=TRACKED_RELEASE_ARTIFACT_NEXT_STEPS,
+                )
+            )
 
     if scope == "bundle":
         required = [
@@ -133,6 +194,7 @@ def audit(root: Path, scope: str) -> List[Finding]:
                         kind="missing-release-file",
                         path=item,
                         message="Required release bundle file is missing.",
+                        next_steps=MISSING_BUNDLE_FILE_NEXT_STEPS,
                     )
                 )
     return findings
@@ -159,6 +221,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"release audit failed: {len(findings)} finding(s)", file=sys.stderr)
         for item in findings:
             print(f"- [{item.severity}] {item.kind}: {item.path} - {item.message}", file=sys.stderr)
+            for step in item.next_steps:
+                print(f"  next: {step}", file=sys.stderr)
     else:
         print(f"release audit passed: {args.scope} {args.root}")
 

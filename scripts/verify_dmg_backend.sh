@@ -51,9 +51,11 @@ hdiutil attach -nobrowse -readonly -mountpoint "${MNT}" "${DMG_PATH}" >/dev/null
 APP="${MNT}/Netfix.app"
 MANIFEST="${APP}/Contents/Resources/release-manifest.json"
 BACKEND="${APP}/Contents/MacOS/netfix-backend"
+MCP_SERVER="${APP}/Contents/Resources/netfix/mcp_server.py"
 
 test -d "${APP}/Contents"
 test -f "${MANIFEST}"
+test -f "${MCP_SERVER}"
 
 python3 - "${MANIFEST}" "${REQUIRE_RUNTIME}" <<'PY'
 import json
@@ -78,6 +80,22 @@ PY
 if [[ "${REQUIRE_RUNTIME}" == "1" || "${REQUIRE_RUNTIME}" == "true" ]]; then
     test -x "${BACKEND}"
 fi
+
+MCP_JSON="$(cd /tmp && printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"dmg-smoke","version":"1.0"}}}' | python3 "${MCP_SERVER}")"
+MCP_JSON="${MCP_JSON}" python3 - <<'PY'
+import json
+import os
+
+lines = [line for line in os.environ["MCP_JSON"].splitlines() if line.strip()]
+if not lines:
+    raise SystemExit("bundled MCP server did not return a JSON-RPC response")
+data = json.loads(lines[-1])
+result = data.get("result") or {}
+server = result.get("serverInfo") or {}
+if server.get("name") != "netfix":
+    raise SystemExit("bundled MCP server did not initialize as netfix")
+print(json.dumps({"ok": True, "bundled_mcp_server": server.get("name")}, ensure_ascii=False))
+PY
 
 if [[ -x "${BACKEND}" ]]; then
     "${BACKEND}" --version >/dev/null
@@ -145,6 +163,8 @@ PY
     WEB_HTML="$(curl -fsS "http://127.0.0.1:${PORT}/")"
     [[ "${WEB_HTML}" == *"btn-open-logs"* ]]
     [[ "${WEB_HTML}" == *"openLogs()"* ]]
+    [[ "${WEB_HTML}" == *"copySupportBundle"* ]]
+    [[ "${WEB_HTML}" == *"/support/bundle"* ]]
     [[ "${WEB_HTML}" == *"recovery-panel"* ]]
     [[ "${WEB_HTML}" == *"renderProxyBridgeLifecycle"* ]]
     [[ "${WEB_HTML}" == *"renderProxyBridgeStartupCheck"* ]]
@@ -157,6 +177,21 @@ PY
     [[ "${WEB_HTML}" == *"TEST_LLM_CHAIN"* ]]
     [[ "${WEB_HTML}" == *"/llm/chain-test"* ]]
     curl -fsS -H "X-Netfix-Token: ${TOKEN}" "http://127.0.0.1:${PORT}/llm/providers" >/dev/null
+    SUPPORT_JSON="$(curl -fsS -H "X-Netfix-Token: ${TOKEN}" "http://127.0.0.1:${PORT}/support/bundle")"
+    SUPPORT_JSON="${SUPPORT_JSON}" python3 - <<'PY'
+import json
+import os
+
+raw = os.environ["SUPPORT_JSON"]
+data = json.loads(raw)
+if data.get("schema_version") != "netfix_support_bundle.v1":
+    raise SystemExit("support bundle schema missing from bundled backend")
+if not data.get("ok") or "support_text" not in data:
+    raise SystemExit("support bundle endpoint did not return a copyable bundle")
+if "X-Netfix-Token" in raw or "__NETFIX_API_TOKEN__" in raw:
+    raise SystemExit("support bundle leaked local API token markers")
+print(json.dumps({"ok": True, "support_bundle": data.get("schema_version")}, ensure_ascii=False))
+PY
     LLM_CHAIN_JSON="$(curl -fsS -H "X-Netfix-Token: ${TOKEN}" "http://127.0.0.1:${PORT}/llm/chain-readiness")"
     LLM_CHAIN_JSON="${LLM_CHAIN_JSON}" python3 - <<'PY'
 import json
@@ -186,7 +221,7 @@ if settings.get("auto_restart_enabled") is not False:
 print(json.dumps({"ok": True, "proxy_bridge_auto_restart_default": settings.get("auto_restart_enabled")}, ensure_ascii=False))
 PY
     IMPORT_JSON="$(curl -fsS -H "X-Netfix-Token: ${TOKEN}" -H "Content-Type: application/json" \
-        -d '{"input":"host,port,user,password\nproxy.example.com,8000,user,real-secret-123"}' \
+        -d '{"input":"host,port,user,password\nproxy.example.com,8000,user,real-secret-123\ndirect.miyaip.online:8001:demo-user:miya-demo-secret"}' \
         "http://127.0.0.1:${PORT}/proxy/import-preview")"
     IMPORT_JSON="${IMPORT_JSON}" python3 - <<'PY'
 import json
@@ -196,10 +231,12 @@ raw = os.environ["IMPORT_JSON"]
 data = json.loads(raw)
 if data.get("schema_version") != "netfix_proxy_import_preview.v1":
     raise SystemExit("proxy import preview schema missing from bundled backend")
-if data.get("summary", {}).get("valid_count") != 1:
-    raise SystemExit("proxy import preview did not parse the provider table row")
+if data.get("summary", {}).get("valid_count") != 2:
+    raise SystemExit("proxy import preview did not parse the provider table row and host:port:user:pass row")
 if "real-secret-123" in raw:
     raise SystemExit("proxy import preview leaked the provider password")
+if "miya-demo-secret" in raw:
+    raise SystemExit("proxy import preview leaked the host:port:user:pass password")
 print(json.dumps({"ok": True, "proxy_import_preview": data.get("summary", {})}, ensure_ascii=False))
 PY
     FIX_DRY_RUN_JSON="$(curl -fsS -H "X-Netfix-Token: ${TOKEN}" -H "Content-Type: application/json" \
@@ -230,6 +267,22 @@ if not data.get("ok") or not profile.get("id"):
 print(profile["id"])
 PY
 )"
+    APPLY_DRY_RUN_JSON="$(curl -fsS -H "X-Netfix-Token: ${TOKEN}" -H "Content-Type: application/json" \
+        -d '{"mode":"system"}' \
+        "http://127.0.0.1:${PORT}/proxy/profiles/${PROFILE_ID}/apply-dry-run")"
+    APPLY_DRY_RUN_JSON="${APPLY_DRY_RUN_JSON}" python3 - <<'PY'
+import json
+import os
+
+data = json.loads(os.environ["APPLY_DRY_RUN_JSON"])
+steps = data.get("steps") or []
+labels = " ".join(str(step.get("label") or "") for step in steps)
+if data.get("status") != "dry_run" or not data.get("requires_confirmation"):
+    raise SystemExit("proxy apply dry-run did not require confirmation")
+if "IPv6" not in labels:
+    raise SystemExit("proxy apply dry-run did not include IPv6 protection step")
+print(json.dumps({"ok": True, "proxy_apply_dry_run_ipv6": True}, ensure_ascii=False))
+PY
     REPLACE_JSON="$(curl -fsS -H "X-Netfix-Token: ${TOKEN}" -H "Content-Type: application/json" \
         -d '{"input":"socks5h://new.proxy.example.com:1081"}' \
         "http://127.0.0.1:${PORT}/proxy/profiles/${PROFILE_ID}/replace")"
@@ -296,6 +349,29 @@ print(json.dumps({
     "ok": True,
     "bridge_lifecycle": lifecycle.get("status"),
     "startup_checked": bool(startup.get("checked_at")),
+}, ensure_ascii=False))
+PY
+    ROLLBACK_RESPONSE="$(curl -sS -w '\n%{http_code}' -H "X-Netfix-Token: ${TOKEN}" -H "Content-Type: application/json" \
+        -d '{"confirmed":true,"confirmation":"ROLLBACK_PROXY_PROFILE"}' \
+        "http://127.0.0.1:${PORT}/proxy/profiles/rollback")"
+    ROLLBACK_STATUS="${ROLLBACK_RESPONSE##*$'\n'}"
+    ROLLBACK_JSON="${ROLLBACK_RESPONSE%$'\n'*}"
+    ROLLBACK_JSON="${ROLLBACK_JSON}" ROLLBACK_STATUS="${ROLLBACK_STATUS}" python3 - <<'PY'
+import json
+import os
+
+status = int(os.environ["ROLLBACK_STATUS"])
+data = json.loads(os.environ["ROLLBACK_JSON"])
+if status not in {200, 404}:
+    raise SystemExit(f"proxy rollback endpoint returned unexpected HTTP {status}: {data}")
+if status == 404 and data.get("status") != "no_journal":
+    raise SystemExit("proxy rollback endpoint did not explain missing restore journal")
+if status == 200 and not data.get("ok"):
+    raise SystemExit("proxy rollback endpoint returned 200 without ok=true")
+print(json.dumps({
+    "ok": True,
+    "proxy_rollback_endpoint": data.get("status"),
+    "http_status": status,
 }, ensure_ascii=False))
 PY
 fi

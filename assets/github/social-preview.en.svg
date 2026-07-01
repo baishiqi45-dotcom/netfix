@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Netfix GitHub social preview</title>
+  <desc id="desc">Netfix open-source project preview, describing a local-first macOS network rescue kit.</desc>
+  <rect width="1200" height="630" fill="#0d1b1e"/>
+  <path d="M0 512 C210 432 322 580 532 500 C744 420 832 492 1010 418 C1118 374 1168 382 1200 350 L1200 630 L0 630 Z" fill="#1f4f55" opacity="0.68"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">
+    <text x="74" y="110" fill="#a7f3d0" font-size="28" font-weight="850">NETFIX</text>
+    <text x="74" y="196" fill="#f8fafc" font-size="64" font-weight="850">macOS network</text>
+    <text x="74" y="272" fill="#f8fafc" font-size="64" font-weight="850">rescue for AI devs</text>
+    <text x="76" y="342" fill="#cbd5e1" font-size="28">When Codex, ChatGPT, or GitHub stops connecting.</text>
+    <g transform="translate(76 414)">
+      <rect width="180" height="52" rx="26" fill="#14b8a6"/>
+      <text x="36" y="34" fill="#042f2e" font-size="19" font-weight="850">Local tests</text>
+      <rect x="202" width="180" height="52" rx="26" fill="#e2e8f0"/>
+      <text x="230" y="34" fill="#0f172a" font-size="19" font-weight="850">Safe fixes</text>
+      <rect x="404" width="210" height="52" rx="26" fill="#fde68a"/>
+      <text x="443" y="34" fill="#422006" font-size="19" font-weight="850">Agent ready</text>
+    </g>
+  </g>
+  <g transform="translate(792 130)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">
+    <rect width="314" height="360" rx="28" fill="#f8fafc"/>
+    <rect x="32" y="44" width="250" height="58" rx="14" fill="#0f766e"/>
+    <text x="56" y="80" fill="#ecfeff" font-size="20" font-weight="850">Diagnose</text>
+    <rect x="32" y="128" width="250" height="58" rx="14" fill="#ffffff" stroke="#cbd5e1"/>
+    <text x="56" y="164" fill="#0f172a" font-size="18" font-weight="800">Paste proxy</text>
+    <rect x="32" y="212" width="250" height="58" rx="14" fill="#111827"/>
+    <text x="56" y="248" fill="#f8fafc" font-size="18" font-weight="800">Monitor and restore</text>
+    <rect x="32" y="296" width="112" height="36" rx="18" fill="#dcfce7"/>
+    <text x="62" y="320" fill="#14532d" font-size="15" font-weight="850">OK</text>
+  </g>
+</svg>

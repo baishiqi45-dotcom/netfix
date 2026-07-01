@@ -6,6 +6,7 @@ import stat
 from pathlib import Path
 from unittest.mock import patch
 
+from netfix.cli import _build_report
 from netfix.i18n import fmt, t
 from netfix.report import Report
 
@@ -23,6 +24,16 @@ class TestI18n(unittest.TestCase):
 
 
 class TestReportSummary(unittest.TestCase):
+    def test_build_report_adds_user_facing_diagnostic_display_names(self):
+        data = _build_report(
+            {},
+            [{"name": "proxy_core_status", "status": "ok", "layer": "proxy"}],
+            [],
+        )
+
+        self.assertEqual(data["diagnostics"][0]["name"], "proxy_core_status")
+        self.assertEqual(data["diagnostics"][0]["display_name"], "代理软件状态")
+
     def test_healthy_summary(self):
         data = {
             "meta": {"version": "0.2.0", "timestamp": "now"},
