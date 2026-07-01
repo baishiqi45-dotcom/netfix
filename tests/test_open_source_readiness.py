@@ -32,6 +32,8 @@ def test_open_source_license_security_and_mcp_installer_exist():
     assert "github.com/baishiqi45-dotcom/netfix/releases/download/v0.2.0-qa.1/install_codex_mcp_from_github.sh" in codex_text
     assert "codex mcp add netfix -- python3" in codex_text
     assert "NETFIX_ARCHIVE_URL" in codex_text
+    assert "zipfile.ZipFile" in codex_text
+    assert "need_cmd unzip" not in codex_text
     assert "releases/download/${RELEASE_TAG}/Netfix-" in mac_text
     assert "github.com/baishiqi45-dotcom/netfix/releases/download/v0.2.0-qa.1/install_mac_app_from_github.sh" in mac_text
     assert "v${VERSION}-qa.1" in mac_text

@@ -49,7 +49,6 @@ need_cmd() {
 
 need_cmd python3
 need_cmd curl
-need_cmd unzip
 
 TMP_DIR="$(mktemp -d)"
 cleanup() {
@@ -66,7 +65,22 @@ echo "  ${ARCHIVE_URL}"
 curl -fsSL "${ARCHIVE_URL}" -o "${ARCHIVE}"
 
 mkdir -p "${UNPACK_DIR}" "${TMP_INSTALL}"
-unzip -q "${ARCHIVE}" -d "${UNPACK_DIR}"
+python3 - "${ARCHIVE}" "${UNPACK_DIR}" <<'PY'
+from pathlib import Path
+import sys
+import zipfile
+
+archive = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+root = destination.resolve()
+
+with zipfile.ZipFile(archive) as zip_file:
+    for member in zip_file.infolist():
+        target = (destination / member.filename).resolve()
+        if target != root and root not in target.parents:
+            raise SystemExit(f"Unsafe archive path: {member.filename}")
+    zip_file.extractall(destination)
+PY
 
 SRC_DIR="$(find "${UNPACK_DIR}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 if [[ -z "${SRC_DIR}" || ! -d "${SRC_DIR}" ]]; then
