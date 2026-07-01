@@ -33,13 +33,13 @@ curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scrip
 
 The command downloads source to `~/.netfix/netfix-codex-mcp-source`, runs an MCP initialization check, and registers `codex mcp add netfix -- python3 .../netfix/mcp_server.py`. Restart Codex or open a new Codex thread afterwards. It does not copy proxy passwords or API keys.
 
-One-line local macOS app install, after a signed and notarized `Netfix-0.2.0.dmg` has been published to GitHub Releases:
+One-line local macOS app install. The current default downloads the unsigned QA DMG from `v0.2.0-qa.1`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
 ```
 
-The command downloads the DMG, installs `Netfix.app` to `~/Applications`, registers Netfix MCP for Codex when the Codex CLI exists, and opens the app. The current local DMG is not Developer ID signed or notarized, so it should not be presented as a finished non-technical installer yet.
+The command downloads the DMG, verifies SHA256, installs `Netfix.app` to `~/Applications`, registers Netfix MCP for Codex when the Codex CLI exists, and opens the app. The current QA DMG is not Developer ID signed or notarized, so it is suitable for technical testers, not finished non-technical distribution.
 
 From a source checkout:
 

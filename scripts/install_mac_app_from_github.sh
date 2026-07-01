@@ -4,8 +4,15 @@ set -euo pipefail
 
 VERSION="${NETFIX_VERSION:-0.2.0}"
 REPO_SLUG="${NETFIX_REPO_SLUG:-baishiqi45-dotcom/netfix}"
-DMG_URL="${NETFIX_DMG_URL:-https://github.com/${REPO_SLUG}/releases/latest/download/Netfix-${VERSION}.dmg}"
-DMG_SHA256="${NETFIX_DMG_SHA256:-}"
+RELEASE_TAG="${NETFIX_RELEASE_TAG:-v${VERSION}-qa.1}"
+DEFAULT_DMG_SHA256="82815efd5888e60b914a1da303e2d42835a03b6b588f87d515346426eb57183b"
+if [[ -n "${NETFIX_DMG_URL:-}" ]]; then
+    DMG_URL="${NETFIX_DMG_URL}"
+    DMG_SHA256="${NETFIX_DMG_SHA256:-}"
+else
+    DMG_URL="https://github.com/${REPO_SLUG}/releases/download/${RELEASE_TAG}/Netfix-${VERSION}.dmg"
+    DMG_SHA256="${NETFIX_DMG_SHA256:-${DEFAULT_DMG_SHA256}}"
+fi
 INSTALL_TARGET="${NETFIX_INSTALL_TARGET:-${HOME}/Applications}"
 OPEN_APP="${NETFIX_OPEN_APP:-true}"
 REGISTER_CODEX="${NETFIX_REGISTER_CODEX:-true}"
@@ -17,16 +24,18 @@ Usage: install_mac_app_from_github.sh [--no-open] [--no-codex]
 Environment overrides:
   NETFIX_VERSION          App version, default: 0.2.0
   NETFIX_REPO_SLUG       GitHub owner/repo, default: baishiqi45-dotcom/netfix
+  NETFIX_RELEASE_TAG      GitHub release tag, default: v0.2.0-qa.1
   NETFIX_DMG_URL         Explicit DMG URL, useful for a fixed release asset
   NETFIX_DMG_SHA256      Optional SHA256 expected for the DMG
   NETFIX_INSTALL_TARGET  Install folder, default: ~/Applications
   NETFIX_OPEN_APP        Open app after install, default: true
   NETFIX_REGISTER_CODEX  Register Codex MCP if codex CLI exists, default: true
 
-Public install, after a signed/notarized release DMG has been published:
+QA install, after the v0.2.0-qa.1 release asset has been published:
   curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
 
 This installs Netfix.app locally. It does not copy proxy credentials or API keys.
+The default QA DMG is unsigned; macOS may require right-click -> Open.
 USAGE
 }
 

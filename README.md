@@ -33,13 +33,13 @@ curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scrip
 
 这条命令会下载源码到 `~/.netfix/netfix-codex-mcp-source`，做 MCP 初始化检查，并执行 `codex mcp add netfix -- python3 .../netfix/mcp_server.py`。完成后需要重启 Codex 或新开 Codex 线程。它不会复制代理密码或 API Key。
 
-给普通 Mac 用户一行安装本地 App，前提是 GitHub Release 已经发布签名/公证后的 `Netfix-0.2.0.dmg`：
+给普通 Mac 用户一行安装本地 App。当前默认下载的是 `v0.2.0-qa.1` 里的 unsigned QA DMG：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
 ```
 
-这条命令会下载 DMG、安装 `Netfix.app` 到 `~/Applications`、如果本机有 Codex CLI 会顺手注册 Netfix MCP，然后打开 App。当前本地 DMG 还没有 Developer ID 签名和公证，所以现在不能把这条命令包装成“普通小白稳定可用的正式安装命令”。
+这条命令会下载 DMG、校验 SHA256、安装 `Netfix.app` 到 `~/Applications`、如果本机有 Codex CLI 会顺手注册 Netfix MCP，然后打开 App。当前 QA DMG 还没有 Developer ID 签名和公证，所以现在能做到“技术用户一行安装”，还不能包装成“普通小白稳定可用的正式安装命令”。
 
 从源码目录直接试：
 
