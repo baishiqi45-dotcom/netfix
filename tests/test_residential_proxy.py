@@ -56,7 +56,7 @@ class TestResidentialProxy(unittest.TestCase):
         self.assertNotIn("demo-password", parsed["redacted_url"])
         self.assertTrue(any("先按 HTTP" in item for item in parsed["warnings"]))
         self.assertEqual(parsed["deployment_decision"]["status"], "ready")
-        self.assertIn("部署到这台 Mac", parsed["deployment_decision"]["headline"])
+        self.assertIn("开始使用这台 Mac", parsed["deployment_decision"]["headline"])
         self.assertEqual(parsed["deployment_decision"]["system_apply"]["status"], "bridge_required")
 
     def test_parse_colon_tuple_can_be_forced_to_socks5h(self):

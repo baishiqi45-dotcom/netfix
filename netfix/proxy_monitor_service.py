@@ -91,7 +91,7 @@ def repair_actions_for_check(check: Dict[str, Any]) -> list:
             _repair_action(
                 "check_provider_endpoint",
                 "核对供应商入口",
-                "确认 host、端口、协议和账号仍有效；住宅 IP 过期或供应商入口变化时需要换新凭据。",
+                "确认 host、端口、协议和账号仍有效；服务商入口变化或凭据过期时需要换新参数。",
                 "replace_profile_credentials",
                 profile_id,
             ),

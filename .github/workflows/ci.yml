@@ -8,10 +8,16 @@ on:
 
 jobs:
   test:
-    runs-on: macos-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: ["3.9", "3.11", "3.12"]
+        include:
+          - os: macos-14
+            python-version: "3.9"
+          - os: macos-15
+            python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.12"
       fail-fast: false
 
     steps:
@@ -51,8 +57,34 @@ jobs:
       - name: Run unit tests
         run: python3 -m pytest -q
 
-  app:
+  release-gate:
     runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test runner
+        run: python3 -m pip install --upgrade pytest
+
+      - name: Source and marketing release gate
+        run: |
+          python3 scripts/release_audit.py --scope workspace --root .
+          python3 scripts/marketing_claims_check.py --json
+          python3 scripts/source_export.py --zip --json
+
+      - name: MCP installer dry-run gate
+        run: bash scripts/install_mcp.sh --all --dry-run
+
+  app:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-14, macos-15]
+      fail-fast: false
     steps:
       - uses: actions/checkout@v4
 

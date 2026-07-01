@@ -638,7 +638,7 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(data["deployment_decision"]["system_apply"]["status"], "bridge_required")
         encoded = json.dumps(data, ensure_ascii=False)
         self.assertIn("demo-user:***@", encoded)
-        self.assertIn("部署到这台 Mac", encoded)
+        self.assertIn("开始使用这台 Mac", encoded)
         self.assertIn("先按 HTTP", encoded)
         self.assertNotIn("demo-password", encoded)
         self.assertNotIn("_secret", encoded)
@@ -657,7 +657,7 @@ class TestAPI(unittest.TestCase):
         encoded = json.dumps(data, ensure_ascii=False)
         self.assertIn("direct.miyaip.online", encoded)
         self.assertIn("demo-user:***@", encoded)
-        self.assertIn("部署到这台 Mac", encoded)
+        self.assertIn("开始使用这台 Mac", encoded)
         self.assertNotIn("demo-password", encoded)
         self.assertNotIn("_secret", encoded)
 

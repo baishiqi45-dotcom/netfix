@@ -163,6 +163,57 @@ class TestMCPServer(unittest.TestCase):
         self.assertNotIn("bob-secret-002", text)
         self.assertNotIn("_secret", text)
 
+    def test_mcp_fix_issue_tier2_requires_confirmation_phrase(self):
+        with patch("netfix.mcp_server.run_cli") as mock_run:
+            result = mcp_server._call_tool(
+                "netfix_fix_issue",
+                {"issue": "disable-ipv6", "yes": True},
+            )
+
+        self.assertTrue(result.get("isError"))
+        mock_run.assert_not_called()
+        data = json.loads(result["content"][0]["text"])
+        self.assertFalse(data["ok"])
+        self.assertTrue(data["requires_confirmation"])
+        self.assertEqual(data["confirmation"], "APPLY_SYSTEM_FIX")
+
+    def test_mcp_fix_issue_tier2_dry_run_allowed_without_phrase(self):
+        with patch("netfix.api.detect_environment", return_value={"ok": True}), \
+                patch("netfix.api.get_core", return_value=None), \
+                patch("netfix.api.FixEngine") as engine_cls:
+            engine = engine_cls.return_value
+            engine.execute.return_value = {"ok": True, "status": "dry-run", "preview": ["sudo bash bin/disable_ipv6.sh"]}
+            result = mcp_server._call_tool(
+                "netfix_fix_issue",
+                {"issue": "disable-ipv6", "dry_run": True},
+            )
+
+        self.assertFalse(result.get("isError"))
+        data = json.loads(result["content"][0]["text"])
+        self.assertEqual(data["status"], "dry-run")
+        kwargs = engine.execute.call_args.kwargs
+        self.assertTrue(kwargs["dry_run"])
+        self.assertFalse(kwargs["confirmed"])
+
+    def test_mcp_cli_result_strips_secret_carriers_and_redacts_command_output(self):
+        secret_url = "http://user:demo-password@proxy.example.com:8000"
+        with patch(
+            "netfix.mcp_server.run_cli",
+            return_value={
+                "ok": False,
+                "error": f"curl failed {secret_url} sk-live-secret-token-1234567890abc",
+                "_secret": {"password": "demo-password"},
+            },
+        ):
+            result = mcp_server._call_tool("netfix_codex", {})
+
+        self.assertTrue(result.get("isError"))
+        text = result["content"][0]["text"]
+        self.assertNotIn('"_secret"', text)
+        self.assertNotIn("demo-password", text)
+        self.assertNotIn("sk-live-secret-token", text)
+        self.assertIn("user:***@", text)
+
     def test_mcp_llm_providers_are_read_only_and_domestic_first(self):
         result = mcp_server._call_tool("netfix_llm_providers", {})
         self.assertFalse(result.get("isError"))

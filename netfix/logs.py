@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from netfix.constants import JOURNAL_DIR
 from netfix import settings
+from netfix.redaction import redact_report
 from netfix.utils import secure_append_text, secure_write_text
 
 
@@ -46,6 +47,7 @@ def load_events(limit: int = 100, hours: Optional[int] = 72) -> Dict[str, Any]:
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                event = redact_report({"event": event}, level="balanced").get("redacted_report", {}).get("event", event)
                 if cutoff is not None:
                     event_time = _parse_timestamp(event.get("timestamp"))
                     if event_time is not None and event_time < cutoff:
@@ -90,6 +92,7 @@ def append_event(event: Dict[str, Any], apply_retention: bool = True) -> Dict[st
     """Append a lightweight local event for product timeline views."""
     payload = dict(event)
     payload.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+    payload = redact_report({"event": payload}, level="balanced").get("redacted_report", {}).get("event", payload)
     try:
         secure_append_text(EVENTS_FILE, json.dumps(payload, ensure_ascii=False, default=str) + "\n")
         if apply_retention:

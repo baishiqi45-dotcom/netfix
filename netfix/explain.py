@@ -125,11 +125,11 @@ _CAUSE_EXPLANATIONS: Dict[str, Dict[str, Any]] = {
         "manual_steps": ["靠近路由器或切换到 5GHz 频段", "重启路由器", "检查是否有设备在大量下载"],
     },
     "ip-datacenter": {
-        "headline": "出口 IP 是数据中心，容易被风控",
-        "explanation": "当前代理节点的 IP 属于机房/服务器 ASN。很多 AI 服务会把这类 IP 直接拉黑或要求额外验证。",
+        "headline": "当前出口属于数据中心网络",
+        "explanation": "当前代理节点的 IP 属于机房/服务器 ASN。部分服务可能会要求额外验证，或对这类网络限制更严格。",
         "primary_action": None,
         "actions": [],
-        "manual_steps": ["在代理客户端切换到住宅 IP 或移动 IP 节点", "联系代理服务商更换出口"],
+        "manual_steps": ["联系网络管理员或服务商更换合规可用的出口节点", "确认该出口是否符合目标服务的使用规则"],
     },
     "ip-reputation-risk": {
         "headline": "出口 IP 风险评分较高",
@@ -248,7 +248,7 @@ def _healthy_tip(report: Dict[str, Any]) -> str:
         ip = details.get("ip")
         isp = details.get("isp") or details.get("asn") or "未知"
         if ip_type in ("residential", "isp"):
-            return f"当前出口是住宅/宽带 IP（{ip or isp}），被 AI 服务风控的概率较低。"
+            return f"当前出口看起来是宽带/运营商网络（{ip or isp}），部分服务的额外验证可能更少。"
         if ip_type in ("hosting/datacenter", "proxy/vpn"):
             return f"当前出口是数据中心/代理 IP（{ip or isp}），部分 AI 服务可能会要求额外验证。"
         if ip:

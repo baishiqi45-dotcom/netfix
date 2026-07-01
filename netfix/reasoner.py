@@ -210,10 +210,10 @@ def reason(env: Dict[str, Any], diagnostics: List[Dict[str, Any]]) -> List[Dict[
                 fixes=["check-proxy-core", "reset-system-proxy"],
                 manual_steps=["确认代理客户端已启动", "检查系统代理是否指向正确端口"])
         elif details.get("ip_type") == "hosting/datacenter":
-            add("ip-datacenter", "出口 IP 属于数据中心/服务器，容易被目标站风控", 0.75,
-                manual_steps=["切换到住宅 IP 或移动 IP 节点", "联系代理服务商更换出口"])
+            add("ip-datacenter", "当前出口属于数据中心/服务器网络，部分服务可能要求额外验证", 0.75,
+                manual_steps=["联系网络管理员或服务商更换合规可用的出口节点", "确认该出口是否符合目标服务的使用规则"])
         elif details.get("risk_score") is not None and details.get("risk_score") >= 33:
-            add("ip-reputation-risk", "出口 IP 风险评分较高，可能被拉黑", 0.75,
+            add("ip-reputation-risk", "出口 IP 风险评分较高，目标服务可能限制访问", 0.75,
                 manual_steps=["切换到其他节点", "在 AbuseIPDB/proxycheck.io 上复核该 IP"])
 
     # Path / transit.

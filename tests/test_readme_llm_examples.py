@@ -33,5 +33,5 @@ def test_readme_documents_authenticated_socks_bridge_support():
     text = README.read_text(encoding="utf-8")
 
     assert "有账号密码的 HTTP/HTTPS/SOCKS 代理会由 Netfix 本机转发" in text
-    assert "部署到这台 Mac" in text
+    assert "开始使用这台 Mac 上网" in text
     assert "认证 SOCKS 不承诺一键系统应用" not in text

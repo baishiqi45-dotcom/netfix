@@ -20,7 +20,7 @@ class TestI18n(unittest.TestCase):
 
     def test_fmt_with_kwargs(self):
         # The key has no placeholder, so fmt falls back to the literal value.
-        self.assertEqual(fmt("fix.tier", tier=13), "等级")
+        self.assertEqual(fmt("fix.tier", tier=13), "处理方式")
 
 
 class TestReportSummary(unittest.TestCase):

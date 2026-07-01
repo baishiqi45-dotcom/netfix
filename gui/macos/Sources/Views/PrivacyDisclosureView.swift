@@ -18,7 +18,7 @@ struct PrivacyDisclosureView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                Text("Netfix 是本地优先的网络工具。它不会内置节点，也不会替你购买住宅 IP。")
+                Text("Netfix 是本地优先的网络工具。它不会内置节点，也不会替你购买代理服务。")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

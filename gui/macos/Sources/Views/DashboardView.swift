@@ -74,8 +74,8 @@ struct DashboardView: View {
                 Text("将处理「\(action.label)」。如果这一步会改网络设置，macOS 会弹出管理员授权；处理完会自动复查。")
             }
         }
-        .alert("撤销上次修复？", isPresented: $showRollbackConfirmation) {
-            Button("撤销", role: .destructive) {
+        .alert("恢复原来的网络设置？", isPresented: $showRollbackConfirmation) {
+            Button("恢复", role: .destructive) {
                 Task { await viewModel.rollback() }
             }
             Button("取消", role: .cancel) {}
@@ -237,9 +237,9 @@ struct DashboardView: View {
 
     private var firstAidSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("AI 服务急救包")
+            Text("检查常用网站能不能打开")
                 .font(.headline)
-            Text("一键快速检查你最常用的海外服务是否通畅")
+            Text("检查 ChatGPT、GitHub 和常用网站是直连失败、代理失败，还是网站本身异常。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack(spacing: 12) {
@@ -380,7 +380,7 @@ struct DashboardView: View {
     private func friendlyErrorMessage(_ message: String) -> String {
         let lower = message.lowercased()
         if lower.contains("command timed out") || lower.contains("timed out") {
-            return "网络太慢或代理没响应。可以重试一次，或者点“去粘贴并部署”换一组代理。"
+            return "网络太慢或代理没响应。可以重试一次，或者点“粘贴代理参数”换一组代理。"
         }
         if lower.contains("could not connect") || lower.contains("connection refused") {
             return "Netfix 自己暂时连不上。等几秒再重试；如果还不行，退出 App 后重新打开。"
@@ -421,7 +421,7 @@ struct DashboardView: View {
                     .cornerRadius(6)
             }
 
-            Text("从你购买代理的网站后台复制完整一行：地址、端口、用户名、密码。Netfix 不卖 IP，也不能只靠出口 IP 部署。")
+            Text("从你的代理服务后台复制完整一行：地址、端口、用户名、密码。Netfix 不卖代理，也不能只靠出口 IP 部署。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -429,7 +429,7 @@ struct DashboardView: View {
                 Button {
                     openProxySettings()
                 } label: {
-                    Label("去粘贴并部署", systemImage: "square.and.arrow.down")
+                    Label("粘贴代理参数", systemImage: "square.and.arrow.down")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -761,7 +761,7 @@ struct DashboardView: View {
             .disabled(!backend.isReady || viewModel.isWorking || viewModel.recommendedAction == nil)
             .help(viewModel.recommendedAction == nil ? "先诊断；Netfix 找到明确建议后才能处理。" : "按上方报告里的建议处理。")
 
-            Button("撤销") {
+            Button("恢复原来的网络设置") {
                 showRollbackConfirmation = true
             }
             .buttonStyle(.borderless)
@@ -783,7 +783,7 @@ struct DashboardView: View {
             }
             .buttonStyle(.borderless)
             .disabled(!backend.isReady)
-            .help("粘贴代理账号并部署到这台 Mac")
+            .help("粘贴代理参数并确认是否让这台 Mac 使用")
 
             Button("日志") {
                 showLogsSheet = true
@@ -1160,7 +1160,7 @@ final class DashboardViewModel: ObservableObject {
             if proxyRollback.status == "no_journal" {
                 let result = try await client.rollback(timeout: 30)
                 self.report = result
-                headline = "已撤销"
+                headline = "已恢复"
                 stopWork()
                 return
             } else {
@@ -1171,7 +1171,7 @@ final class DashboardViewModel: ObservableObject {
             }
         } catch {
             errorMessage = error.localizedDescription
-            headline = "撤销失败"
+            headline = "恢复失败"
         }
         stopWork()
     }

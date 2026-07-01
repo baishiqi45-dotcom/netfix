@@ -497,18 +497,18 @@ def deployment_decision(profile: Dict[str, Any], errors: Optional[List[str]] = N
     if protocol in {"http", "https"} and has_auth:
         base.update({
             "status": "ready",
-            "headline": "可以部署到这台 Mac：有账号密码的 HTTP/HTTPS 代理会由 Netfix 本机转发",
+            "headline": "可以开始使用这台 Mac 上网：有账号密码的 HTTP/HTTPS 代理会由 Netfix 本机转发",
             "primary_action": "save_validate_apply_system",
             "system_apply": {
                 "status": "bridge_required",
                 "reason_code": "authenticated_http_bridge_required",
-                "label": "保存到本机密码库后，可以部署到这台 Mac；系统先连 127.0.0.1，再由 Netfix 带着账号密码转发到供应商代理",
+                "label": "保存到本机密码库后，可以让这台 Mac 使用；系统先连 127.0.0.1，再由 Netfix 带着账号密码转发到供应商代理",
                 "requires_confirmation": True,
                 "requires_netfix_running": True,
             },
             "next_steps": [
                 "保存到本机密码库后验证出口身份和地区。",
-                "验证通过后点“部署到这台 Mac”；使用期间需要保持 Netfix 运行。",
+                "验证通过后点“开始使用这台 Mac 上网”；使用期间需要保持 Netfix 运行。",
                 "启动后台监控，失效时提示回滚或恢复桥接。",
             ],
         })
@@ -517,18 +517,18 @@ def deployment_decision(profile: Dict[str, Any], errors: Optional[List[str]] = N
     if protocol in {"http", "https"}:
         base.update({
             "status": "ready",
-            "headline": "可以部署到这台 Mac：无账号密码的 HTTP/HTTPS 代理可直接写入系统代理",
+            "headline": "可以开始使用这台 Mac 上网：无账号密码的 HTTP/HTTPS 代理可直接写入系统代理",
             "primary_action": "save_validate_apply_system",
             "system_apply": {
                 "status": "supported",
                 "reason_code": "system_http_supported_without_auth",
-                "label": "验证通过后，可以部署到这台 Mac 的 Web/Secure Web 代理",
+                "label": "验证通过后，可以让这台 Mac 使用 Web/Secure Web 代理",
                 "requires_confirmation": True,
                 "requires_netfix_running": False,
             },
             "next_steps": [
                 "保存并验证出口身份。",
-                "验证通过后点“部署到这台 Mac”，再启动健康监控。",
+                "验证通过后点“开始使用这台 Mac 上网”，再启动健康监控。",
             ],
         })
         return base
@@ -536,12 +536,12 @@ def deployment_decision(profile: Dict[str, Any], errors: Optional[List[str]] = N
     if protocol in {"socks5", "socks5h"} and has_auth:
         base.update({
             "status": "ready",
-            "headline": "可以部署到这台 Mac：有账号密码的 SOCKS 代理会由 Netfix 本机转发",
+            "headline": "可以开始使用这台 Mac 上网：有账号密码的 SOCKS 代理会由 Netfix 本机转发",
             "primary_action": "save_validate_apply_system",
             "system_apply": {
                 "status": "bridge_required",
                 "reason_code": "authenticated_socks_bridge_required",
-                "label": "保存到本机密码库后，可以部署到这台 Mac；系统先连 127.0.0.1，再由 Netfix 转发到 SOCKS 代理",
+                "label": "保存到本机密码库后，可以让这台 Mac 使用；系统先连 127.0.0.1，再由 Netfix 转发到 SOCKS 代理",
                 "requires_confirmation": True,
                 "requires_netfix_running": True,
             },
@@ -550,7 +550,7 @@ def deployment_decision(profile: Dict[str, Any], errors: Optional[List[str]] = N
             ],
             "next_steps": [
                 "保存到本机密码库后验证出口身份。",
-                "验证通过后点“部署到这台 Mac”；Netfix 会启动 127.0.0.1 本机转发并使用已保存的账号密码。",
+                "验证通过后点“开始使用这台 Mac 上网”；Netfix 会启动 127.0.0.1 本机转发并使用已保存的账号密码。",
                 "启动后台监控，失效时提示回滚或恢复桥接；也可以导出 Mihomo/sing-box/Clash 配置作为备用。",
             ],
         })
@@ -558,7 +558,7 @@ def deployment_decision(profile: Dict[str, Any], errors: Optional[List[str]] = N
 
     base.update({
         "status": "ready",
-        "headline": "可以部署到这台 Mac：无账号密码的 SOCKS 代理可写入系统 SOCKS 代理",
+        "headline": "可以开始使用这台 Mac 上网：无账号密码的 SOCKS 代理可写入系统 SOCKS 代理",
         "primary_action": "save_validate_apply_system",
         "system_apply": {
             "status": "supported",
@@ -569,7 +569,7 @@ def deployment_decision(profile: Dict[str, Any], errors: Optional[List[str]] = N
         },
         "next_steps": [
             "保存并验证出口身份。",
-            "验证通过后点“部署到这台 Mac”，再启动健康监控。",
+            "验证通过后点“开始使用这台 Mac 上网”，再启动健康监控。",
         ],
     })
     if protocol == "socks5":
@@ -1600,7 +1600,7 @@ def audit_proxy_identity(
             report["identity"] = identity
             report["expected_geo"] = _geo_match(profile.get("expected_geo"), identity)
             if identity.get("ip_type") == "hosting/datacenter":
-                report["warnings"].append("IP 情报倾向于机房/托管网络；不要对外宣称这是干净住宅 IP。")
+                report["warnings"].append("IP 情报倾向于机房/托管网络；不要对外宣称这是特定类型或高质量出口。")
             elif identity.get("ip_type") in {"unknown", None}:
                 report["warnings"].append("IP 类型无法可靠判断；需要用户以供应商后台和目标网站实际结果为准。")
     except Exception as exc:
@@ -1784,7 +1784,7 @@ def apply_dry_run(profile: Dict[str, Any], mode: str = "system") -> Dict[str, An
             if protocol in {"http", "https", "socks5", "socks5h"}:
                 steps.append({
                     "tier": 2,
-                    "label": "启动 127.0.0.1 本地桥接代理，由桥接进程向上游住宅代理注入认证",
+                    "label": "启动 127.0.0.1 本地桥接代理，由桥接进程向上游代理注入认证",
                     "safe_preview": "system proxy -> http://127.0.0.1:<netfix-bridge-port>",
                 })
                 warnings.append("认证代理不会直接写入系统代理；netfix 会使用本地桥接，App 退出后应回滚或保持后台运行。")
@@ -2287,7 +2287,7 @@ def bridge_lifecycle(bridges: List[Dict[str, Any]], stale_check: Dict[str, Any])
             "status": "not_in_use",
             "headline": "系统当前未使用 Netfix 桥接",
             "primary_action": "none",
-            "next_steps": ["需要把有账号密码的代理部署到这台 Mac 时，先保存并验证代理参数，再确认部署。"],
+            "next_steps": ["需要让这台 Mac 使用有账号密码的代理时，先保存并验证代理参数，再确认开始使用。"],
         }
 
     return {
@@ -2295,7 +2295,7 @@ def bridge_lifecycle(bridges: List[Dict[str, Any]], stale_check: Dict[str, Any])
         "status": "stopped",
         "headline": "本地桥接未启动",
         "primary_action": "none",
-        "next_steps": ["有账号密码的 HTTP/HTTPS 代理确认部署到这台 Mac 后，本机转发状态会显示在这里。"],
+        "next_steps": ["有账号密码的 HTTP/HTTPS 代理确认开始使用后，本机转发状态会显示在这里。"],
     }
 
 

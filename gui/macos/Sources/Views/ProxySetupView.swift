@@ -49,7 +49,7 @@ struct ProxySetupView: View {
                         }
                     }
                 } else if backend.isReady {
-                    Text("没看到你电脑里有代理软件。没关系，可以直接粘贴你买到的代理账号。")
+                    Text("没看到你电脑里有代理软件。没关系，可以直接粘贴你已有的合法代理参数。")
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -61,18 +61,18 @@ struct ProxySetupView: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("你有代理账号吗？有的话复制粘贴")
+                Text("你有合法代理参数吗？有的话复制粘贴")
                     .font(.headline)
-                Text("去你买代理的网站后台，复制一整行连接信息。通常需要地址、端口、用户名和密码；密码保存到本机密码库。")
+                Text("去你的代理服务后台，复制一整行连接信息。通常需要地址、端口、用户名和密码；密码保存到本机密码库。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("复制下来大概是：地址:端口:用户名:密码 这种样子。不要只复制出口 IP。没有这类参数也可以先跳过。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Picker("参数类型", selection: $proxyProtocolHint) {
-                    Text("自动（常见 HTTP）").tag("auto")
-                    Text("HTTP").tag("http")
-                    Text("SOCKS5").tag("socks5h")
+                    Text("自动判断（大多数选这个）").tag("auto")
+                    Text("HTTP 代理").tag("http")
+                    Text("SOCKS5 代理").tag("socks5h")
                 }
                 .pickerStyle(.segmented)
                 TextEditor(text: $proxyInput)
@@ -83,12 +83,12 @@ struct ProxySetupView: View {
                             .stroke(Color.secondary.opacity(0.25))
                     )
                 HStack {
-                    Button("检查这行参数") {
+                    Button("检查这行能不能用") {
                         Task { await previewProxyInput() }
                     }
                     .disabled(!backend.isReady || proxyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProxyWorking)
 
-                    Button("保存到本机") {
+                    Button("保存并测试（暂不改网络）") {
                         Task { await saveProxyInput() }
                     }
                     .buttonStyle(.borderedProminent)
@@ -114,7 +114,7 @@ struct ProxySetupView: View {
                         Button {
                             Task { await prepareProxyDeployment(profile) }
                         } label: {
-                            Label("部署到这台 Mac", systemImage: "exclamationmark.triangle.fill")
+                            Label("开始使用这台 Mac 上网", systemImage: "play.circle.fill")
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(!backend.isReady || isProxyWorking)
@@ -168,8 +168,8 @@ struct ProxySetupView: View {
             bindClient()
             Task { await loadEnvironment() }
         }
-        .confirmationDialog("部署到这台 Mac？", isPresented: $showProxyDeployConfirmation, titleVisibility: .visible) {
-            Button("确认部署到这台 Mac", role: .destructive) {
+        .confirmationDialog("开始使用这台 Mac 上网？", isPresented: $showProxyDeployConfirmation, titleVisibility: .visible) {
+            Button("确认开始使用") {
                 if let profile = savedProxyProfile {
                     Task { await applySavedProxyProfile(profile) }
                 }
@@ -196,15 +196,15 @@ struct ProxySetupView: View {
     private func saveProxyInput() async {
         guard let client = client else { return }
         isProxyWorking = true
-        proxySaveStatus = "正在保存到本机密码库并启动健康监控…"
+        proxySaveStatus = "正在保存到本机密码库并启动健康监控，暂不改系统网络…"
         savedProxyProfile = nil
         do {
             let response = try await client.saveProxyProfile(input: proxyInput, startMonitor: true, targetProfile: "ai_dev", protocolHint: proxyProtocolHint)
             if response.ok {
                 savedProxyProfile = response.profile
                 proxySaveStatus = response.monitor?.running == true
-                    ? "已保存并启动健康监控。点下面“部署到这台 Mac”开始用它上网。"
-                    : "已保存到本机，密码已写入本机密码库。点下面“部署到这台 Mac”开始用它上网。"
+                    ? "已保存并启动健康监控。点下面“开始使用这台 Mac 上网”才会生效。"
+                    : "已保存到本机，密码已写入本机密码库。点下面“开始使用这台 Mac 上网”才会生效。"
             } else {
                 proxySaveStatus = "失败：\(response.error ?? "无法保存代理")"
             }
@@ -232,7 +232,7 @@ struct ProxySetupView: View {
     private func applySavedProxyProfile(_ profile: ProxyProfile) async {
         guard let client = client else { return }
         isProxyWorking = true
-        proxySaveStatus = "正在部署到这台 Mac。会先备份原来的网络设置…"
+        proxySaveStatus = "正在让这台 Mac 使用代理上网。会先备份原来的网络设置…"
         do {
             let response = try await client.applyProxyProfile(profileID: profile.id, mode: "system", confirmed: true, targetProfile: "ai_dev")
             if response.ok && response.status == "applied" {
@@ -244,7 +244,7 @@ struct ProxySetupView: View {
                     proxySaveStatus = "已部署到 \(service)。不用时到设置里点“恢复原来的网络设置”。"
                 }
             } else if response.status == "pending_confirmation" {
-                proxySaveStatus = "还需要确认。请再点一次“部署到这台 Mac”。"
+                proxySaveStatus = "还需要确认。请再点一次“开始使用这台 Mac 上网”。"
             } else {
                 proxySaveStatus = "失败：\(response.friendlyFailureMessage)"
             }

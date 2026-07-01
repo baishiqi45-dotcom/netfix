@@ -893,7 +893,7 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="输出 JSON")
     common.add_argument("--dry-run", action="store_true", help="只打印不执行")
-    common.add_argument("--yes", action="store_true", help="对 Tier 1 修复自动确认")
+    common.add_argument("--yes", action="store_true", help="自动确认“安全、不会改系统网络设置”的修复")
     common.add_argument(
         "--timeout", type=int, default=30, help="网络探针超时（秒），默认 30"
     )
@@ -910,9 +910,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_services.add_argument("--group", type=str, default=None, help="分组 id，逗号分隔，如 ai,dev,common")
     p_services.add_argument("--proxy", type=str, default=None, help="手动指定代理 URL")
 
-    sub.add_parser("triage", parents=[common], help="OSI 五层通用分诊")
+    sub.add_parser("triage", parents=[common], help="快速排查最常见网络问题")
     sub.add_parser("proxy", parents=[common], help="代理核心专项诊断")
-    sub.add_parser("doctor", parents=[common], help="完整体检（跑所有诊断）")
+    sub.add_parser("doctor", parents=[common], help="完整检查网络、DNS、代理和目标网站")
     sub.add_parser("layers", parents=[common], help="全栈分层诊断")
 
     p_dns = sub.add_parser("dns", parents=[common], help="DNS 诊断")
@@ -937,9 +937,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_logs.add_argument("--prune", action="store_true", help="按保留天数裁剪 events.jsonl")
     p_logs.add_argument("--retention-days", type=int, help="设置事件日志保留天数（1-365）")
     sub.add_parser("explain", parents=[common], help="用人话解释上一次报告")
-    sub.add_parser("rollback", parents=[common], help="回滚上一次 Tier 2 变更")
+    sub.add_parser("rollback", parents=[common], help="恢复上一次修改前的网络设置")
 
-    p_kb = sub.add_parser("kb", parents=[common], help="知识库查询")
+    p_kb = sub.add_parser("kb", parents=[common], help="按关键词查解决手册")
     p_kb.add_argument("--query", type=str, required=True, help="关键词")
 
     p_watch = sub.add_parser("watch", parents=[common], help="持续监控 Codex 连通性")
@@ -948,7 +948,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_watch.add_argument("--notify", action="store_true", help="状态变化时弹出 macOS 通知")
     p_watch.add_argument("--proxy", type=str, default=None, help="手动指定代理 URL")
 
-    p_proxy_monitor = sub.add_parser("proxy-monitor", parents=[common], help="持续验证保存的住宅/自定义代理 Profile")
+    p_proxy_monitor = sub.add_parser("proxy-monitor", parents=[common], help="持续验证保存的自定义代理配置")
     p_proxy_monitor.add_argument("--profile", type=str, required=True, help="Profile id 或名称")
     p_proxy_monitor.add_argument("--interval", type=int, default=60, help="检查间隔（秒），默认 60")
     p_proxy_monitor.add_argument("--max-runs", type=int, default=0, help="最大检查次数，0 为无限")

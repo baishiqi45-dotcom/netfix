@@ -133,8 +133,8 @@ struct SettingsView: View {
         } message: {
             Text("这会删除 Netfix 最近报告、事件日志、AI 本地预算账本、非敏感设置，以及已保存的 AI 密钥和代理密码。不会删除 App 本体或系统网络配置。")
         }
-        .confirmationDialog("部署到这台 Mac？", isPresented: $showSystemProxyConfirmation, titleVisibility: .visible) {
-            Button("部署到这台 Mac", role: .none) {
+        .confirmationDialog("开始使用这台 Mac 上网？", isPresented: $showSystemProxyConfirmation, titleVisibility: .visible) {
+            Button("确认开始使用", role: .none) {
                 if let profile = pendingSystemProxyProfile {
                     Task { await applyProxyProfile(profile, mode: "system", confirmed: true) }
                 }
@@ -519,7 +519,7 @@ struct SettingsView: View {
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                proxyStepBadge("2", "预检")
+                proxyStepBadge("2", "检查能不能用")
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -527,10 +527,10 @@ struct SettingsView: View {
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                proxyStepBadge("4", "部署到这台 Mac")
+                proxyStepBadge("4", "开始使用")
             }
 
-            Text("保存不会改网络；部署才会让浏览器和其他 App 使用这个代理。")
+            Text("保存不会改网络；点“开始使用这台 Mac 上网”才会让浏览器和其他 App 使用这个代理。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -561,7 +561,7 @@ struct SettingsView: View {
                 .font(.subheadline)
                 .fontWeight(.semibold)
 
-            Text("打开你购买代理的网站后台，找“代理生成”“我的订阅”“Endpoint”“API Access”这类页面，复制包含地址、端口、用户名、密码的整行。")
+            Text("打开你的代理服务后台，找“代理生成”“我的订阅”“Endpoint”“API Access”这类页面，复制包含地址、端口、用户名、密码的整行。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -631,9 +631,9 @@ struct SettingsView: View {
                     .pickerStyle(.segmented)
 
                     Picker("参数类型", selection: $proxyProtocolHint) {
-                        Text("自动（常见 HTTP）").tag("auto")
-                        Text("HTTP").tag("http")
-                        Text("SOCKS5").tag("socks5h")
+                        Text("自动判断（大多数选这个）").tag("auto")
+                        Text("HTTP 代理").tag("http")
+                        Text("SOCKS5 代理").tag("socks5h")
                     }
                     .pickerStyle(.segmented)
 
@@ -645,14 +645,14 @@ struct SettingsView: View {
                         Button {
                             Task { await importProxyPreview() }
                         } label: {
-                            Label("预检这行参数", systemImage: "checklist")
+                            Label("检查这行能不能用", systemImage: "checklist")
                         }
                         .disabled(!backend.isReady || proxyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                         Button {
                             Task { await saveProxyProfile() }
                         } label: {
-                            Label("保存到这台 Mac", systemImage: "tray.and.arrow.down")
+                            Label("保存并测试（暂不改网络）", systemImage: "tray.and.arrow.down")
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(!backend.isReady || proxyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -663,7 +663,7 @@ struct SettingsView: View {
                     }
 
                     Toggle("保存后自动启动健康监控", isOn: $proxyStartMonitorOnSave)
-                    Text("保存只是把参数放到本机并测试，暂不影响浏览器。要开始使用，请在已保存代理里点“部署到这台 Mac”。")
+                    Text("保存只是把参数放到本机并测试，暂不影响浏览器。要开始使用，请在已保存代理里点“开始使用这台 Mac 上网”。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -699,14 +699,14 @@ struct SettingsView: View {
                         Button {
                             Task { await prepareProxyDeployment(profile) }
                         } label: {
-                            Label("下一步：部署到这台 Mac", systemImage: "exclamationmark.triangle.fill")
+                            Label("下一步：开始使用这台 Mac 上网", systemImage: "play.circle.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(!backend.isReady)
                     }
                 } else {
-                        Text("下一步：粘贴整行参数 → 预检 → 保存到这台 Mac → 点“部署到这台 Mac”开始使用。")
+                        Text("下一步：粘贴整行参数 → 检查能不能用 → 保存并测试 → 开始使用这台 Mac 上网。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1162,7 +1162,7 @@ struct SettingsView: View {
                             .font(.caption2)
                             .foregroundStyle(check.status == "ok" ? Color.secondary : Color.orange)
                     } else {
-                        Text("已保存但尚未验证。点“部署到这台 Mac”前，建议先预检或保存时自动检测。")
+                        Text("已保存但尚未验证。点“开始使用这台 Mac 上网”前，建议先检查或保存时自动检测。")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -1172,7 +1172,7 @@ struct SettingsView: View {
                     Button {
                         Task { await prepareProxyDeployment(profile) }
                     } label: {
-                        Label("部署到这台 Mac", systemImage: "exclamationmark.triangle.fill")
+                        Label("开始使用这台 Mac 上网", systemImage: "play.circle.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!backend.isReady)
@@ -1380,7 +1380,7 @@ struct SettingsView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             if decision.systemApply?.reasonCode == "authenticated_socks_bridge_required" {
-                Text("这个代理需要账号密码。部署到这台 Mac 后，请保持 Netfix 打开，系统会先连本机，再由 Netfix 转发到供应商代理。")
+                Text("这个代理需要账号密码。开始使用后，请保持 Netfix 打开，系统会先连本机，再由 Netfix 转发到供应商代理。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -1394,10 +1394,10 @@ struct SettingsView: View {
 
     private func friendlyDeploymentHeadline(_ decision: ProxyDeploymentDecision) -> String {
         if decision.systemApply?.status == "blocked" {
-            return "这组参数还不能部署到这台 Mac"
+            return "这组参数还不能让这台 Mac 使用"
         }
         if decision.systemApply?.status == "available" {
-            return "可以部署到这台 Mac"
+            return "可以开始使用这台 Mac 上网"
         }
         return "已识别代理参数"
     }
@@ -1410,9 +1410,9 @@ struct SettingsView: View {
         case "blocked":
             return "还缺信息，先修正代理地址、端口、账号或密码。"
         case "available":
-            return "保存到这台 Mac 后，可以点“部署到这台 Mac”。"
+            return "保存到这台 Mac 后，可以点“开始使用这台 Mac 上网”。"
         default:
-            return "保存后可以继续检测，再决定是否部署到这台 Mac。"
+            return "保存后可以继续检测，再决定是否让这台 Mac 使用。"
         }
     }
 
@@ -2006,11 +2006,11 @@ struct SettingsView: View {
             proxyExportResult = nil
             if result.ok {
                 if result.monitor?.running == true {
-                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库，后台监控已启动。还没有影响浏览器，下一步点“部署到这台 Mac”。"
+                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库，后台监控已启动。还没有影响浏览器，下一步点“开始使用这台 Mac 上网”。"
                 } else if result.monitor != nil {
-                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库，但后台监控未启动。还没有影响浏览器，下一步点“部署到这台 Mac”。"
+                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库，但后台监控未启动。还没有影响浏览器，下一步点“开始使用这台 Mac 上网”。"
                 } else {
-                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库。还没有影响浏览器，下一步点“部署到这台 Mac”。"
+                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库。还没有影响浏览器，下一步点“开始使用这台 Mac 上网”。"
                 }
             } else {
                 lastSavedProxyProfile = nil
@@ -2054,7 +2054,7 @@ struct SettingsView: View {
             proxyValidateResult = nil
             proxyExportResult = nil
             proxyStatus = result.ok
-                ? "已更新代理连接参数。新密码已写入本机密码库；要切全机流量请点“部署到这台 Mac”。"
+                ? "已更新代理连接参数。新密码已写入本机密码库；要切全机流量请点“开始使用这台 Mac 上网”。"
                 : "失败：\(result.error ?? "无法更新凭据")"
             if result.monitor == nil {
                 await loadProxyMonitor()
@@ -2273,7 +2273,7 @@ struct SettingsView: View {
                 return
             }
             if response.ok && response.status == "pending_confirmation" {
-                proxyStatus = "还需要确认。请重新点“部署到这台 Mac”，并在中文确认框里确认。"
+                proxyStatus = "还需要确认。请重新点“开始使用这台 Mac 上网”，并在中文确认框里确认。"
                 return
             }
             proxyStatus = "失败：\(response.friendlyFailureMessage)"

@@ -22,7 +22,7 @@ def test_macos_proxy_import_preview_is_visible_and_secret_safe():
 
     assert "@State private var proxyImportPreviewResult: ProxyImportPreviewResponse?" in settings
     assert "@State private var proxyStartMonitorOnSave = true" in settings
-    assert 'Label("预检这行参数", systemImage: "checklist")' in settings
+    assert 'Label("检查这行能不能用", systemImage: "checklist")' in settings
     assert 'Toggle("保存后自动启动健康监控"' in settings
     assert "await importProxyPreview()" in settings
     assert "startMonitor: proxyStartMonitorOnSave" in settings
@@ -31,17 +31,17 @@ def test_macos_proxy_import_preview_is_visible_and_secret_safe():
     assert "saveProxyImportCandidate" in settings
     assert "proxyInputLine" in settings
     assert "TextEditor(text: $proxyInput)" in settings
-    assert "打开你购买代理的网站后台" in settings
+    assert "打开你的代理服务后台" in settings
     assert "复制包含地址、端口、用户名、密码的整行" in settings
     assert "proxy.example.com:8001:username:password" in settings
     assert 'Picker("参数类型", selection: $proxyProtocolHint)' in settings
-    assert "自动（常见 HTTP）" in settings
+    assert "自动判断（大多数选这个）" in settings
     assert "SOCKS5" in settings
     assert "不要只复制出口 IP" in settings
     assert "预检不会保存代理密码" in settings
-    assert 'Label("保存到这台 Mac", systemImage: "tray.and.arrow.down")' in settings
+    assert 'Label("保存并测试（暂不改网络）", systemImage: "tray.and.arrow.down")' in settings
     assert "保存只是把参数放到本机并测试，暂不影响浏览器" in settings
-    assert "下一步：部署到这台 Mac" in settings
+    assert "下一步：开始使用这台 Mac 上网" in settings
     assert "await saveProxyProfile(input: selected)" in settings
     assert "proxyStatus = \"正在保存并启动监控...\"" in settings
     assert "saveProxyProfile(input: String, startMonitor: Bool = true, targetProfile: String = \"baseline\", protocolHint: String = \"auto\")" in api_client

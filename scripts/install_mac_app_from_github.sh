@@ -1,6 +1,7 @@
 #!/bin/bash
 # One-line installer for the Netfix macOS app, with optional Codex MCP registration.
 set -euo pipefail
+IFS=$'\n\t'
 
 VERSION="${NETFIX_VERSION:-0.2.0}"
 REPO_SLUG="${NETFIX_REPO_SLUG:-baishiqi45-dotcom/netfix}"
@@ -14,12 +15,15 @@ else
     DMG_SHA256="${NETFIX_DMG_SHA256:-${DEFAULT_DMG_SHA256}}"
 fi
 INSTALL_TARGET="${NETFIX_INSTALL_TARGET:-${HOME}/Applications}"
+APP_DEST="${INSTALL_TARGET}/Netfix.app"
 OPEN_APP="${NETFIX_OPEN_APP:-true}"
 REGISTER_CODEX="${NETFIX_REGISTER_CODEX:-true}"
+DRY_RUN=false
+UNINSTALL=false
 
 usage() {
     cat <<'USAGE'
-Usage: install_mac_app_from_github.sh [--no-open] [--no-codex]
+Usage: install_mac_app_from_github.sh [--no-open] [--no-codex] [--dry-run] [--uninstall]
 
 Environment overrides:
   NETFIX_VERSION          App version, default: 0.2.0
@@ -31,11 +35,17 @@ Environment overrides:
   NETFIX_OPEN_APP        Open app after install, default: true
   NETFIX_REGISTER_CODEX  Register Codex MCP if codex CLI exists, default: true
 
-QA install, after the v0.2.0-qa.1 release asset has been published:
-  curl -fsSL https://github.com/baishiqi45-dotcom/netfix/releases/download/v0.2.0-qa.1/install_mac_app_from_github.sh | bash
+QA install, after the v0.2.0-qa.1 DMG release asset has been published:
+  curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
 
 This installs Netfix.app locally. It does not copy proxy credentials or API keys.
 The default QA DMG is unsigned; macOS may require right-click -> Open.
+
+Safety:
+  - Will install Netfix.app to ~/Applications by default.
+  - May run 'codex mcp add netfix ...' when the Codex CLI is installed.
+  - Will not read or send proxy passwords, API keys, browser data, or shell history.
+  - Run with --dry-run to preview actions, or --uninstall to remove only the app/MCP entry.
 USAGE
 }
 
@@ -43,6 +53,8 @@ for arg in "$@"; do
     case "$arg" in
         --no-open) OPEN_APP=false ;;
         --no-codex) REGISTER_CODEX=false ;;
+        --dry-run) DRY_RUN=true ;;
+        --uninstall|--remove) UNINSTALL=true ;;
         -h|--help) usage; exit 0 ;;
         *)
             echo "Unknown argument: $arg" >&2
@@ -52,9 +64,51 @@ for arg in "$@"; do
     esac
 done
 
+if [[ "${DRY_RUN}" == true ]]; then
+    if [[ "${UNINSTALL}" == true ]]; then
+        echo "Dry run: would remove app at:"
+        echo "  ${APP_DEST}"
+        if [[ "${REGISTER_CODEX}" == true ]]; then
+            echo "Dry run: would remove Codex MCP entry named 'netfix' if present."
+        fi
+    else
+        echo "Dry run: would download Netfix DMG from:"
+        echo "  ${DMG_URL}"
+        if [[ -n "${DMG_SHA256}" ]]; then
+            echo "Dry run: would verify DMG SHA256:"
+            echo "  ${DMG_SHA256}"
+        fi
+        echo "Dry run: would install Netfix.app to:"
+        echo "  ${APP_DEST}"
+        if [[ "${REGISTER_CODEX}" == true ]]; then
+            echo "Dry run: would register bundled MCP for Codex if codex CLI exists."
+        else
+            echo "Dry run: would skip Codex MCP registration."
+        fi
+    fi
+    exit 0
+fi
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "Netfix.app installer requires macOS." >&2
     exit 1
+fi
+
+if [[ "${UNINSTALL}" == true ]]; then
+    if [[ "${REGISTER_CODEX}" == true && command -v codex >/dev/null 2>&1 && codex mcp get netfix >/dev/null 2>&1 ]]; then
+        codex mcp remove netfix >/dev/null 2>&1 || true
+        echo "Removed Codex MCP entry: netfix"
+    fi
+    if [[ -e "${APP_DEST}" ]]; then
+        rm -rf "${APP_DEST}"
+        echo "Removed Netfix.app:"
+        echo "  ${APP_DEST}"
+    else
+        echo "Netfix.app was not found:"
+        echo "  ${APP_DEST}"
+    fi
+    echo "Netfix macOS app uninstall finished. Local logs/settings are kept under ~/.netfix."
+    exit 0
 fi
 
 need_cmd() {
@@ -107,7 +161,6 @@ if [[ -z "${APP_IN_DMG}" || ! -d "${APP_IN_DMG}" ]]; then
 fi
 
 mkdir -p "${INSTALL_TARGET}"
-APP_DEST="${INSTALL_TARGET}/Netfix.app"
 if [[ -e "${APP_DEST}" ]]; then
     BACKUP_DEST="${APP_DEST}.backup.$(date +%Y%m%d-%H%M%S)"
     mv "${APP_DEST}" "${BACKUP_DEST}"

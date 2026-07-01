@@ -13,6 +13,7 @@ if __package__ in {None, ""}:
 
 from netfix import agent_tools, keychain, llm_explain, llm_provider, residential_proxy, settings
 from netfix.constants import VERSION
+from netfix.redaction import redact_text
 from netfix.report import Report
 from netfix.service_runner import run_cli
 
@@ -72,13 +73,15 @@ _TOOLS: List[Dict[str, Any]] = [
     ),
     _tool(
         "netfix_fix_issue",
-        "Execute a netfix repair by issue id.",
+        "Execute a netfix repair by issue id. Tier 2 fixes require dry_run first, then confirmed=true and confirmation=APPLY_SYSTEM_FIX.",
         {
             "type": "object",
             "properties": {
                 "issue": {"type": "string"},
                 "dry_run": {"type": "boolean", "default": False},
-                "yes": {"type": "boolean", "default": False},
+                "confirmed": {"type": "boolean", "default": False},
+                "confirmation": {"type": "string", "description": "Required for Tier 2 execution: APPLY_SYSTEM_FIX"},
+                "yes": {"type": "boolean", "default": False, "description": "Deprecated; does not bypass Tier 2 confirmation."},
             },
             "required": ["issue"],
         },
@@ -315,7 +318,48 @@ def _log(fmt: str, *args: Any) -> None:
 
 def _parse_proxy_for_mcp(args: Dict[str, Any]) -> Dict[str, Any]:
     result = residential_proxy.parse_proxy_input(args)
-    result.pop("_secret", None)
+    return _strip_internal_secrets(result)
+
+
+def _strip_internal_secrets(value: Any) -> Any:
+    """Drop internal secret carriers before returning MCP payloads."""
+    if isinstance(value, dict):
+        return {
+            key: _strip_internal_secrets(item)
+            for key, item in value.items()
+            if key != "_secret"
+        }
+    if isinstance(value, list):
+        return [_strip_internal_secrets(item) for item in value]
+    return value
+
+
+def _sanitize_mcp_output(value: Any, path: tuple[str, ...] = ()) -> Any:
+    """Redact command-output text while preserving structured MCP payloads."""
+    if isinstance(value, dict):
+        return {key: _sanitize_mcp_output(item, path + (str(key).lower(),)) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_mcp_output(item, path) for item in value]
+    if isinstance(value, str) and path and path[-1] in {"error", "stderr", "stdout", "stdout_tail", "raw"}:
+        return redact_text(value)
+    return value
+
+
+def _fix_issue_for_mcp(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute fixes through the same confirmation gate as the local HTTP API."""
+    from netfix import api  # Lazy import keeps MCP startup small and avoids cycles.
+
+    body = {
+        "fix_id": str(args.get("issue") or "").strip(),
+        "dry_run": bool(args.get("dry_run")),
+        "confirmed": bool(args.get("confirmed") or args.get("confirm")),
+        "confirmation": str(args.get("confirmation") or ""),
+        "timeout": int(args.get("timeout") or 90),
+    }
+    status, payload = api._execute_confirmed_fix(body)
+    result = _sanitize_mcp_output(_strip_internal_secrets(payload))
+    if isinstance(result, dict):
+        result.setdefault("http_status", status)
     return result
 
 
@@ -434,8 +478,6 @@ def _build_argv(name: str, args: Dict[str, Any]) -> List[str]:
         argv = ["fix", "--issue", str(args.get("issue", ""))]
         if args.get("dry_run"):
             argv.append("--dry-run")
-        if args.get("yes"):
-            argv.append("--yes")
         return _ensure_json_and_timeout(argv, timeout)
 
     if name in _FIX_TOOL_IDS:
@@ -460,9 +502,15 @@ def _build_argv(name: str, args: Dict[str, Any]) -> List[str]:
 
 
 def _call_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    if name == "netfix_fix_issue":
+        result = _fix_issue_for_mcp(args)
+        text = json.dumps(result, ensure_ascii=False, indent=2)
+        is_error = isinstance(result, dict) and (not result.get("ok", True) or int(result.get("http_status", 200)) >= 400)
+        return {"content": [{"type": "text", "text": text}], "isError": bool(is_error)}
+
     if name in _AGENT_TOOL_DISPATCH:
         try:
-            result = _AGENT_TOOL_DISPATCH[name](args)
+            result = _sanitize_mcp_output(_strip_internal_secrets(_AGENT_TOOL_DISPATCH[name](args)))
         except Exception as exc:  # pragma: no cover - defensive
             text = json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2)
             return {"content": [{"type": "text", "text": text}], "isError": True}
@@ -475,7 +523,7 @@ def _call_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     except ValueError as exc:
         return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
 
-    result = run_cli(argv, timeout=int(args.get("timeout", 60)))
+    result = _sanitize_mcp_output(_strip_internal_secrets(run_cli(argv, timeout=int(args.get("timeout", 60)))))
     text = json.dumps(result, ensure_ascii=False, indent=2)
     return {"content": [{"type": "text", "text": text}], "isError": not result.get("ok", True)}
 

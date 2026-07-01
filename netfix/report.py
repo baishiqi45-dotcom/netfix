@@ -29,6 +29,30 @@ class Report:
             return "✗"
         return "?"
 
+    @staticmethod
+    def _confidence_label(confidence: Any) -> str:
+        try:
+            value = float(confidence)
+        except (TypeError, ValueError):
+            return ""
+        if value >= 0.8:
+            return "很确定"
+        if value >= 0.6:
+            return "比较确定"
+        return "可能"
+
+    @staticmethod
+    def _fix_tier_label(tier: Any) -> str:
+        try:
+            value = int(tier)
+        except (TypeError, ValueError):
+            value = 3
+        return {
+            1: "可自动处理",
+            2: "需要你确认",
+            3: "请手动操作",
+        }.get(value, "请手动操作")
+
     def summary(self) -> Dict[str, Any]:
         """Return a one-sentence conclusion and recommended action."""
         env = self.data.get("environment", {})
@@ -84,7 +108,7 @@ class Report:
             f"【结论】{summary['headline']}",
         ]
         if summary["root_cause"]:
-            lines.append(f"【根因】{summary['root_cause']}")
+            lines.append(f"【最可能的原因】{summary['root_cause']}")
         lines.append(f"【建议】{summary['action']}")
         lines.append("")
 
@@ -129,7 +153,8 @@ class Report:
         if root_causes:
             for rc in root_causes:
                 conf = rc.get("confidence")
-                conf_str = f" (置信度 {conf})" if conf is not None else ""
+                label = self._confidence_label(conf)
+                conf_str = f"（{label}）" if label else ""
                 lines.append(f"  - {rc.get('description')}{conf_str}")
         else:
             lines.append(f"  {t('label.none')}")
@@ -140,7 +165,7 @@ class Report:
             for fix in fixes:
                 tier = fix.get("tier", 3)
                 lines.append(
-                    f"  [{t('fix.tier')} {tier}] {fix.get('id')}: {fix.get('description')}"
+                    f"  [{self._fix_tier_label(tier)}] {fix.get('id')}: {fix.get('description')}"
                 )
                 cmd = fix.get("command") or "N/A"
                 lines.append(f"      {t('fix.command')}: {cmd}")

@@ -19,7 +19,14 @@ from netfix.layers._helpers import (
     interface_ipv4,
     interface_ipv6s,
 )
+from netfix.redaction import redact_text
 from netfix.utils import run_command
+
+
+def _safe_text(value: Any, max_len: int = 500) -> str:
+    """Return a short, redacted command-output snippet for agent-facing tools."""
+    text = redact_text(str(value or ""))
+    return text[:max_len]
 
 
 def _redact_url(url: Optional[str]) -> Optional[str]:
@@ -36,7 +43,7 @@ def _redact_url(url: Optional[str]) -> Optional[str]:
 def _parse_scutil_dns() -> Dict[str, Any]:
     res = run_command(["scutil", "--dns"], timeout=10)
     if not res["ok"]:
-        return {"error": res["stderr"]}
+        return {"error": _safe_text(res["stderr"])}
     resolvers: List[str] = []
     search_domains: List[str] = []
     for line in res["stdout"].splitlines():
@@ -195,8 +202,8 @@ def dns_resolve(target: str, resolver: Optional[str] = None) -> Dict[str, Any]:
         "target": target,
         "resolver": resolver,
         "status": "ok" if ok else "fail",
-        "stdout_tail": res["stdout"][-500:],
-        "stderr": res["stderr"],
+        "stdout_tail": _safe_text(res["stdout"], 500),
+        "stderr": _safe_text(res["stderr"]),
     }
 
 
@@ -219,7 +226,7 @@ def test_proxy_for_url(url: str) -> Dict[str, Any]:
         "proxy": _redact_url(proxy),
         "http_code": code,
         "status": "ok" if code == 200 else ("fail" if code == 407 else "warn"),
-        "error": res["stderr"] if not res["ok"] else None,
+        "error": _safe_text(res["stderr"]) if not res["ok"] else None,
     }
 
 
@@ -237,7 +244,7 @@ def test_direct_for_url(url: str) -> Dict[str, Any]:
         "url": url,
         "http_code": code,
         "status": "ok" if code == 200 else "warn",
-        "error": res["stderr"] if not res["ok"] else None,
+        "error": _safe_text(res["stderr"]) if not res["ok"] else None,
     }
 
 
@@ -291,8 +298,8 @@ def flush_dns() -> Dict[str, Any]:
     r1 = run_command(["sudo", "dscacheutil", "-flushcache"], timeout=10)
     r2 = run_command(["sudo", "killall", "-HUP", "mDNSResponder"], timeout=10)
     return {
-        "flush": {"ok": r1["ok"], "stderr": r1["stderr"]},
-        "signal": {"ok": r2["ok"], "stderr": r2["stderr"]},
+        "flush": {"ok": r1["ok"], "stderr": _safe_text(r1["stderr"])},
+        "signal": {"ok": r2["ok"], "stderr": _safe_text(r2["stderr"])},
         "status": "ok" if r1["ok"] and r2["ok"] else "warn",
     }
 
@@ -301,10 +308,10 @@ def renew_dhcp(interface: Optional[str] = None) -> Dict[str, Any]:
     """Force a DHCP renew on *interface* (defaults to primary)."""
     iface = interface or default_interface() or "en0"
     res = run_command(["sudo", "ipconfig", "set", iface, "DHCP"], timeout=15)
-    return {"interface": iface, "status": "ok" if res["ok"] else "fail", "error": res["stderr"]}
+    return {"interface": iface, "status": "ok" if res["ok"] else "fail", "error": _safe_text(res["stderr"])}
 
 
 def disable_ipv6(service: str = "Wi-Fi") -> Dict[str, Any]:
     """Temporarily disable IPv6 for a network service."""
     res = run_command(["networksetup", "-setv6off", service], timeout=10)
-    return {"service": service, "status": "ok" if res["ok"] else "fail", "error": res["stderr"]}
+    return {"service": service, "status": "ok" if res["ok"] else "fail", "error": _safe_text(res["stderr"])}

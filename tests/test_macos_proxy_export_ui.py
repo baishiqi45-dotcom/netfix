@@ -113,14 +113,14 @@ def test_macos_proxy_tab_prioritizes_plain_one_paste_wizard():
     assert "复制包含地址、端口、用户名、密码的整行" in settings
     assert "proxy.example.com:8001:username:password" in settings
     assert 'Picker("参数类型", selection: $proxyProtocolHint)' in settings
-    assert "自动（常见 HTTP）" in settings
+    assert "自动判断（大多数选这个）" in settings
     assert "如果服务商明确写 SOCKS5" in settings
     assert "保存不会改网络" in settings
     assert "还没有影响浏览器" in settings
-    assert "部署到这台 Mac" in settings
+    assert "开始使用这台 Mac 上网" in settings
     assert "不要只复制出口 IP" in settings
-    assert 'Label("预检这行参数", systemImage: "checklist")' in settings
-    assert 'Label("保存到这台 Mac", systemImage: "tray.and.arrow.down")' in settings
+    assert 'Label("检查这行能不能用", systemImage: "checklist")' in settings
+    assert 'Label("保存并测试（暂不改网络）", systemImage: "tray.and.arrow.down")' in settings
     assert 'Button("我没有代理服务商参数")' in settings
     assert "proxyDeploymentConfirmationText" in settings
     assert "friendlyProxyApplyStep" in settings
@@ -134,6 +134,6 @@ def test_macos_proxy_tab_prioritizes_plain_one_paste_wizard():
     assert "proxyCheckSummary" in settings
     assert "friendlyProxyError" in settings
     assert "系统会先连本机，再由 Netfix 转发到供应商代理" in settings
-    assert 'Label("部署到这台 Mac", systemImage: "exclamationmark.triangle.fill")' in settings
+    assert 'Label("开始使用这台 Mac 上网", systemImage: "play.circle.fill")' in settings
     assert 'Button("导出配置包")' in settings
     assert 'Button("给终端工具使用")' in settings
