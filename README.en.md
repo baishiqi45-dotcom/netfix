@@ -25,10 +25,10 @@ The product goal is a desktop app that a non-terminal user can open, run, and re
 
 This repository is ready for source-first open-source review and local execution. A public signed `.dmg` is not ready yet because Developer ID signing and notarization are still missing. Do not market the local candidate build as an official external download.
 
-One-line Codex MCP install for other users, after this repository has been pushed publicly to GitHub:
+One-line Codex MCP install for other users. This uses the `v0.2.0-qa.1` release asset URL to avoid GitHub raw main cache lag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_codex_mcp_from_github.sh | bash
+curl -fsSL https://github.com/baishiqi45-dotcom/netfix/releases/download/v0.2.0-qa.1/install_codex_mcp_from_github.sh | bash
 ```
 
 The command downloads source to `~/.netfix/netfix-codex-mcp-source`, runs an MCP initialization check, and registers `codex mcp add netfix -- python3 .../netfix/mcp_server.py`. Restart Codex or open a new Codex thread afterwards. It does not copy proxy passwords or API keys.
@@ -36,7 +36,7 @@ The command downloads source to `~/.netfix/netfix-codex-mcp-source`, runs an MCP
 One-line local macOS app install. The current default downloads the unsigned QA DMG from `v0.2.0-qa.1`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
+curl -fsSL https://github.com/baishiqi45-dotcom/netfix/releases/download/v0.2.0-qa.1/install_mac_app_from_github.sh | bash
 ```
 
 The command downloads the DMG, verifies SHA256, installs `Netfix.app` to `~/Applications`, registers Netfix MCP for Codex when the Codex CLI exists, and opens the app. The current QA DMG is not Developer ID signed or notarized, so it is suitable for technical testers, not finished non-technical distribution.

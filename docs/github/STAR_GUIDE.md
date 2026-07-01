@@ -67,10 +67,10 @@ Then manually check:
 
 - README first screen renders both badges and hero image.
 - README.en.md has no `<repo>` placeholder.
-- The one-line Codex MCP install works from a clean account after the GitHub branch is pushed:
-  `curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_codex_mcp_from_github.sh | bash`
-- The one-line macOS app install works for the QA DMG after `v0.2.0-qa.1` is published to GitHub Releases:
-  `curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash`
+- The one-line Codex MCP install works from a clean account through the `v0.2.0-qa.1` GitHub Release asset:
+  `curl -fsSL https://github.com/baishiqi45-dotcom/netfix/releases/download/v0.2.0-qa.1/install_codex_mcp_from_github.sh | bash`
+- The one-line macOS app install works for the QA DMG through the `v0.2.0-qa.1` GitHub Release asset:
+  `curl -fsSL https://github.com/baishiqi45-dotcom/netfix/releases/download/v0.2.0-qa.1/install_mac_app_from_github.sh | bash`
 - GitHub Issues have safe templates.
 - SECURITY.md gives a private-report path or a sanitized fallback.
 - Release notes do not call an unsigned local build a public product.

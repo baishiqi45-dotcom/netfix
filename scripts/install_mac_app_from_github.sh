@@ -32,7 +32,7 @@ Environment overrides:
   NETFIX_REGISTER_CODEX  Register Codex MCP if codex CLI exists, default: true
 
 QA install, after the v0.2.0-qa.1 release asset has been published:
-  curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
+  curl -fsSL https://github.com/baishiqi45-dotcom/netfix/releases/download/v0.2.0-qa.1/install_mac_app_from_github.sh | bash
 
 This installs Netfix.app locally. It does not copy proxy credentials or API keys.
 The default QA DMG is unsigned; macOS may require right-click -> Open.

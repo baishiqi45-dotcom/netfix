@@ -29,10 +29,11 @@ def test_open_source_license_security_and_mcp_installer_exist():
     assert "netfix/mcp_server.py" in text
     assert "--dry-run" in text
     assert "cd /tmp" in text
-    assert "raw.githubusercontent.com/baishiqi45-dotcom/netfix/main" in codex_text
+    assert "github.com/baishiqi45-dotcom/netfix/releases/download/v0.2.0-qa.1/install_codex_mcp_from_github.sh" in codex_text
     assert "codex mcp add netfix -- python3" in codex_text
     assert "NETFIX_ARCHIVE_URL" in codex_text
     assert "releases/download/${RELEASE_TAG}/Netfix-" in mac_text
+    assert "github.com/baishiqi45-dotcom/netfix/releases/download/v0.2.0-qa.1/install_mac_app_from_github.sh" in mac_text
     assert "v${VERSION}-qa.1" in mac_text
     assert "DEFAULT_DMG_SHA256" in mac_text
     assert "82815efd5888e60b914a1da303e2d42835a03b6b588f87d515346426eb57183b" in mac_text

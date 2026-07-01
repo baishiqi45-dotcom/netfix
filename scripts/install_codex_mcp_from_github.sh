@@ -19,7 +19,7 @@ Environment overrides:
   NETFIX_INSTALL_DIR    Install directory, default: ~/.netfix/netfix-codex-mcp-source
 
 One-line public install, after the repository has been pushed:
-  curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_codex_mcp_from_github.sh | bash
+  curl -fsSL https://github.com/baishiqi45-dotcom/netfix/releases/download/v0.2.0-qa.1/install_codex_mcp_from_github.sh | bash
 
 This installs source files for local MCP use and registers:
   codex mcp add netfix -- python3 <install-dir>/netfix/mcp_server.py
