@@ -21,7 +21,7 @@ Netfix 是 macOS 上的本地网络诊断与配置助手：把你从代理服务
 这是 **v0.2.0-qa.1 预览版**，DMG 还没有完成 Apple Developer ID 签名和公证。普通用户首次打开时，macOS 可能会提示“无法验证开发者”。请在 **系统设置 → 隐私与安全性** 里点击 **仍要打开**。
 
 ```bash
-# 安装 Netfix.app（QA 版本，未签名）
+# 普通用户复制这一行：安装 Netfix.app（QA 版本，未签名）
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
 
 # 只预览会做什么，不安装

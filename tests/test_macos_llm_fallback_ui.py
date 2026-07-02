@@ -28,7 +28,7 @@ def test_macos_ai_settings_exposes_domestic_fallback_chain():
     assert "testLLMChain" in view
     assert "testLLMConnection" in view
     assert "importDeepSeekSidecarKey" in view
-    assert 'Button("导入 DeepSeek 侧车 Key")' in view
+    assert 'Button("自动读取 DeepSeek Key")' in view
     assert "不会显示或记录密钥" in view
     assert 'Button("测试链路")' in view
     assert 'Button("测试连接")' in view

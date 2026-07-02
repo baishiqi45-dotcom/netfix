@@ -23,7 +23,7 @@ No API key is required. If you do configure one, the model only ever sees an on-
 > ⚠️ The current DMG is the **v0.2.0-qa.1 preview build, unsigned and not notarized**. On first launch, macOS will block it; open System Settings → Privacy & Security → Open Anyway. Do not market this QA build as an official external release.
 
 ```bash
-# One-line macOS app install (QA build, unsigned; first launch: System Settings → Privacy & Security → Open Anyway)
+# Most users copy this line: install Netfix.app (QA build, unsigned; first launch: System Settings → Privacy & Security → Open Anyway)
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
 
 # Preview installer actions without installing

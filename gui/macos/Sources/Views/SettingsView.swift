@@ -474,7 +474,7 @@ struct SettingsView: View {
                     }
 
                     HStack {
-                        Button("导入 DeepSeek 侧车 Key") {
+                        Button("自动读取 DeepSeek Key") {
                             Task { await importDeepSeekSidecarKey() }
                         }
                         .disabled(!backend.isReady)
@@ -1841,7 +1841,7 @@ struct SettingsView: View {
             aiStatus = "失败：Netfix 还没准备好。"
             return
         }
-        aiStatus = "正在导入 DeepSeek 侧车 Key；不会显示或记录密钥。"
+        aiStatus = "正在读取本机 DeepSeek 配置；不会显示或记录密钥。"
         do {
             let response = try await client.importDeepSeekSidecarKey()
             if let settings = response.settings {
@@ -1864,7 +1864,7 @@ struct SettingsView: View {
             let providers = try await client.llmProviders()
             llmProviders = providers.providers
             llmChainReadiness = try await client.llmChainReadiness()
-            aiStatus = "已导入 DeepSeek 侧车 Key，模型：\(response.model ?? llmModel)。现在可以问 AI 或测试链路。"
+            aiStatus = "已读取本机 DeepSeek Key，模型：\(response.model ?? llmModel)。现在可以问 AI 或测试链路。"
         } catch {
             aiStatus = "失败：\(error.localizedDescription)"
         }
