@@ -16,6 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 _BRIDGES: Dict[str, "_BridgeRecord"] = {}
 _LOCK = threading.RLock()
+TUNNEL_MAX_SECONDS = 60.0
 
 
 class _BridgeRecord:
@@ -43,6 +44,7 @@ class _BridgeRecord:
 
 
 class _BridgeServer(socketserver.ThreadingTCPServer):
+    address_family = socket.AF_INET
     allow_reuse_address = True
     daemon_threads = True
 
@@ -358,8 +360,12 @@ class _BridgeHandler(BaseHTTPRequestHandler):
     @staticmethod
     def _tunnel(left: socket.socket, right: socket.socket) -> None:
         sockets = [left, right]
+        deadline = time.monotonic() + TUNNEL_MAX_SECONDS
         while True:
-            readable, _writable, errored = select.select(sockets, [], sockets, 300)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            readable, _writable, errored = select.select(sockets, [], sockets, min(5.0, remaining))
             if errored or not readable:
                 return
             for src in readable:

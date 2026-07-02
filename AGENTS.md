@@ -53,18 +53,18 @@ python3 netfix.py connectivity 8.8.8.8:443 --json
 
 ## 修复执行规则
 
-`fixes` 数组里每一项都有 `tier`：
+`fixes` 数组里每一项都有 `tier`，你可以把它理解成“风险等级”：
 
-- **Tier 1**：低风险，可以直接执行。
+- **Tier 1 / 可自动执行**：低风险，例如刷新 DNS 缓存。可以直接执行。
   ```bash
   python3 netfix.py fix --issue flush-dns-cache
   ```
-- **Tier 2**：会改配置，**必须先问用户**，不能因 `--yes` 绕过。
+- **Tier 2 / 需用户确认**：会改系统配置，**必须先问用户**，不能因 `--yes` 绕过。
   ```bash
   python3 netfix.py fix --issue reset-system-proxy --dry-run
   # 给用户看 diff，确认后再去掉 --dry-run
   ```
-- **Tier 3**：只给手动步骤清单，不执行任何命令。把 `manual_steps` 逐条念给用户。
+- **Tier 3 / 只能手动**：只给手动步骤清单，不执行任何命令。把 `manual_steps` 逐条念给用户。
 
 **注意**：`--yes` 只对 Tier 1 生效。Tier 2 无论有没有 `--yes`，都要用户亲口确认。
 
@@ -74,10 +74,10 @@ python3 netfix.py connectivity 8.8.8.8:443 --json
 
 netfix 没覆盖的场景才手写命令。优先顺序：
 
-1. `python3 netfix.py codex --json`
-2. `python3 netfix.py triage --json` 或分项诊断
-3. `python3 netfix.py doctor --json`（完整体检）
-4. `python3 netfix.py kb --query <关键词>` 查 runbook
+1. `python3 netfix.py codex --json`（快速检查）
+2. `python3 netfix.py triage --json` 或分项诊断（别名：`python3 netfix.py check --json`）
+3. `python3 netfix.py doctor --json`（完整体检；别名：`python3 netfix.py full-check --json`）
+4. `python3 netfix.py kb --query <关键词>` 查 runbook（别名：`python3 netfix.py guide --query <关键词>`）
 5. 最后才查 `final.md` 或手写命令
 
 ---
@@ -136,6 +136,16 @@ HTTP 端点：
 - `GET /services/groups`
 
 MCP 暴露的工具包括 `netfix_codex`、`netfix_services`、`netfix_triage`、`netfix_doctor`、`netfix_report`、`netfix_kb_query`、`netfix_fix_issue`、`netfix_rollback`、`netfix_proxy_switch`。
+
+Agent 优先用这些更清楚的新工具：
+
+- `netfix_list_fixes`：列出当前已知修复项、Tier、风险和是否需要确认。
+- `netfix_dry_run_fix`：只预演一个修复，不改系统设置。
+- `netfix_apply_fix`：真正执行修复。Tier 2 必须传 `confirmed=true` 和 `magic_word=APPLY_SYSTEM_FIX`。
+- `netfix_evidence_chain`：给出“为什么判断这个根因”的诊断证据链。
+- `netfix_sanitized_report`：返回已脱敏报告，适合贴 issue 或发给 AI。
+
+旧的 `netfix_fix_issue` 仍保留兼容，但新 Agent 应该优先 `list_fixes → dry_run_fix → apply_fix`。
 
 ### 在 Kimi Code CLI 中注册
 

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import copy
+import hashlib
 import subprocess
 import sys
 import re
@@ -15,6 +17,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 from netfix import codex, ip_intel, keychain, proxy_bridge
 from netfix.constants import JOURNAL_DIR
+from netfix.redaction import redact_text
 from netfix.settings import delete_proxy_profile as delete_stored_proxy_profile
 from netfix.settings import get_proxy_profiles, upsert_proxy_profile
 from netfix.utils import secure_write_json
@@ -836,8 +839,16 @@ def _restore_system_proxy_backup(backup: Dict[str, Any]) -> Dict[str, Any]:
         commands.extend(_restore_proxy_kind(service, kind, backup.get(kind, {})))
 
     auto_url = backup.get("auto_proxy_url", {})
-    if auto_url.get("enabled") and auto_url.get("url"):
-        commands.append(["-setautoproxyurl", service, str(auto_url["url"])])
+    if auto_url.get("enabled"):
+        restore_url = _auto_proxy_url_for_restore(auto_url)
+        if not restore_url:
+            return {
+                "ok": False,
+                "error": "rollback backup contains a redacted PAC/auto-proxy URL that cannot be restored",
+                "reason_code": "auto_proxy_url_backup_not_restorable",
+                "network_service": service,
+            }
+        commands.append(["-setautoproxyurl", service, restore_url])
         commands.append(["-setautoproxystate", service, "on"])
     else:
         commands.append(["-setautoproxystate", service, "off"])
@@ -852,8 +863,64 @@ def _restore_system_proxy_backup(backup: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "network_service": service, "commands": executed}
 
 
+def _journal_secret_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+def _journal_secret_account(entry_id: str, name: str) -> str:
+    safe_id = re.sub(r"[^A-Za-z0-9_.:-]+", "_", entry_id or "unknown")
+    return f"journal:{safe_id}:{name}"
+
+
+def _auto_proxy_url_for_restore(auto_url: Dict[str, Any]) -> str:
+    ref = auto_url.get("credential_ref") if isinstance(auto_url.get("credential_ref"), dict) else {}
+    account = str(ref.get("account") or "")
+    service = str(ref.get("service") or keychain.PROXY_SERVICE)
+    if account:
+        secret = keychain.get_secret(service, account) or ""
+        if secret:
+            return secret
+    url = str(auto_url.get("url") or "")
+    if not url or "***" in url or "[redacted" in url:
+        return ""
+    return url
+
+
+def _sanitize_proxy_backup_for_journal(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a journal-safe copy while preserving rollback via Keychain refs."""
+    safe = copy.deepcopy(entry)
+    backup = safe.get("backup") if isinstance(safe.get("backup"), dict) else {}
+    entry_id = str(safe.get("id") or "")
+
+    for key in ("web", "secure", "socks", "auto_discovery", "ipv6"):
+        state = backup.get(key)
+        if isinstance(state, dict):
+            state.pop("raw", None)
+
+    auto_url = backup.get("auto_proxy_url")
+    if isinstance(auto_url, dict):
+        raw_url = str(auto_url.get("url") or "")
+        auto_url.pop("raw", None)
+        if raw_url:
+            auto_url["url_redacted"] = redact_text(raw_url)
+            auto_url["url_hash"] = _journal_secret_hash(raw_url)
+            account = _journal_secret_account(entry_id, "auto_proxy_url")
+            stored = False
+            try:
+                stored = bool(keychain.set_secret(keychain.PROXY_SERVICE, account, raw_url).get("ok"))
+            except Exception:
+                stored = False
+            if stored:
+                auto_url["credential_ref"] = {"service": keychain.PROXY_SERVICE, "account": account}
+                auto_url["url"] = ""
+            else:
+                auto_url["url"] = ""
+                auto_url["restore_blocked_reason"] = "auto_proxy_url_not_stored_in_keychain"
+    return safe
+
+
 def _write_apply_journal(entry: Dict[str, Any]) -> Dict[str, Any]:
-    payload = {"version": 1, "last_apply": entry}
+    payload = {"version": 1, "last_apply": _sanitize_proxy_backup_for_journal(entry)}
     secure_write_json(PROXY_APPLY_JOURNAL, payload, sort_keys=True)
     return payload
 

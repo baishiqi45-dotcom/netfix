@@ -87,7 +87,7 @@ struct SettingsView: View {
 
             agentTab
                 .tabItem {
-                    Label("Agent", systemImage: "terminal")
+                    Label("AI 编程助手", systemImage: "terminal")
                 }
                 .tag("agent")
 
@@ -274,7 +274,7 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Agent / MCP
+    // MARK: - AI 编程助手 / MCP
 
     private var agentTab: some View {
         Form {
@@ -283,7 +283,7 @@ struct SettingsView: View {
                     HStack {
                         Image(systemName: "terminal")
                             .foregroundStyle(.blue)
-                        Text("把 Netfix 接进 Agent")
+                        Text("把 Netfix 接进 AI 编程助手")
                             .font(.headline)
                         Spacer()
                         Text(mcpServerExists ? "已就绪" : "缺少 MCP 文件")
@@ -643,18 +643,18 @@ struct SettingsView: View {
 
                     HStack {
                         Button {
-                            Task { await importProxyPreview() }
+                            Task { await saveProxyProfile() }
                         } label: {
-                            Label("检查这行能不能用", systemImage: "checklist")
+                            Label("检查并保存到这台 Mac", systemImage: "tray.and.arrow.down")
                         }
+                        .buttonStyle(.borderedProminent)
                         .disabled(!backend.isReady || proxyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                         Button {
-                            Task { await saveProxyProfile() }
+                            Task { await importProxyPreview() }
                         } label: {
-                            Label("保存并测试（暂不改网络）", systemImage: "tray.and.arrow.down")
+                            Label("只检查，不保存", systemImage: "checklist")
                         }
-                        .buttonStyle(.borderedProminent)
                         .disabled(!backend.isReady || proxyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                         Button("我没有代理服务商参数") {
@@ -663,7 +663,7 @@ struct SettingsView: View {
                     }
 
                     Toggle("保存后自动启动健康监控", isOn: $proxyStartMonitorOnSave)
-                    Text("保存只是把参数放到本机并测试，暂不影响浏览器。要开始使用，请在已保存代理里点“开始使用这台 Mac 上网”。")
+                    Text("检查并保存只是把参数放到本机，暂不影响浏览器。要开始使用，请在已保存代理里点“开始使用这台 Mac 上网”。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -706,7 +706,7 @@ struct SettingsView: View {
                         .disabled(!backend.isReady)
                     }
                 } else {
-                        Text("下一步：粘贴整行参数 → 检查能不能用 → 保存并测试 → 开始使用这台 Mac 上网。")
+                        Text("下一步：粘贴整行参数 → 检查并保存到这台 Mac → 开始使用这台 Mac 上网。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -984,7 +984,7 @@ struct SettingsView: View {
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-        mcpStatus = "已复制。Codex 粘贴命令后重启 Agent；Kimi 用通用 stdio 配置，前提是宿主支持 MCP。"
+        mcpStatus = "已复制。Codex 粘贴命令后重启对应的 AI 编程助手；Kimi 用通用 stdio 配置，前提是宿主支持 MCP。"
     }
 
     private func refreshNotificationStatus() async {
@@ -1238,7 +1238,7 @@ struct SettingsView: View {
     private func proxyDeploymentConfirmationText() -> String {
         var lines = [
             "Netfix 会先备份当前网络设置。",
-            "部署后，浏览器和大多数 App 会使用这组代理。",
+            "部署后，Safari、Chrome、微信、钉钉、终端和大多数 App 都会按系统代理使用这组代理。",
         ]
         if let plan = pendingSystemProxyPlan {
             let steps = (plan.steps ?? []).map { friendlyProxyApplyStep($0) }.filter { !$0.isEmpty }
@@ -1249,7 +1249,7 @@ struct SettingsView: View {
                 lines.append("这组代理需要 Netfix 保持打开，用来安全代管账号密码。")
             }
         }
-        lines.append("不用时可以点“恢复原来的网络设置”。")
+        lines.append("不用时可以点“恢复原来的网络设置”，回到部署前的网络配置。")
         return lines.joined(separator: "\n")
     }
 

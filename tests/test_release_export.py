@@ -190,7 +190,7 @@ class TestReleaseExport(unittest.TestCase):
             self.assertIn("DeepSeek text setup", first_readme)
             self.assertIn("Copy for Codex", first_readme)
             self.assertIn("MCP 不保存 API Key 或代理密码", first_readme)
-            self.assertIn("Settings -> Agent", first_readme)
+            self.assertIn("Settings -> AI Coding Assistant", first_readme)
             self.assertIn("Copy for Codex", first_readme)
             self.assertIn("诊断、查报告、查知识库和代理预检", first_readme)
             self.assertIn("源码开源阻塞项", first_readme)

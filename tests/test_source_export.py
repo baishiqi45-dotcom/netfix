@@ -3,6 +3,8 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from scripts.release_audit import audit
 from scripts.source_export import create_source_export
@@ -148,6 +150,33 @@ class TestSourceExport(unittest.TestCase):
             data = json.loads(proc.stdout)
             self.assertTrue(data["ok"])
             self.assertTrue(Path(data["export_root"]).exists())
+
+    def test_source_export_manifest_sanitizes_audit_finding_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "README.md").write_text("# Netfix\n", encoding="utf-8")
+            (root / "netfix.py").write_text("print('netfix')\n", encoding="utf-8")
+            private_path = root / "private" / "cc-http.proxy-url"
+            private_path.parent.mkdir()
+            private_path.write_text("redacted fixture", encoding="utf-8")
+            finding = SimpleNamespace(
+                severity="blocker",
+                kind="secret-like-text",
+                path=str(private_path),
+                message=f"found private file under {root}",
+                next_steps=[f"remove {private_path}"],
+            )
+
+            with patch("scripts.source_export.audit", return_value=[finding]):
+                result = create_source_export(root=root, out_dir=root / "out", make_zip=False)
+
+            self.assertFalse(result["ok"])
+            export_root = Path(result["export_root"])
+            manifest_text = (export_root / "SOURCE-EXPORT-MANIFEST.json").read_text(encoding="utf-8")
+            self.assertNotIn(str(root), manifest_text)
+            self.assertNotIn("cc-http.proxy-url", manifest_text)
+            self.assertIn("<source-workspace>", manifest_text)
+            self.assertIn("<private-proxy-config>", manifest_text)
 
 
 if __name__ == "__main__":

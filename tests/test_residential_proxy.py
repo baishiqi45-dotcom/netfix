@@ -510,6 +510,73 @@ class TestResidentialProxy(unittest.TestCase):
         calls = [call.args[0] for call in networksetup.call_args_list]
         self.assertIn(["-setv6automatic", "Wi-Fi"], calls)
 
+    def test_apply_journal_redacts_auto_proxy_url_and_keeps_keychain_ref(self):
+        entry = {
+            "id": "journal-1",
+            "backup": {
+                "service": "Wi-Fi",
+                "web": {"enabled": False, "raw": "web raw"},
+                "secure": {"enabled": False, "raw": "secure raw"},
+                "socks": {"enabled": False, "raw": "socks raw"},
+                "auto_proxy_url": {
+                    "enabled": True,
+                    "url": "http://user:secret-password@pac.example.com/proxy.pac?token=raw-token",
+                    "raw": "URL: http://user:secret-password@pac.example.com/proxy.pac?token=raw-token",
+                },
+                "auto_discovery": {"enabled": False, "raw": "auto raw"},
+            },
+        }
+        with patch("netfix.residential_proxy.keychain.set_secret", return_value={"ok": True}) as set_secret, \
+                patch("netfix.residential_proxy.secure_write_json") as write_json:
+            payload = residential_proxy._write_apply_journal(entry)
+
+        set_secret.assert_called_once()
+        written = write_json.call_args.args[1]
+        auto_url = written["last_apply"]["backup"]["auto_proxy_url"]
+        self.assertEqual(auto_url["url"], "")
+        self.assertEqual(auto_url["credential_ref"]["service"], "netfix.proxy")
+        self.assertIn("url_hash", auto_url)
+        self.assertNotIn("raw", auto_url)
+        self.assertNotIn("raw", written["last_apply"]["backup"]["web"])
+        encoded = str(payload)
+        self.assertNotIn("secret-password", encoded)
+        self.assertNotIn("raw-token", encoded)
+
+    def test_restore_system_proxy_backup_reads_auto_proxy_url_from_keychain_ref(self):
+        backup = {
+            "service": "Wi-Fi",
+            "web": {"enabled": False, "authenticated": False},
+            "secure": {"enabled": False, "authenticated": False},
+            "socks": {"enabled": False, "authenticated": False},
+            "auto_proxy_url": {
+                "enabled": True,
+                "url": "",
+                "credential_ref": {"service": "netfix.proxy", "account": "journal:j1:auto_proxy_url"},
+            },
+            "auto_discovery": {"enabled": False},
+        }
+        with patch("netfix.residential_proxy.keychain.get_secret", return_value="http://pac.example.com/proxy.pac"), \
+                patch("netfix.residential_proxy._run_networksetup", return_value={"ok": True}) as networksetup:
+            result = residential_proxy._restore_system_proxy_backup(backup)
+
+        self.assertTrue(result["ok"])
+        calls = [call.args[0] for call in networksetup.call_args_list]
+        self.assertIn(["-setautoproxyurl", "Wi-Fi", "http://pac.example.com/proxy.pac"], calls)
+
+    def test_restore_system_proxy_backup_blocks_redacted_auto_proxy_without_keychain_ref(self):
+        backup = {
+            "service": "Wi-Fi",
+            "web": {"enabled": False, "authenticated": False},
+            "secure": {"enabled": False, "authenticated": False},
+            "socks": {"enabled": False, "authenticated": False},
+            "auto_proxy_url": {"enabled": True, "url": "http://user:***@pac.example.com/proxy.pac"},
+            "auto_discovery": {"enabled": False},
+        }
+        result = residential_proxy._restore_system_proxy_backup(backup)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason_code"], "auto_proxy_url_backup_not_restorable")
+
     def test_rollback_last_proxy_apply_requires_confirmation(self):
         with patch("netfix.residential_proxy._read_apply_journal", return_value={"last_apply": {"id": "j1", "profile_id": "p1", "network_service": "Wi-Fi"}}), \
                 patch("netfix.residential_proxy._restore_system_proxy_backup") as restore:

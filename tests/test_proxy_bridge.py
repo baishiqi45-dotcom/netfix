@@ -4,6 +4,7 @@ import threading
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler
+from unittest.mock import patch
 
 from netfix import proxy_bridge
 
@@ -89,6 +90,22 @@ class TestProxyBridge(unittest.TestCase):
         self.upstream.shutdown()
         self.upstream.server_close()
         self.thread.join(timeout=3)
+
+    def test_bridge_server_uses_ipv4_loopback_family(self):
+        self.assertEqual(proxy_bridge._BridgeServer.address_family, socket.AF_INET)
+
+    def test_tunnel_has_wall_clock_limit(self):
+        left, peer_left = socket.socketpair()
+        right, peer_right = socket.socketpair()
+        try:
+            with patch("netfix.proxy_bridge.TUNNEL_MAX_SECONDS", 0.05):
+                thread = threading.Thread(target=proxy_bridge._BridgeHandler._tunnel, args=(left, right), daemon=True)
+                thread.start()
+                thread.join(timeout=1)
+            self.assertFalse(thread.is_alive())
+        finally:
+            for sock in (left, right, peer_left, peer_right):
+                sock.close()
 
     def test_bridge_injects_proxy_authorization_without_public_secret(self):
         host, port = self.upstream.server_address

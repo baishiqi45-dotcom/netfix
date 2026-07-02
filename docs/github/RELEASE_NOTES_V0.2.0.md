@@ -25,7 +25,7 @@ Codex MCP one-line registration:
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_codex_mcp_from_github.sh | bash
 ```
 
-Kimi / Claude / Cursor users should use the generic MCP config from the App Settings -> Agent screen or `AGENTS.md`; the one-line installer only auto-registers Codex CLI.
+Kimi / Claude / Cursor users should use the generic MCP config from the App Settings -> AI Coding Assistant screen or `AGENTS.md`; the one-line installer only auto-registers Codex CLI.
 
 Source build:
 

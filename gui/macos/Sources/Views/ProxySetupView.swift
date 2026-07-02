@@ -83,15 +83,17 @@ struct ProxySetupView: View {
                             .stroke(Color.secondary.opacity(0.25))
                     )
                 HStack {
-                    Button("检查这行能不能用") {
-                        Task { await previewProxyInput() }
-                    }
-                    .disabled(!backend.isReady || proxyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProxyWorking)
-
-                    Button("保存并测试（暂不改网络）") {
+                    Button {
                         Task { await saveProxyInput() }
+                    } label: {
+                        Label("检查并保存到这台 Mac", systemImage: "tray.and.arrow.down")
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(!backend.isReady || proxyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProxyWorking)
+
+                    Button("只检查，不保存") {
+                        Task { await previewProxyInput() }
+                    }
                     .disabled(!backend.isReady || proxyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProxyWorking)
                 }
 
@@ -257,12 +259,12 @@ struct ProxySetupView: View {
     private func proxyDeploymentConfirmationText() -> String {
         var lines = [
             "Netfix 会先备份当前网络设置。",
-            "部署后，浏览器和大多数 App 会使用这组代理。",
+            "部署后，Safari、Chrome、微信、钉钉、终端和大多数 App 都会按系统代理使用这组代理。",
         ]
         if proxyDeployPlan?.steps?.contains(where: { ($0.safePreview ?? "").contains("127.0.0.1") || ($0.label ?? "").contains("桥接") }) == true {
             lines.append("这组代理需要 Netfix 保持打开，用来安全代管账号密码。")
         }
-        lines.append("不用时可以到设置里点“恢复原来的网络设置”。")
+        lines.append("不用时可以到设置里点“恢复原来的网络设置”，回到部署前的网络配置。")
         return lines.joined(separator: "\n")
     }
 

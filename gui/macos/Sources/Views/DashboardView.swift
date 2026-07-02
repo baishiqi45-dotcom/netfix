@@ -126,6 +126,9 @@ struct DashboardView: View {
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Label(viewModel.proxyUsageLabel, systemImage: viewModel.proxyUsageIcon)
+                    .font(.caption2)
+                    .foregroundStyle(viewModel.proxyUsageColor)
             }
             Spacer()
         }
@@ -198,9 +201,13 @@ struct DashboardView: View {
                 StatusIconView(status: .unknown, label: "未检测")
             }
 
-            if !items.isEmpty {
+            let visibleItems = Array(items.sorted { lhs, rhs in
+                diagnosticPriority(lhs) > diagnosticPriority(rhs)
+            }.prefix(5))
+
+            if !visibleItems.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(items.prefix(3)) { item in
+                    ForEach(visibleItems) { item in
                         Text("• \(item.displayTitle)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -224,6 +231,15 @@ struct DashboardView: View {
         case .warn: return "注意"
         case .fail: return "异常"
         case .unknown: return "未检测"
+        }
+    }
+
+    private func diagnosticPriority(_ item: DiagnosticItem) -> Int {
+        switch DiagnosticStatus(item.status) {
+        case .fail: return 4
+        case .warn: return 3
+        case .unknown: return 2
+        case .ok: return 1
         }
     }
 
@@ -382,8 +398,17 @@ struct DashboardView: View {
         if lower.contains("command timed out") || lower.contains("timed out") {
             return "网络太慢或代理没响应。可以重试一次，或者点“粘贴代理参数”换一组代理。"
         }
-        if lower.contains("could not connect") || lower.contains("connection refused") {
-            return "Netfix 自己暂时连不上。等几秒再重试；如果还不行，退出 App 后重新打开。"
+        if lower.contains("407") || lower.contains("proxy authentication") || lower.contains("auth_failed") || lower.contains("authentication") {
+            return "代理账号或密码没有通过。请从服务商后台重新复制完整的地址、端口、用户名和密码，再粘贴保存。"
+        }
+        if lower.contains("unsupported") || lower.contains("ss://") || lower.contains("vmess://") || lower.contains("subscription") || lower.contains("订阅") {
+            return "这类链接暂时不能直接部署。请到服务商后台复制 HTTP 或 SOCKS5 的地址、端口、用户名和密码。"
+        }
+        if lower.contains("dns") || lower.contains("could not resolve") || lower.contains("name_not_resolved") {
+            return "DNS 解析失败。可能是当前网络打不开这个域名，也可能是代理服务商给的地址写错。"
+        }
+        if lower.contains("connection refused") || lower.contains("could not connect") {
+            return "目标服务或本机转发没有响应。可以先重试；如果是刚部署代理，请确认 Netfix 仍在运行。"
         }
         if lower.contains("decode") || lower.contains("解析失败") {
             return "App 与后端返回的数据格式不匹配，可能是版本不一致。请尝试重启应用。"
@@ -761,11 +786,13 @@ struct DashboardView: View {
             .disabled(!backend.isReady || viewModel.isWorking || viewModel.recommendedAction == nil)
             .help(viewModel.recommendedAction == nil ? "先诊断；Netfix 找到明确建议后才能处理。" : "按上方报告里的建议处理。")
 
-            Button("恢复原来的网络设置") {
-                showRollbackConfirmation = true
+            if viewModel.rollbackAvailable {
+                Button("恢复原来的网络设置") {
+                    showRollbackConfirmation = true
+                }
+                .buttonStyle(.borderless)
+                .disabled(!backend.isReady || viewModel.isWorking)
             }
-            .buttonStyle(.borderless)
-            .disabled(!backend.isReady || viewModel.isWorking)
         }
     }
 
@@ -1042,9 +1069,58 @@ final class DashboardViewModel: ObservableObject {
     @Published var llmExplanation: LLMExplainResult?
     @Published var llmError: String?
     @Published var activeJobID: String?
+    @Published private var proxyBridgeState: ProxyBridgeResponse?
 
     var recommendedAction: Action? {
         report?.explanation?.primaryAction ?? report?.explanation?.actions.first
+    }
+
+    var proxyUsageLabel: String {
+        guard let lifecycle = proxyBridgeState?.lifecycle else {
+            return "代理状态：未使用 Netfix 代理"
+        }
+        if lifecycle.status == "running_system" || lifecycle.systemPointsToBridge == true {
+            let name = lifecycle.profileName ?? lifecycle.profileId
+            return name.map { "代理状态：正在使用 Netfix 代理（\($0)）" } ?? "代理状态：正在使用 Netfix 代理"
+        }
+        if lifecycle.needsAttention == true || lifecycle.recoveryAvailable == true {
+            return "代理状态：上次部署需要处理"
+        }
+        return "代理状态：未使用 Netfix 代理"
+    }
+
+    var proxyUsageIcon: String {
+        guard let lifecycle = proxyBridgeState?.lifecycle else { return "network" }
+        if lifecycle.status == "running_system" || lifecycle.systemPointsToBridge == true {
+            return "checkmark.shield"
+        }
+        if lifecycle.needsAttention == true || lifecycle.recoveryAvailable == true {
+            return "exclamationmark.triangle"
+        }
+        return "network"
+    }
+
+    var proxyUsageColor: Color {
+        guard let lifecycle = proxyBridgeState?.lifecycle else { return .secondary }
+        if lifecycle.status == "running_system" || lifecycle.systemPointsToBridge == true {
+            return .green
+        }
+        if lifecycle.needsAttention == true || lifecycle.recoveryAvailable == true {
+            return .orange
+        }
+        return .secondary
+    }
+
+    var rollbackAvailable: Bool {
+        guard let report else { return false }
+        let actions = [report.explanation?.primaryAction].compactMap { $0 } + (report.explanation?.actions ?? [])
+        if actions.contains(where: actionLooksLikeRollback) {
+            return true
+        }
+        return report.fixes.contains { fix in
+            let text = "\(fix.id) \(fix.description)".lowercased()
+            return text.contains("rollback") || text.contains("restore") || text.contains("回滚") || text.contains("恢复")
+        }
     }
 
     private var client: APIClient?
@@ -1061,11 +1137,17 @@ final class DashboardViewModel: ObservableObject {
         case rollback
     }
 
+    private func actionLooksLikeRollback(_ action: Action) -> Bool {
+        let text = "\(action.id) \(action.label)".lowercased()
+        return text.contains("rollback") || text.contains("restore") || text.contains("回滚") || text.contains("恢复")
+    }
+
     func bind(backend: Backend) async {
         for await _ in backend.$state.values {
             updateHeadline(backend: backend)
             if backend.isReady, let url = backend.apiURL, let token = backend.apiToken, client == nil {
                 client = APIClient(baseURL: url, apiToken: token)
+                Task { await refreshProxyUsage() }
             }
         }
     }
@@ -1103,6 +1185,7 @@ final class DashboardViewModel: ObservableObject {
                 "正在检查目标网站…",
             ]
         )
+        await refreshProxyUsage()
     }
 
     func fix() async {
@@ -1154,6 +1237,7 @@ final class DashboardViewModel: ObservableObject {
                 } catch {
                     errorMessage = "已恢复代理部署前网络，但重新检测失败：\(error.localizedDescription)"
                 }
+                await refreshProxyUsage()
                 stopWork()
                 return
             }
@@ -1161,6 +1245,7 @@ final class DashboardViewModel: ObservableObject {
                 let result = try await client.rollback(timeout: 30)
                 self.report = result
                 headline = "已恢复"
+                await refreshProxyUsage()
                 stopWork()
                 return
             } else {
@@ -1174,6 +1259,15 @@ final class DashboardViewModel: ObservableObject {
             headline = "恢复失败"
         }
         stopWork()
+    }
+
+    private func refreshProxyUsage() async {
+        guard let client else { return }
+        do {
+            proxyBridgeState = try await client.proxyBridge()
+        } catch {
+            proxyBridgeState = nil
+        }
     }
 
     func checkServices(group: String) async {

@@ -119,8 +119,8 @@ def test_macos_proxy_tab_prioritizes_plain_one_paste_wizard():
     assert "还没有影响浏览器" in settings
     assert "开始使用这台 Mac 上网" in settings
     assert "不要只复制出口 IP" in settings
-    assert 'Label("检查这行能不能用", systemImage: "checklist")' in settings
-    assert 'Label("保存并测试（暂不改网络）", systemImage: "tray.and.arrow.down")' in settings
+    assert 'Label("只检查，不保存", systemImage: "checklist")' in settings
+    assert 'Label("检查并保存到这台 Mac", systemImage: "tray.and.arrow.down")' in settings
     assert 'Button("我没有代理服务商参数")' in settings
     assert "proxyDeploymentConfirmationText" in settings
     assert "friendlyProxyApplyStep" in settings

@@ -21,7 +21,7 @@ Use sanitized data only:
 3. Proxy setup with `proxy.example.com:1080:user:<password>`.
 4. Proxy precheck result with password masked.
 5. Settings -> AI with a fake provider key masked.
-6. Settings -> Agent copy flow for Codex and Kimi.
+6. Settings -> AI Coding Assistant copy flow for Codex and Kimi.
 7. Restore original network settings prompt.
 
 ## Capture Rules

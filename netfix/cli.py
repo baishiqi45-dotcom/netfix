@@ -162,6 +162,7 @@ def _build_report(
     ]
 
     report = {
+        "schema_version": "netfix_report.v1",
         "meta": {
             "version": VERSION,
             "timestamp": human_time(),

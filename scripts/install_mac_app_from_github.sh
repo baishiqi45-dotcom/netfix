@@ -127,12 +127,34 @@ TMP_DIR="$(mktemp -d)"
 MOUNT_POINT="${TMP_DIR}/mnt"
 DMG_PATH="${TMP_DIR}/Netfix.dmg"
 ATTACHED=false
+BACKUP_DEST=""
+INSTALL_IN_PROGRESS=false
+INSTALL_COMPLETE=false
+
+rollback_failed_install() {
+    if [[ "${INSTALL_IN_PROGRESS}" != true || "${INSTALL_COMPLETE}" == true ]]; then
+        return
+    fi
+    if [[ -e "${APP_DEST}" ]]; then
+        rm -rf "${APP_DEST}" || true
+    fi
+    if [[ -n "${BACKUP_DEST}" && -e "${BACKUP_DEST}" ]]; then
+        mv "${BACKUP_DEST}" "${APP_DEST}" || true
+        echo "Restored previous Netfix.app after failed install:"
+        echo "  ${APP_DEST}"
+    fi
+}
 
 cleanup() {
+    local status=$?
     if [[ "${ATTACHED}" == true ]]; then
         hdiutil detach "${MOUNT_POINT}" -quiet >/dev/null 2>&1 || true
     fi
+    if [[ "${status}" -ne 0 ]]; then
+        rollback_failed_install
+    fi
     rm -rf "${TMP_DIR}"
+    exit "${status}"
 }
 trap cleanup EXIT
 
@@ -167,15 +189,18 @@ if [[ -e "${APP_DEST}" ]]; then
     echo "Existing app moved to: ${BACKUP_DEST}"
 fi
 
+INSTALL_IN_PROGRESS=true
 ditto "${APP_IN_DMG}" "${APP_DEST}"
 
 if [[ ! -x "${APP_DEST}/Contents/MacOS/Netfix" ]]; then
     echo "Installed app is missing executable: ${APP_DEST}/Contents/MacOS/Netfix" >&2
     exit 1
 fi
+INSTALL_COMPLETE=true
 
 echo "Installed Netfix.app:"
 echo "  ${APP_DEST}"
+open -R "${APP_DEST}" >/dev/null 2>&1 || true
 
 MCP_SERVER="${APP_DEST}/Contents/Resources/netfix/mcp_server.py"
 if [[ "${REGISTER_CODEX}" == true && -f "${MCP_SERVER}" ]]; then
@@ -195,4 +220,6 @@ if [[ "${OPEN_APP}" == true ]]; then
 fi
 
 echo "Netfix macOS app install finished."
+echo "Uninstall command:"
+echo "  curl -fsSL https://raw.githubusercontent.com/${REPO_SLUG}/main/scripts/install_mac_app_from_github.sh | bash -s -- --uninstall"
 echo "If macOS says the developer cannot be verified, this DMG is not ready for public non-technical distribution."

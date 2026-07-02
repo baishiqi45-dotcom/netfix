@@ -36,8 +36,8 @@ def test_proxy_setup_exposes_one_paste_proxy_onboarding_path():
 
     assert "你有合法代理参数吗？有的话复制粘贴" in proxy_setup
     assert "TextEditor(text: $proxyInput)" in proxy_setup
-    assert 'Button("检查这行能不能用")' in proxy_setup
-    assert 'Button("保存并测试（暂不改网络）")' in proxy_setup
+    assert 'Label("检查并保存到这台 Mac", systemImage: "tray.and.arrow.down")' in proxy_setup
+    assert 'Button("只检查，不保存")' in proxy_setup
     assert 'Label("开始使用这台 Mac 上网", systemImage: "play.circle.fill")' in proxy_setup
     assert "showProxyDeployConfirmation" in proxy_setup
     assert "applyProxyDryRun(profileID: profile.id, mode: \"system\")" in proxy_setup
@@ -64,3 +64,14 @@ def test_macos_primary_ui_does_not_expose_tier_language():
     assert "Tier 2" not in visible_sources
     assert "低风险问题" in visible_sources
     assert "修改网络设置" in visible_sources
+
+
+def test_dashboard_header_shows_plain_proxy_usage_state():
+    dashboard = DASHBOARD_VIEW.read_text(encoding="utf-8")
+
+    assert "viewModel.proxyUsageLabel" in dashboard
+    assert "代理状态：未使用 Netfix 代理" in dashboard
+    assert "代理状态：正在使用 Netfix 代理" in dashboard
+    assert 'lifecycle.status == "running_system"' in dashboard
+    assert "systemPointsToBridge == true" in dashboard
+    assert "refreshProxyUsage()" in dashboard

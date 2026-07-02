@@ -20,9 +20,17 @@ No API key is required. If you do configure one, the model only ever sees an on-
 
 ## Get started in 60 seconds
 
+> ⚠️ The current DMG is the **v0.2.0-qa.1 preview build, unsigned and not notarized**. On first launch, macOS will block it; open System Settings → Privacy & Security → Open Anyway. Do not market this QA build as an official external release.
+
 ```bash
 # One-line macOS app install (QA build, unsigned; first launch: System Settings → Privacy & Security → Open Anyway)
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
+
+# Preview installer actions without installing
+curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash -s -- --dry-run
+
+# Uninstall the local app and Codex MCP registration
+curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash -s -- --uninstall
 
 # Developer / Agent users: one-line Codex MCP registration. Kimi / Claude / Cursor use the manual config below.
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_codex_mcp_from_github.sh | bash
@@ -154,7 +162,7 @@ DeepSeek is the default text explanation provider. Image question flows route to
 Users who installed the app should not hunt for repository scripts:
 
 1. Open Netfix.
-2. Go to Settings -> Agent -> Copy for Codex, paste the command into a Codex terminal, then restart Codex.
+2. Go to Settings -> AI Coding Assistant -> Copy for Codex, paste the command into a Codex terminal, then restart Codex.
 3. For Kimi, use Copy Kimi / generic config. Some current Kimi Code CLI versions do not expose `mcp add`; do not paste old commands. Use the generic stdio config in a Kimi/Agent host that supports MCP.
 4. For Claude Desktop / Cursor, copy the `mcp.json` snippet from the app and paste it into the matching MCP config file (paths are in [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md)).
 

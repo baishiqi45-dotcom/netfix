@@ -68,11 +68,13 @@ def classify_command(command: str) -> FixTier:
 
     lower = command.lower()
     # Privileged commands (even read-only ones like `sudo lsof`) need confirmation.
-    if any(kw in lower for kw in _SUDO_KEYWORDS):
+    # Use \b word boundary to avoid false positives like "sudoMyScript" or "notnetworksetup".
+    sudo_pattern = re.compile(r"\b(?:" + "|".join(re.escape(kw) for kw in _SUDO_KEYWORDS) + r")\b")
+    if sudo_pattern.search(lower):
         return FixTier.CONFIRM
 
-    if any(lower.startswith(kw) for kw in _READONLY_KEYWORDS) or \
-       any(f" {kw}" in lower for kw in _READONLY_KEYWORDS):
+    readonly_pattern = re.compile(r"(?:^|\s)(?:" + "|".join(re.escape(kw) for kw in _READONLY_KEYWORDS) + r")\b")
+    if readonly_pattern.search(lower):
         return FixTier.READONLY
 
     return FixTier.AUTO_SAFE

@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts.path_sanitizer import build_replacements, sanitize_json  # noqa: E402
 from scripts.release_audit import audit, _match_sensitive_name  # noqa: E402
 
 
@@ -176,6 +177,11 @@ def create_source_export(
         copied.append(rel)
 
     audit_findings = audit(export_root, "workspace")
+    replacements = build_replacements([
+        (root, "<source-workspace>"),
+        (out_dir, "<source-export-output>"),
+        (export_root, "<source-export-root>"),
+    ])
     manifest = {
         "schema_version": "netfix_source_export.v1",
         "name": "Netfix",
@@ -205,6 +211,7 @@ def create_source_export(
             "Publish only if audit_passed is true and the owner has approved source publication.",
         ],
     }
+    manifest = sanitize_json(manifest, replacements)
     manifest_path = export_root / "SOURCE-EXPORT-MANIFEST.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     _write_checksums(export_root)

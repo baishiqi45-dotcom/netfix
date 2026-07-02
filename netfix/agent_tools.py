@@ -5,6 +5,7 @@ passwords, UUIDs, tokens and subscription URLs are masked before returning.
 """
 from __future__ import annotations
 
+import platform
 import re
 import socket
 from typing import Any, Dict, List, Optional
@@ -117,7 +118,7 @@ def get_global_state() -> Dict[str, Any]:
     """High-level network path summary."""
     iface = default_interface()
     return {
-        "platform": "darwin",
+        "platform": platform.system().lower(),
         "primary_interface": iface,
         "gateway": default_gateway(),
         "self_ipv4": interface_ipv4(iface) if iface else None,

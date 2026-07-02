@@ -66,6 +66,11 @@ class TestMCPServer(unittest.TestCase):
             "netfix_report",
             "netfix_kb_query",
             "netfix_fix_issue",
+            "netfix_list_fixes",
+            "netfix_dry_run_fix",
+            "netfix_apply_fix",
+            "netfix_sanitized_report",
+            "netfix_evidence_chain",
             "netfix_rollback",
             "netfix_proxy_switch",
             "netfix_llm_providers",
@@ -84,6 +89,7 @@ class TestMCPServer(unittest.TestCase):
         # Mutating tools must be visible as mutating/destructive to MCP hosts.
         for name in (
             "netfix_fix_issue",
+            "netfix_apply_fix",
             "netfix_rollback",
             "netfix_proxy_switch",
             "netfix_flush_dns",
@@ -94,6 +100,10 @@ class TestMCPServer(unittest.TestCase):
             annotations = tool.get("annotations", {})
             self.assertEqual(annotations.get("readOnlyHint"), False, name)
             self.assertEqual(annotations.get("destructiveHint"), True, name)
+
+        for name in ("netfix_list_fixes", "netfix_dry_run_fix", "netfix_apply_fix", "netfix_sanitized_report", "netfix_evidence_chain"):
+            tool = next(t for t in tools if t["name"] == name)
+            self.assertIn("outputSchema", tool)
 
     def test_mcp_script_bootstraps_repo_root_when_started_from_other_cwd(self):
         script = ROOT / "netfix" / "mcp_server.py"
@@ -194,6 +204,75 @@ class TestMCPServer(unittest.TestCase):
         kwargs = engine.execute.call_args.kwargs
         self.assertTrue(kwargs["dry_run"])
         self.assertFalse(kwargs["confirmed"])
+
+    def test_mcp_list_fixes_returns_schema_and_confirmation_policy(self):
+        result = mcp_server._call_tool("netfix_list_fixes", {"tier_filter": 2})
+
+        self.assertFalse(result.get("isError"))
+        data = json.loads(result["content"][0]["text"])
+        self.assertEqual(data["schema_version"], "netfix_mcp.v1")
+        self.assertTrue(data["fixes"])
+        self.assertTrue(all(item["tier"] == 2 for item in data["fixes"]))
+        self.assertTrue(any(item["requires_confirmation"] for item in data["fixes"]))
+
+    def test_mcp_dry_run_fix_uses_confirmed_api_without_mutating(self):
+        with patch("netfix.api.detect_environment", return_value={"ok": True}), \
+                patch("netfix.api.get_core", return_value=None), \
+                patch("netfix.api.FixEngine") as engine_cls:
+            engine = engine_cls.return_value
+            engine.execute.return_value = {"ok": True, "status": "dry-run", "preview": ["sudo bash bin/disable_ipv6.sh"]}
+            result = mcp_server._call_tool("netfix_dry_run_fix", {"fix_id": "disable-ipv6"})
+
+        self.assertFalse(result.get("isError"))
+        data = json.loads(result["content"][0]["text"])
+        self.assertEqual(data["schema_version"], "netfix_mcp.v1")
+        self.assertEqual(data["fix_id"], "disable-ipv6")
+        self.assertEqual(data["preview"]["status"], "dry-run")
+        self.assertTrue(engine.execute.call_args.kwargs["dry_run"])
+
+    def test_mcp_apply_fix_tier2_requires_magic_word(self):
+        result = mcp_server._call_tool("netfix_apply_fix", {"fix_id": "disable-ipv6", "confirmed": True, "magic_word": "WRONG"})
+
+        self.assertTrue(result.get("isError"))
+        data = json.loads(result["content"][0]["text"])
+        self.assertEqual(data["schema_version"], "netfix_mcp.v1")
+        self.assertTrue(data["requires_confirmation"])
+        self.assertEqual(data["confirmation"], "APPLY_SYSTEM_FIX")
+
+    def test_mcp_sanitized_report_redacts_latest_report(self):
+        report = Mock()
+        report.as_dict.return_value = {
+            "meta": {"timestamp": "now"},
+            "diagnostics": [{"name": "proxy", "status": "fail", "error": "socks5://user:secret-pass@proxy.example.com:1080"}],
+            "root_causes": [],
+        }
+        with patch("netfix.mcp_server.Report.load", return_value=report):
+            result = mcp_server._call_tool("netfix_sanitized_report", {"level": "strict"})
+
+        self.assertFalse(result.get("isError"))
+        text = result["content"][0]["text"]
+        data = json.loads(text)
+        self.assertEqual(data["schema_version"], "netfix_mcp.v1")
+        self.assertNotIn("secret-pass", text)
+        self.assertIn("user:***@", text)
+        self.assertIn("redacted_report_hash", data)
+
+    def test_mcp_evidence_chain_binds_root_cause_to_diagnostics(self):
+        report = Mock()
+        report.as_dict.return_value = {
+            "diagnostics": [
+                {"name": "ipv6_leak", "display_name": "IPv6 泄漏检查", "status": "warn"},
+                {"name": "dns", "display_name": "DNS 解析", "status": "ok"},
+            ],
+            "root_causes": [{"id": "ipv6-exposed", "description": "IPv6 直连", "confidence": 0.8}],
+        }
+        with patch("netfix.mcp_server.Report.load", return_value=report):
+            result = mcp_server._call_tool("netfix_evidence_chain", {})
+
+        self.assertFalse(result.get("isError"))
+        data = json.loads(result["content"][0]["text"])
+        self.assertEqual(data["schema_version"], "netfix_mcp.v1")
+        self.assertEqual(data["root_causes"][0]["evidence"][0]["diagnostic_id"], "ipv6_leak")
 
     def test_mcp_cli_result_strips_secret_carriers_and_redacts_command_output(self):
         secret_url = "http://user:demo-password@proxy.example.com:8000"

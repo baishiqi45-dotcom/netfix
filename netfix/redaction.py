@@ -33,7 +33,7 @@ SECRET_KEY_PARTS = (
 )
 
 PROFILE_HOST_KEYS = {"address", "host", "hostname", "server", "url", "pac_url"}
-URL_RE = re.compile(r"\b(?:https?|socks5h?)://[^\s'\"<>]+", re.IGNORECASE)
+URL_RE = re.compile(r"\b(?:https?|socks5h?|socks5)://[^\s'\"<>]+", re.IGNORECASE)
 IP_RE = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b")
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b", re.IGNORECASE)

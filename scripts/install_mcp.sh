@@ -23,8 +23,8 @@ proxy credentials or API keys.
 Codex CLI currently uses:
   codex mcp add netfix -- python3 /path/to/netfix/mcp_server.py
 
-Kimi Code CLI registration is not automated here because current Kimi Code CLI
-builds may not expose an "mcp add" command. The script prints a generic MCP
+Automatic Kimi MCP registration is not enabled here because current Kimi Code CLI
+builds may not expose a stable "mcp add" command. The script prints a generic MCP
 stdio config for Kimi-compatible hosts instead of pretending a command worked.
 USAGE
 }
@@ -80,21 +80,41 @@ run_cmd() {
 if [[ "${INSTALL_CODEX}" == true ]]; then
     if command -v codex >/dev/null 2>&1; then
         run_cmd codex mcp add netfix -- python3 "${MCP_SERVER}"
+        echo ""
+        echo "Codex MCP registered. Next steps:"
+        echo "  1. Restart Codex or start a new thread."
+        echo "  2. Type something like 'check my network' to see Netfix tools."
+        echo "  3. Verify with: codex mcp list"
     else
         echo "codex CLI not found; skipping Codex MCP registration." >&2
+        echo "Install Codex CLI first, or use the manual command below." >&2
     fi
 fi
 
 if [[ "${INSTALL_KIMI}" == true ]]; then
+    echo ""
+    echo "---"
+    echo "Kimi / Claude / Cursor MCP stdio config"
+    echo "---"
+    echo ""
+    echo "Copy the following block into your MCP host configuration:"
+    echo ""
+    echo "name: netfix"
+    echo "command: python3"
+    echo "args: ${MCP_SERVER}"
+    echo ""
+    echo "Where to paste it:"
+    echo "  - Kimi Code CLI / Kimi Desktop: ~/.kimi/mcp.json  (or the host's MCP settings)"
+    echo "  - Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json"
+    echo "  - Cursor: ~/.cursor/mcp.json  or  <project-root>/.cursor/mcp.json"
+    echo ""
     if command -v kimi >/dev/null 2>&1; then
-        echo "kimi CLI found. Automatic Kimi MCP registration is not enabled because current Kimi Code CLI builds may not expose a stable 'mcp add' command." >&2
-        echo "Use this stdio config in any MCP-capable Kimi host:" >&2
-        echo "  name: netfix" >&2
-        echo "  command: python3" >&2
-        echo "  args: ${MCP_SERVER}" >&2
+        echo "kimi CLI found. Automatic Kimi MCP registration is not enabled because current Kimi Code CLI builds may not expose a stable 'mcp add' command. Please paste the config above manually." >&2
     else
         echo "kimi CLI not found; skipping Kimi MCP registration." >&2
     fi
 fi
 
+echo ""
 echo "Netfix MCP setup finished."
+echo "To test the server directly: python3 ${MCP_SERVER}"
