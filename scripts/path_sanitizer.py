@@ -37,6 +37,13 @@ def path_forms(path: Path | str) -> list[str]:
             forms.add("/var/" + item[len("/private/var/"):])
         elif item.startswith("/var/"):
             forms.add("/private/var/" + item[len("/var/"):])
+        elif item.startswith("/private/tmp/"):
+            forms.add("/tmp/" + item[len("/private/tmp/"):])
+        elif item.startswith("/tmp/") and not item.startswith("/tmp/.X"):
+            # /tmp is a symlink to /private/tmp on macOS; keep the public form
+            # alongside the resolved form so source-export manifests do not
+            # leak build-machine paths to readers.
+            forms.add("/private/tmp/" + item[len("/tmp/"):])
     return sorted(forms, key=len, reverse=True)
 
 

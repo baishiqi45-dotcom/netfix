@@ -93,28 +93,41 @@ fi
 
 if [[ "${INSTALL_KIMI}" == true ]]; then
     echo ""
-    echo "---"
-    echo "Kimi / Claude / Cursor MCP stdio config"
-    echo "---"
+    echo "=============================================="
+    echo " Kimi / Claude / Cursor MCP stdio config"
+    echo "=============================================="
     echo ""
-    echo "Copy the following block into your MCP host configuration:"
+    echo "  把下面这段粘到你用的 MCP 宿主配置里："
     echo ""
-    echo "name: netfix"
-    echo "command: python3"
-    echo "args: ${MCP_SERVER}"
+    echo "  ----- start of MCP config -----"
+    cat <<JSON
+{
+  "mcpServers": {
+    "netfix": {
+      "command": "python3",
+      "args": ["${MCP_SERVER}"]
+    }
+  }
+}
+JSON
+    echo "  ----- end of MCP config -----"
     echo ""
-    echo "Where to paste it:"
-    echo "  - Kimi Code CLI / Kimi Desktop: ~/.kimi/mcp.json  (or the host's MCP settings)"
-    echo "  - Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json"
-    echo "  - Cursor: ~/.cursor/mcp.json  or  <project-root>/.cursor/mcp.json"
+    echo "  粘到哪个文件："
+    echo "    Kimi Code CLI / Kimi Desktop:  ~/.kimi/mcp.json"
+    echo "    Claude Desktop:                ~/Library/Application Support/Claude/claude_desktop_config.json"
+    echo "    Cursor:                        ~/.cursor/mcp.json  或  <项目根>/.cursor/mcp.json"
     echo ""
     if command -v kimi >/dev/null 2>&1; then
-        echo "kimi CLI found. Automatic Kimi MCP registration is not enabled because current Kimi Code CLI builds may not expose a stable 'mcp add' command. Please paste the config above manually." >&2
+        echo "  ⚠️  当前 Kimi Code CLI 版本可能不暴露 'mcp add' 命令，所以这里只给配置片段，请手动粘贴。"
+        echo "  Automatic Kimi MCP registration is not enabled because current Kimi Code CLI builds may not expose a stable 'mcp add' command."
     else
-        echo "kimi CLI not found; skipping Kimi MCP registration." >&2
+        echo "  ℹ️  没找到 kimi CLI；上面配置也适用于 Kimi Desktop 等 GUI 客户端。"
     fi
 fi
 
 echo ""
-echo "Netfix MCP setup finished."
-echo "To test the server directly: python3 ${MCP_SERVER}"
+echo "=============================================="
+echo " ✅ Netfix MCP 配置完成"
+echo "=============================================="
+echo " 直接测试 MCP server：  python3 ${MCP_SERVER}"
+echo " Codex 用户：           codex mcp list"

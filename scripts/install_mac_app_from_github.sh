@@ -219,7 +219,21 @@ if [[ "${OPEN_APP}" == true ]]; then
     open "${APP_DEST}" || true
 fi
 
-echo "Netfix macOS app install finished."
-echo "Uninstall command:"
-echo "  curl -fsSL https://raw.githubusercontent.com/${REPO_SLUG}/main/scripts/install_mac_app_from_github.sh | bash -s -- --uninstall"
-echo "If macOS says the developer cannot be verified, this DMG is not ready for public non-technical distribution."
+cat <<FINISHED
+
+✅ Netfix 安装完成
+
+📦 App 位置：
+   ${APP_DEST}
+
+🍎 首次打开提示（QA 版 DMG 未签名）：
+   1. 双击 Netfix.app，如果 macOS 提示「无法验证开发者」，
+      打开「系统设置 → 隐私与安全性」，滚到最下面点击「仍要打开」。
+   2. 以后双击即可直接打开。
+
+🧹 卸载命令（后悔了随时跑）：
+   curl -fsSL https://raw.githubusercontent.com/${REPO_SLUG}/main/scripts/install_mac_app_from_github.sh | bash -s -- --uninstall
+
+⚠️  这是 v0.2.0-qa.1 预览版 DMG（未签名未公证），仅适合技术测试用户，
+   不要把它宣传成「普通用户正式版」。
+FINISHED

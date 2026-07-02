@@ -63,7 +63,7 @@ struct ProxySetupView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("你有合法代理参数吗？有的话复制粘贴")
                     .font(.headline)
-                Text("去你的代理服务后台，复制一整行连接信息。通常需要地址、端口、用户名和密码；密码保存到本机密码库。")
+                Text("去你的代理服务后台，复制一整行连接信息。一般包含地址、端口、用户名和密码。密码保存到本机密码库，不上传。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("复制下来大概是：地址:端口:用户名:密码 这种样子。不要只复制出口 IP。没有这类参数也可以先跳过。")
@@ -75,13 +75,23 @@ struct ProxySetupView: View {
                     Text("SOCKS5 代理").tag("socks5h")
                 }
                 .pickerStyle(.segmented)
-                TextEditor(text: $proxyInput)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 72, maxHeight: 96)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.secondary.opacity(0.25))
-                    )
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $proxyInput)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 72, maxHeight: 96)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.secondary.opacity(0.25))
+                        )
+                    if proxyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("例如 proxy.example.com:8001:用户名:密码\n也支持 http://user:pass@host:port 和 socks5h://user:pass@host:port\n不支持 ss://、vmess://、Clash/sing-box 订阅链接")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 8)
+                            .allowsHitTesting(false)
+                    }
+                }
                 HStack {
                     Button {
                         Task { await saveProxyInput() }
