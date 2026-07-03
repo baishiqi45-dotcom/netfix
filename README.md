@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scrip
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash -s -- --uninstall
 ```
 
-安装脚本会把 App 放到 `~/Applications/Netfix.app`，并在有 Codex CLI 时顺手注册 MCP。如果你只想看源码或不想用 App：
+安装脚本会把 App 放到 `~/Applications/Netfix.app`，打开 App，并在本机有 Codex CLI 时顺手注册 MCP。脚本最后还会打印 Kimi / Claude Desktop / Cursor / MiniMax-compatible 本地智能体可复制的 MCP stdio 配置。如果你只想看源码或不想用 App：
 
 ```bash
 pip install -e .
@@ -82,7 +82,7 @@ python3 netfix.py codex --json
 
 ---
 
-## 接进 Codex / Kimi / Claude / Cursor
+## 接进 Codex / Kimi / Claude / Cursor / MiniMax-compatible 本地智能体
 
 已经安装 App 的用户不用找仓库脚本：
 
@@ -91,6 +91,7 @@ python3 netfix.py codex --json
 3. 如果你用 Kimi，点「复制 Kimi/通用配置」。当前部分 Kimi Code CLI 版本没有 `mcp add` 命令，不要粘贴旧命令；把通用 stdio 配置填到支持 MCP 的 Kimi/Agent 宿主里。
 4. Claude Desktop：把配置粘到 `~/Library/Application Support/Claude/claude_desktop_config.json` 的 `mcpServers` 段。
 5. Cursor：把配置粘到 `~/.cursor/mcp.json` 或项目根目录 `.cursor/mcp.json` 的 `mcpServers` 段。
+6. MiniMax 或其他本地智能体：只要宿主支持 MCP stdio，就填 `command: python3` 和脚本打印的 `args`。Netfix 不假设 MiniMax 一定有官方 MCP client。
 
 源码用户可以从仓库根目录注册 Codex，并对 Kimi 做能力检测：
 
@@ -106,13 +107,13 @@ codex mcp add netfix -- python3 "$(pwd)/netfix/mcp_server.py"
 codex mcp list
 ```
 
-Kimi/Claude/Cursor 通用 MCP stdio 配置：
+Kimi/Claude/Cursor/MiniMax-compatible 通用 MCP stdio 配置：
 
 ```yaml
 name: netfix
 command: python3
 args:
-  - /absolute/path/to/netfix/mcp_server.py
+  - /Users/you/Applications/Netfix.app/Contents/Resources/netfix/mcp_server.py
 ```
 
 Agent 端标准入口：
@@ -135,7 +136,7 @@ python3 netfix.py codex --json
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
 ```
 
-这条命令会下载 DMG、校验 SHA256、安装 `Netfix.app` 到 `~/Applications`、如果本机有 Codex CLI 会顺手注册 Netfix MCP，然后打开 App。当前 QA DMG 还没有 Developer ID 签名和公证，所以现在能做到"技术用户一行安装"，还不能包装成"普通小白稳定可用的正式安装命令"。
+这条命令会下载 DMG、校验 SHA256、安装 `Netfix.app` 到 `~/Applications`、打开 App、烟测 App 内置 MCP；如果本机有 Codex CLI，会顺手注册 Netfix MCP；如果是 Kimi / Claude / Cursor / MiniMax-compatible 本地智能体，脚本会打印可复制的 stdio 配置。当前 QA DMG 还没有 Developer ID 签名和公证，所以现在能做到"技术用户一行安装"，还不能包装成"普通小白稳定可用的正式安装命令"。
 
 安装后如果找不到 App：它放在你的用户应用程序文件夹 `~/Applications/Netfix.app`，可以按 `⌘ + 空格` 搜索 `Netfix` 打开。
 

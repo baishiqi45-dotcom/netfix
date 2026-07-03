@@ -32,7 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scrip
 # Uninstall the local app and Codex MCP registration
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash -s -- --uninstall
 
-# Developer / Agent users: one-line Codex MCP registration. Kimi / Claude / Cursor use the manual config below.
+# Developer / Agent users: one-line Codex MCP registration. Kimi / Claude / Cursor / MiniMax-compatible hosts can use the printed stdio config.
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_codex_mcp_from_github.sh | bash
 ```
 
@@ -76,7 +76,7 @@ One-line local macOS app install. This downloads the installer from `main`; the 
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
 ```
 
-The command downloads the DMG, verifies SHA256, installs `Netfix.app` to `~/Applications`, registers Netfix MCP for Codex when the Codex CLI exists, and opens the app. The current QA DMG is not Developer ID signed or notarized, so it is suitable for technical testers, not finished non-technical distribution.
+The command downloads the DMG, verifies SHA256, installs `Netfix.app` to `~/Applications`, opens the app, smoke-checks the bundled MCP server, registers Netfix MCP for Codex when the Codex CLI exists, and prints stdio config for Kimi / Claude / Cursor / MiniMax-compatible local agents. The current QA DMG is not Developer ID signed or notarized, so it is suitable for technical testers, not finished non-technical distribution.
 
 From a source checkout:
 
@@ -157,7 +157,7 @@ python3 netfix.py explain --provider deepseek --json
 
 DeepSeek is the default text explanation provider. Image question flows route to MiniMax, Kimi/Moonshot, or Qwen after explicit upload confirmation. Do not describe DeepSeek as a vision or screenshot model.
 
-## Connect Codex / Kimi / Claude / Cursor
+## Connect Codex / Kimi / Claude / Cursor / MiniMax-compatible Local Agents
 
 Users who installed the app should not hunt for repository scripts:
 
@@ -165,6 +165,7 @@ Users who installed the app should not hunt for repository scripts:
 2. Go to Settings -> AI Coding Assistant -> Copy for Codex, paste the command into a Codex terminal, then restart Codex.
 3. For Kimi, use Copy Kimi / generic config. Some current Kimi Code CLI versions do not expose `mcp add`; do not paste old commands. Use the generic stdio config in a Kimi/Agent host that supports MCP.
 4. For Claude Desktop / Cursor, copy the `mcp.json` snippet from the app and paste it into the matching MCP config file (paths are in [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md)).
+5. For MiniMax or any other local agent, use the same `command: python3` and `args` if the host supports MCP stdio. Netfix does not assume MiniMax has an official MCP client.
 
 Source checkout users can register Codex and detect Kimi support from the repository root:
 
@@ -180,13 +181,13 @@ codex mcp add netfix -- python3 "$(pwd)/netfix/mcp_server.py"
 codex mcp list
 ```
 
-Kimi / Claude / Cursor MCP stdio config:
+Kimi / Claude / Cursor / MiniMax-compatible MCP stdio config:
 
 ```yaml
 name: netfix
 command: python3
 args:
-  - /absolute/path/to/netfix/mcp_server.py
+  - /Users/you/Applications/Netfix.app/Contents/Resources/netfix/mcp_server.py
 ```
 
 The standard agent entry is:

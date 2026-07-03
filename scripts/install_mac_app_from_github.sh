@@ -1,5 +1,5 @@
 #!/bin/bash
-# One-line installer for the Netfix macOS app, with optional Codex MCP registration.
+# One-line installer for the Netfix macOS app, with optional local-agent MCP setup.
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -33,17 +33,19 @@ Environment overrides:
   NETFIX_DMG_SHA256      Optional SHA256 expected for the DMG
   NETFIX_INSTALL_TARGET  Install folder, default: ~/Applications
   NETFIX_OPEN_APP        Open app after install, default: true
-  NETFIX_REGISTER_CODEX  Register Codex MCP if codex CLI exists, default: true
+  NETFIX_REGISTER_CODEX  Register Codex MCP if codex CLI exists and bundled MCP is healthy, default: true
 
 QA install, after the v0.2.0-qa.1 DMG release asset has been published:
   curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
 
-This installs Netfix.app locally. It does not copy proxy credentials or API keys.
+This installs Netfix.app locally, prints local-agent MCP config, and does not
+copy proxy credentials or API keys.
 The default QA DMG is unsigned; macOS may require right-click -> Open.
 
 Safety:
   - Will install Netfix.app to ~/Applications by default.
   - May run 'codex mcp add netfix ...' when the Codex CLI is installed.
+  - Prints copy/paste MCP config for Kimi, Claude Desktop, Cursor, MiniMax-compatible agents, and other MCP stdio hosts.
   - Will not read or send proxy passwords, API keys, browser data, or shell history.
   - Run with --dry-run to preview actions, or --uninstall to remove only the app/MCP entry.
 USAGE
@@ -81,9 +83,9 @@ if [[ "${DRY_RUN}" == true ]]; then
         echo "Dry run: would install Netfix.app to:"
         echo "  ${APP_DEST}"
         if [[ "${REGISTER_CODEX}" == true ]]; then
-            echo "Dry run: would register bundled MCP for Codex if codex CLI exists."
+            echo "Dry run: would smoke-check bundled MCP, register Codex if codex CLI exists, and print generic MCP config."
         else
-            echo "Dry run: would skip Codex MCP registration."
+            echo "Dry run: would smoke-check bundled MCP and print generic MCP config, but skip Codex MCP registration."
         fi
     fi
     exit 0
@@ -95,7 +97,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 if [[ "${UNINSTALL}" == true ]]; then
-    if [[ "${REGISTER_CODEX}" == true && command -v codex >/dev/null 2>&1 && codex mcp get netfix >/dev/null 2>&1 ]]; then
+    if [[ "${REGISTER_CODEX}" == true ]] && command -v codex >/dev/null 2>&1 && codex mcp get netfix >/dev/null 2>&1; then
         codex mcp remove netfix >/dev/null 2>&1 || true
         echo "Removed Codex MCP entry: netfix"
     fi
@@ -116,6 +118,58 @@ need_cmd() {
         echo "Missing required command: $1" >&2
         exit 1
     fi
+}
+
+smoke_check_bundled_mcp() {
+    if [[ ! -f "${MCP_SERVER}" ]]; then
+        echo "Bundled MCP server was not found:"
+        echo "  ${MCP_SERVER}"
+        return 1
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "python3 was not found, so local-agent MCP setup was skipped."
+        echo "Netfix.app is installed and can still be opened; install Python 3 before using MCP hosts."
+        return 1
+    fi
+    if (cd /tmp && printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | python3 "${MCP_SERVER}" | grep -q '"name": "netfix"'); then
+        echo "Bundled Netfix MCP smoke check passed."
+        return 0
+    fi
+    echo "Bundled Netfix MCP smoke check failed:"
+    echo "  python3 ${MCP_SERVER}"
+    return 1
+}
+
+print_agent_mcp_config() {
+    cat <<AGENT_MCP
+
+🤖 本地智能体接入（可选，但装完就能复制）
+
+   Codex：
+      如果本机有 codex CLI，安装脚本会自动注册。
+      手动命令：codex mcp add netfix -- python3 "${MCP_SERVER}"
+
+   Kimi / Claude Desktop / Cursor / MiniMax-compatible 本地智能体：
+      把下面这段复制到支持 MCP stdio 的宿主配置里。MiniMax 目前按
+      “兼容 MCP stdio 的本地智能体/壳”处理，不假设它一定有官方 MCP client。
+
+   ----- start of MCP config -----
+   {
+     "mcpServers": {
+       "netfix": {
+         "command": "python3",
+         "args": ["${MCP_SERVER}"]
+       }
+     }
+   }
+   ----- end of MCP config -----
+
+   常见粘贴位置：
+      Kimi Code CLI / Kimi Desktop: ~/.kimi/mcp.json
+      Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json
+      Cursor: ~/.cursor/mcp.json 或项目根目录 .cursor/mcp.json
+      其他本地智能体：找 MCP / Tools / stdio server 设置，填 command 和 args。
+AGENT_MCP
 }
 
 need_cmd curl
@@ -203,7 +257,13 @@ echo "  ${APP_DEST}"
 open -R "${APP_DEST}" >/dev/null 2>&1 || true
 
 MCP_SERVER="${APP_DEST}/Contents/Resources/netfix/mcp_server.py"
-if [[ "${REGISTER_CODEX}" == true && -f "${MCP_SERVER}" ]]; then
+MCP_READY=false
+if smoke_check_bundled_mcp; then
+    MCP_READY=true
+    print_agent_mcp_config
+fi
+
+if [[ "${REGISTER_CODEX}" == true && "${MCP_READY}" == true ]]; then
     if command -v codex >/dev/null 2>&1; then
         if codex mcp get netfix >/dev/null 2>&1; then
             codex mcp remove netfix >/dev/null 2>&1 || true
@@ -213,6 +273,8 @@ if [[ "${REGISTER_CODEX}" == true && -f "${MCP_SERVER}" ]]; then
     else
         echo "codex CLI not found; skipped Codex MCP registration."
     fi
+elif [[ "${REGISTER_CODEX}" == true ]]; then
+    echo "Skipped Codex MCP registration because bundled MCP is not ready."
 fi
 
 if [[ "${OPEN_APP}" == true ]]; then
@@ -233,6 +295,19 @@ cat <<FINISHED
 
 🧹 卸载命令（后悔了随时跑）：
    curl -fsSL https://raw.githubusercontent.com/${REPO_SLUG}/main/scripts/install_mac_app_from_github.sh | bash -s -- --uninstall
+
+🧭 代理下一步（不懂网络也按这个走）：
+   1. 打开 Netfix.app。
+   2. 进入「设置 → 代理」。
+   3. 粘贴服务商给你的整行连接参数，例如 host:port:用户名:密码、
+      http://user:pass@host:port 或 socks5h://user:pass@host:port。
+   4. 点「检查并保存到这台 Mac」。
+   5. 检查通过后点「开始使用这台 Mac 上网」。
+   6. 不用了或失败了，点「恢复原来的网络设置」。
+
+   不要复制“当前出口 IP”。那只是检测结果，不能拿来连接。
+   暂不支持 ss://、vmess://、Clash/sing-box 订阅链接；请去服务商后台
+   复制 HTTP/SOCKS5 的 host、port、用户名、密码。
 
 ⚠️  这是 v0.2.0-qa.1 预览版 DMG（未签名未公证），仅适合技术测试用户，
    不要把它宣传成「普通用户正式版」。

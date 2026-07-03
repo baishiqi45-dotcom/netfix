@@ -7,7 +7,7 @@ ordinary user actually sees still appear after future edits:
   not just hidden inside --help.
 * The installer prints a one-line uninstall command and the App install
   path after a successful run.
-* The Kimi / Claude / Cursor MCP installer gives the exact config file
+* The Kimi / Claude / Cursor / MiniMax-compatible MCP installer gives the exact config file
   paths and a copy/paste JSON block.
 * Chinese README first screen still leads with the paste-proxy value
   prop and warns that the current DMG is QA-only.
@@ -28,6 +28,21 @@ def test_mac_installer_finished_banner_mentions_app_path_uninstall_and_qa():
     assert "卸载命令" in text
     assert "未签名未公证" in text
     assert "v0.2.0-qa.1 预览版" in text
+    # One-line app install must also leave local agents with usable MCP config.
+    assert "Bundled Netfix MCP smoke check passed" in text
+    assert "Kimi / Claude Desktop / Cursor / MiniMax-compatible" in text
+    assert "mcpServers" in text
+    assert '"command": "python3"' in text
+    assert '"args": ["${MCP_SERVER}"]' in text
+    assert "~/.kimi/mcp.json" in text
+    assert "claude_desktop_config.json" in text
+    assert ".cursor/mcp.json" in text
+    # And it must say where a normal user pastes proxy credentials next.
+    assert "设置 → 代理" in text
+    assert "检查并保存到这台 Mac" in text
+    assert "开始使用这台 Mac 上网" in text
+    assert "当前出口 IP" in text
+    assert "ss://" in text and "vmess://" in text
     # Original safety assertions are still required.
     assert "Will not read or send proxy passwords" in text
 

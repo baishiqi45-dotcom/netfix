@@ -52,6 +52,10 @@ def test_open_source_license_security_and_mcp_installer_exist():
     assert "--uninstall" in mac_text
     assert "Will not read or send proxy passwords" in mac_text
     assert "codex mcp add netfix -- python3" in mac_text
+    assert "Bundled Netfix MCP smoke check passed" in mac_text
+    assert "MiniMax-compatible" in mac_text
+    assert "mcpServers" in mac_text
+    assert "设置 → 代理" in mac_text
 
 
 def test_github_readme_has_bilingual_visual_assets_and_metadata():
