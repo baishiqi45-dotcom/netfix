@@ -44,6 +44,7 @@ The default QA DMG is unsigned; macOS may require right-click -> Open.
 
 Safety:
   - Will install Netfix.app to ~/Applications by default.
+  - Requires macOS 13 or newer.
   - May run 'codex mcp add netfix ...' when the Codex CLI is installed.
   - Prints copy/paste MCP config for Kimi, Claude Desktop, Cursor, MiniMax-compatible agents, and other MCP stdio hosts.
   - Will not read or send proxy passwords, API keys, browser data, or shell history.
@@ -93,6 +94,12 @@ fi
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "Netfix.app installer requires macOS." >&2
+    exit 1
+fi
+MACOS_VERSION="$(sw_vers -productVersion 2>/dev/null || echo "0.0")"
+MACOS_MAJOR="${MACOS_VERSION%%.*}"
+if [[ "${MACOS_MAJOR}" =~ ^[0-9]+$ && "${MACOS_MAJOR}" -lt 13 ]]; then
+    echo "Netfix.app requires macOS 13 or newer. This Mac reports macOS ${MACOS_VERSION}." >&2
     exit 1
 fi
 
@@ -214,7 +221,7 @@ trap cleanup EXIT
 
 echo "Downloading Netfix DMG:"
 echo "  ${DMG_URL}"
-curl -fL "${DMG_URL}" -o "${DMG_PATH}"
+curl -fL --connect-timeout 10 --max-time 600 --retry 2 "${DMG_URL}" -o "${DMG_PATH}"
 
 if [[ -n "${DMG_SHA256}" ]]; then
     ACTUAL_SHA256="$(shasum -a 256 "${DMG_PATH}" | awk '{print $1}')"

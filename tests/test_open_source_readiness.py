@@ -79,6 +79,7 @@ def test_github_readme_has_bilingual_visual_assets_and_metadata():
         "docs/github/STAR_GUIDE.md",
         "docs/github/SCREENSHOTS.md",
         "docs/github/RELEASE_NOTES_V0.2.0.md",
+        "cases/INDEX.md",
     ]:
         assert (ROOT / rel).exists()
 
@@ -90,6 +91,9 @@ def test_github_readme_has_bilingual_visual_assets_and_metadata():
     assert "<repo>" not in readme_en
     assert "network-diagnostics" in repository
     assert "mcp-server" in repository
+    assert "homebrew" not in repository
+    assert "cases/INDEX.md" in readme
+    assert "cases/INDEX.md" in readme_en
 
 
 def test_public_docs_do_not_use_author_local_paths_or_pipx_claim():

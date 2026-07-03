@@ -25,7 +25,7 @@ Codex MCP one-line registration:
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_codex_mcp_from_github.sh | bash
 ```
 
-Kimi / Claude / Cursor users should use the generic MCP config from the App Settings -> AI Coding Assistant screen or `AGENTS.md`; the one-line installer only auto-registers Codex CLI.
+Kimi / Claude / Cursor / MiniMax-compatible local agents can use the generic MCP stdio config printed by the App installer, or copy it later from *Settings → AI Coding Assistant*. The installer only auto-registers Codex CLI when `codex` is available.
 
 Source build:
 
@@ -40,6 +40,23 @@ python3 netfix.py codex --json
 - No Linux / Windows support. Netfix shells out to macOS-only tooling (`scutil`, `networksetup`, `dscacheutil`, `security`).
 - No built-in proxy providers, no node list, no account bypass tools. Netfix only parses, prechecks, stores, deploys, monitors, and restores credentials **you already have**.
 - No automated image-text redaction inside screenshots. If you upload a screenshot to the optional AI, visible text in the image is on you to sanitize first.
+
+## Proof you can check
+
+- Real user story: [ordinary-user proxy deployment review](../../cases/2026-06-29-普通用户代理部署体验审查.md). This is the strongest explanation of why the product flow is paste → precheck → deploy → rollback.
+- Installer dry run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash -s -- --dry-run
+```
+
+- Local CLI smoke:
+
+```bash
+python3 netfix.py codex --json
+```
+
+The output is structured JSON. Agents should read `diagnostics`, `root_causes`, `fixes`, and `manual_steps`; users should not paste raw reports with secrets into public issues.
 
 ## Known limits
 

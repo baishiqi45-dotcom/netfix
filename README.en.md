@@ -20,14 +20,18 @@ No API key is required. If you do configure one, the model only ever sees an on-
 
 ## Get started in 60 seconds
 
-> ⚠️ The current DMG is the **v0.2.0-qa.1 preview build, unsigned and not notarized**. On first launch, macOS will block it; open System Settings → Privacy & Security → Open Anyway. Do not market this QA build as an official external release.
+> ⚠️ The current DMG is the **v0.2.0-qa.1 preview build, unsigned and not notarized**. On first launch, macOS will block it; open System Settings → Privacy & Security → Open Anyway. This is suitable for technical testing, not a finished non-technical public installer.
+
+Prepare the HTTP/SOCKS5 connection parameters from your proxy provider dashboard, such as `host:port:username:password`. Do not paste the current exit IP from an IP lookup page; that is only a result, not a connection string. Netfix is not a Clash client and does not import subscriptions; `ss://`, `vmess://`, and Clash/sing-box subscription links are not supported yet.
+
+Requirements: macOS 13 or newer; Apple Silicon and Intel Macs are both in scope; macOS may ask for your local password when system proxy settings are changed; optional MCP setup needs `python3`.
 
 ```bash
-# Most users copy this line: install Netfix.app (QA build, unsigned; first launch: System Settings → Privacy & Security → Open Anyway)
-curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
-
-# Preview installer actions without installing
+# Preview installer actions without installing or changing configuration
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash -s -- --dry-run
+
+# Technical testers: install Netfix.app (QA build, unsigned)
+curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
 
 # Uninstall the local app and Codex MCP registration
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash -s -- --uninstall
@@ -103,11 +107,12 @@ The intended user entry is `Netfix.app`: double-click, let the app start the loc
 
 ## Real cases
 
-`cases/` holds sanitized real scenarios. A few worth quoting in the README:
+`cases/` holds sanitized real scenarios; start from the [Case Index](cases/INDEX.md). The best first story is [9 pitfalls for a non-technical user deploying their first proxy](cases/2026-06-29-普通用户代理部署体验审查.md). It explains why Netfix is shaped as paste → precheck → deploy → rollback, instead of making users guess system proxy settings, IPv6 behavior, exit IPs, and password storage.
 
-- **"Codex reports unreachable — turns out the API key expired"** — `cases/20260617-1405-codex-reachable-needs-key.md`. The network was fine; Netfix points away from the wrong suspect.
-- **"9 pitfalls for a non-technical user deploying their first proxy"** — `cases/2026-06-29-普通用户代理部署体验审查.md`. Paste → precheck → deploy → rollback, in plain language.
-- **"Healthy baseline snapshot"** — `cases/2026-06-17-healthy-baseline.md`. Before/after comparison for fast triage next time.
+A few more worth quoting:
+
+- **[Codex reports unreachable — turns out the API key expired](cases/20260617-1405-codex-reachable-needs-key.md)**: The network was fine; Netfix points away from the wrong suspect.
+- **[Healthy baseline snapshot](cases/2026-06-17-healthy-baseline.md)**: Before/after comparison for fast triage next time.
 
 New cases welcome. Use `cases/TEMPLATE.md`, read [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) before opening a PR.
 
@@ -255,6 +260,8 @@ netfix/
 ├── assets/github/         Chinese and English GitHub visuals
 └── docs/github/           GitHub release and screenshot notes
 ```
+
+If Netfix helped you identify a Mac network problem, starring the repo is the easiest way to follow the signed build, screenshots/GIFs, and new cases.
 
 ## License
 

@@ -1,43 +1,29 @@
 repository:
   name: netfix
-  description: "Local-first macOS network triage for AI/dev tools: diagnose DNS, proxy, node, IPv6, TLS, and target service issues before changing config."
+  description: "Mac 网络自救工具：Codex、ChatGPT、GitHub 连不上时先定位层级；也能粘贴 HTTP/SOCKS5 代理、预检、部署和回滚。"
   private: false
   has_issues: true
   has_projects: false
   has_wiki: false
   default_branch: main
   topics:
-    # platform / runtime
     - macos
-    - apple-silicon
-    - swiftui
-    - python
-    - homebrew
-    # what it does
+    - macos-app
     - network-diagnostics
-    - network-triage
-    - network-monitor
+    - diagnostics
+    - proxy
+    - socks5
     - dns
-    - tls
     - ipv6
-    # AI / dev tool reachability (these are the highest-traffic search terms in 2026)
+    - tls
     - codex
+    - chatgpt
+    - github
     - claude
     - cursor
     - kimi
-    - openai
-    - chatgpt
-    - github
-    - developer-tools
-    # agent / protocol
     - mcp
     - model-context-protocol
     - mcp-server
-    # privacy / posture
-    - offline-first
-    - privacy
-    - local-first
-    # ecosystems users already know
     - clash
-    - mihomo
     - sing-box

@@ -43,6 +43,8 @@ def test_mac_installer_finished_banner_mentions_app_path_uninstall_and_qa():
     assert "开始使用这台 Mac 上网" in text
     assert "当前出口 IP" in text
     assert "ss://" in text and "vmess://" in text
+    assert "requires macOS 13 or newer" in text
+    assert "--connect-timeout 10 --max-time 600 --retry 2" in text
     # Original safety assertions are still required.
     assert "Will not read or send proxy passwords" in text
 
@@ -66,7 +68,9 @@ def test_chinese_readme_first_screen_states_paste_proxy_and_qa_warning():
     head = text.split("\n", 80)[:80]
     head_text = "\n".join(head)
     # First screen promise (KIMI audit §1.5 requirement).
-    assert "粘贴" in head_text and "让 Mac 安全上网" in head_text
+    assert "粘贴" in head_text and "已有的代理" in head_text
+    assert "当前出口 IP" in head_text
+    assert "macOS 13" in head_text
     # Loud QA warning block.
     assert "未签名" in head_text or "未公证" in head_text
     assert "仍要打开" in head_text

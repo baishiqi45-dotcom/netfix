@@ -7,7 +7,7 @@ Stars follow usefulness, not promotion. This file keeps the repository honest, a
 - The README first screen answers four questions in under five seconds:
   1. **What is it?** A local-first macOS network triage tool for AI / dev tools.
   2. **What does it do?** Tells you *which layer* broke (DNS, system proxy, proxy core, IPv6, TLS, target service, or your pasted credentials) before you change anything.
-  3. **How do I install it?** Two one-line commands (App and MCP) are visible above the fold.
+  3. **How do I try it safely?** `--dry-run` is visible before the unsigned QA App install command.
   4. **Is it different from what I already use?** A short comparison table is the first thing under the install buttons.
 
 If any of those four answers is missing or buried below the fold, fix the README before asking for stars.
@@ -17,10 +17,10 @@ If any of those four answers is missing or buried below the fold, fix the README
 Suggested description (already in `.github/repository.yml`):
 
 ```text
-Local-first macOS network triage for AI/dev tools: diagnose DNS, proxy, node, IPv6, TLS, and target service issues before changing config.
+Mac 网络自救工具：Codex、ChatGPT、GitHub 连不上时先定位层级；也能粘贴 HTTP/SOCKS5 代理、预检、部署和回滚。
 ```
 
-Topics are intentionally tuned for 2026 search traffic: `macos`, `apple-silicon`, `swiftui`, `network-diagnostics`, `codex`, `claude`, `cursor`, `kimi`, `mcp`, `model-context-protocol`, `clash`, `mihomo`, `sing-box`.
+Topics are intentionally scoped to supported search entry points: `macos`, `macos-app`, `network-diagnostics`, `diagnostics`, `proxy`, `socks5`, `dns`, `ipv6`, `tls`, `codex`, `chatgpt`, `github`, `claude`, `cursor`, `kimi`, `mcp`, `model-context-protocol`, `mcp-server`, `clash`, `sing-box`.
 
 ## Comparison Snippet (paste into README)
 
@@ -66,6 +66,60 @@ or the saved proxy credentials themselves. Open the Mac app, click once,
 get a plain-English answer. Local-first, no telemetry, no cloud required.
 ```
 
+## Copy-Paste Launch Posts
+
+Use one real case link everywhere:
+
+```text
+https://github.com/baishiqi45-dotcom/netfix/blob/main/cases/2026-06-29-%E6%99%AE%E9%80%9A%E7%94%A8%E6%88%B7%E4%BB%A3%E7%90%86%E9%83%A8%E7%BD%B2%E4%BD%93%E9%AA%8C%E5%AE%A1%E6%9F%A5.md
+```
+
+Show HN title:
+
+```text
+Show HN: Netfix – local-first macOS network triage for AI/dev tool outages
+```
+
+Show HN body:
+
+```text
+I built Netfix after repeatedly seeing “Codex/GitHub/ChatGPT is unreachable” cases where the real issue was not the AI tool: it was DNS, system proxy, a dead proxy core, IPv6, TLS, or bad pasted proxy credentials.
+
+Netfix is a local-first macOS app/CLI. It diagnoses the broken layer, explains the result in plain language, and only changes system proxy settings after explicit confirmation. If you already have HTTP/SOCKS5 proxy credentials, it can precheck, save to Keychain, apply, monitor, and roll back.
+
+Current state: source-first MIT release. The QA DMG is unsigned/not notarized, so it is for technical testers; run --dry-run first. No telemetry, no proxy selling, no built-in nodes.
+```
+
+V2EX / NodeSeek title:
+
+```text
+做了个 macOS 本地网络自救工具：Codex / GitHub 连不上时先判断坏在哪一层，也能粘贴代理参数后预检、部署、回滚
+```
+
+V2EX / NodeSeek body:
+
+```text
+最近一直遇到一种很烦的问题：Mac 上 Codex、ChatGPT、GitHub 或 API 客户端突然连不上，普通用户看不出来是 DNS、系统代理、代理核心、IPv6、TLS、目标服务，还是自己粘贴的代理参数错了。
+
+我做了一个开源小工具 Netfix。它的目标不是卖代理，也不是替代 Clash/Surge，而是在改系统配置前先诊断：哪一层坏了、下一步该点什么、改坏了怎么恢复。
+
+如果你已经有 HTTP/SOCKS5 代理参数，可以在 App 里粘贴 host:port:用户名:密码，先检查能不能连，再保存到 Keychain，最后确认是否让这台 Mac 使用。当前 DMG 还是未签名 QA 版，适合技术测试用户；建议先跑 dry-run 或从源码看。
+
+我最想要的反馈：README 第一屏是否看得懂、安装是否可信、代理参数入口是否清楚、失败提示是否像人话。觉得有用的话也欢迎 star。
+```
+
+Reddit short post:
+
+```text
+I built Netfix, a local-first macOS network triage app for AI/dev tool connectivity issues.
+
+It tries to answer: is Codex/GitHub/ChatGPT failing because of DNS, system proxy, proxy core, IPv6, TLS, the target service, or pasted proxy credentials?
+
+It can also precheck HTTP/SOCKS5 credentials, save them to Keychain, apply system proxy settings only after confirmation, and roll back.
+
+Current state: MIT source-first release. The QA DMG is unsigned/not notarized, so treat it as technical testing and run --dry-run first. No telemetry, no built-in proxy nodes.
+```
+
 ## Trust Claims — safe to assert
 
 - local-first diagnosis (works offline)
@@ -92,6 +146,17 @@ get a plain-English answer. Local-first, no telemetry, no cloud required.
 2. In every post, link to a **single concrete case** (`cases/2026-06-29-普通用户代理部署体验审查.md` is currently the strongest hook).
 3. Do not promise what is not in the release. The current QA DMG is unsigned; say so out loud — credibility earns stars more than polish.
 4. After 30 stars, write a follow-up post showing the **before / after** of a real diagnosis.
+
+## 30-Star Sprint
+
+| Step | Goal | Output |
+|---|---|---|
+| Day 1 | Make the repo trustworthy | GitHub About/topics set, README says unsigned QA plainly, dry-run comes before install |
+| Day 2 | Show one real story | Link the ordinary-user proxy deployment case from README and every launch post |
+| Day 3 | Post once in Chinese | V2EX / NodeSeek post with the same case link and no exaggerated claims |
+| Day 4 | Collect friction | Turn the first 3 confusing comments into README fixes or issues |
+| Day 5 | Post once in English | Reddit or Show HN only after the README first screen is stable |
+| After 30 stars | Earn the follow-up | Publish a before/after diagnosis case and the next signed-DMG roadmap |
 
 ## Before Asking For Stars — verification
 

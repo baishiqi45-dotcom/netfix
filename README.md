@@ -2,13 +2,14 @@
 
 [English README](README.en.md)
 
-![Netfix — 粘贴代理，让 Mac 安全上网](assets/github/hero.zh.png)
+![Netfix — 粘贴代理，让 Mac 正确使用已有代理](assets/github/hero.zh.png)
 
 ![license: MIT](https://img.shields.io/badge/license-MIT-green)
 ![platform: macOS](https://img.shields.io/badge/platform-macOS-blue)
-![privacy: 本地优先](https://img.shields.io/badge/privacy-local--first-0f766e)
+![privacy: 本地优先](https://img.shields.io/badge/privacy-%E6%9C%AC%E5%9C%B0%E4%BC%98%E5%85%88-0f766e)
+![agent: MCP 就绪](https://img.shields.io/badge/agent-MCP%20ready-111827)
 
-> **买了代理不会配？粘贴一行，让 Mac 安全上网。**
+> **买了代理不会配？粘贴一行，让 Mac 正确使用你已有的代理。**
 
 Netfix 是 macOS 上的本地网络诊断与配置助手：把你从代理服务商后台复制来的连接信息贴进来，它会先检测能不能用，再保存到本机密码库，最后由你确认是否让这台 Mac 开始使用。改之前自动备份，不用时一键回滚。
 
@@ -18,20 +19,24 @@ Netfix 是 macOS 上的本地网络诊断与配置助手：把你从代理服务
 
 ## ⚠️ 当前版本说明
 
-这是 **v0.2.0-qa.1 预览版**，DMG 还没有完成 Apple Developer ID 签名和公证。普通用户首次打开时，macOS 可能会提示“无法验证开发者”。请在 **系统设置 → 隐私与安全性** 里点击 **仍要打开**。
+这是 **v0.2.0-qa.1 预览版**，DMG 还没有完成 Apple Developer ID 签名和公证。首次打开时，macOS 可能会提示“无法验证开发者”。请在 **系统设置 → 隐私与安全性** 里点击 **仍要打开**。现在适合技术测试用户试用；正式面向普通用户还需要 Developer ID 签名和公证。
+
+你需要准备的是代理服务后台里的 **HTTP/SOCKS5 连接参数**，例如 `host:port:用户名:密码`。不要复制“当前出口 IP”；它只是检测结果，不能拿来连接。Netfix 不是 Clash 客户端，不解析订阅；`ss://`、`vmess://`、Clash/sing-box 订阅链接暂不支持，请到服务商后台找 host、port、用户名、密码。
+
+系统要求：macOS 13 或更新版本；Apple Silicon / Intel Mac 都可试；修改系统代理时 macOS 可能会要求输入本机密码；可选 MCP 接入需要本机有 `python3`。
 
 ```bash
-# 普通用户复制这一行：安装 Netfix.app（QA 版本，未签名）
-curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
-
-# 只预览会做什么，不安装
+# 先看脚本会做什么，不安装、不改配置
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash -s -- --dry-run
+
+# 技术测试用户安装 Netfix.app（QA 版本，未签名）
+curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
 
 # 卸载本机 App 和 Codex MCP 注册
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash -s -- --uninstall
 ```
 
-安装脚本会把 App 放到 `~/Applications/Netfix.app`，打开 App，并在本机有 Codex CLI 时顺手注册 MCP。脚本最后还会打印 Kimi / Claude Desktop / Cursor / MiniMax-compatible 本地智能体可复制的 MCP stdio 配置。如果你只想看源码或不想用 App：
+安装脚本会把 App 放到 `~/Applications/Netfix.app`，打开 App，并在本机有 Codex CLI 时注册 MCP。脚本最后还会打印 Kimi / Claude Desktop / Cursor / MiniMax-compatible 本地智能体可复制的 MCP stdio 配置。如果你只想看源码或不想用 App：
 
 ```bash
 pip install -e .
@@ -40,9 +45,9 @@ python3 netfix.py codex --json
 
 ---
 
-## 三步让 Mac 上网
+## 三步把已有代理部署到 Mac
 
-1. **复制**：去你的代理服务后台，复制一整行连接参数。
+1. **复制**：去你的代理服务后台，复制一整行 HTTP/SOCKS5 连接参数。
 2. **粘贴**：在 Netfix 里粘贴，点「检查并保存到这台 Mac」。
 3. **确认**：检查通过后，点「开始使用这台 Mac 上网」。Netfix 会先备份当前网络设置，再应用代理。
 
@@ -130,13 +135,13 @@ python3 netfix.py codex --json
 
 当前仓库优先保证源码开源、可审计、可本地运行。公开签名 `.dmg` 还没有完成 Developer ID 签名和公证，所以不要把本地候选包宣传成正式下载版。
 
-### 普通用户：装 App
+### 技术测试用户：装 QA App
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
 ```
 
-这条命令会下载 DMG、校验 SHA256、安装 `Netfix.app` 到 `~/Applications`、打开 App、烟测 App 内置 MCP；如果本机有 Codex CLI，会顺手注册 Netfix MCP；如果是 Kimi / Claude / Cursor / MiniMax-compatible 本地智能体，脚本会打印可复制的 stdio 配置。当前 QA DMG 还没有 Developer ID 签名和公证，所以现在能做到"技术用户一行安装"，还不能包装成"普通小白稳定可用的正式安装命令"。
+这条命令会下载 DMG、校验 SHA256、安装 `Netfix.app` 到 `~/Applications`、打开 App、烟测 App 内置 MCP；如果本机有 Codex CLI，会注册 Netfix MCP；如果是 Kimi / Claude / Cursor / MiniMax-compatible 本地智能体，脚本会打印可复制的 stdio 配置。当前 QA DMG 还没有 Developer ID 签名和公证，所以现在能做到"技术测试用户一行安装"，还不能包装成"普通小白稳定可用的正式安装命令"。
 
 安装后如果找不到 App：它放在你的用户应用程序文件夹 `~/Applications/Netfix.app`，可以按 `⌘ + 空格` 搜索 `Netfix` 打开。
 
@@ -171,11 +176,12 @@ open .build/Netfix.app
 
 ## 真实 case 速览
 
-`cases/` 目录里都是脱敏后的真实场景，README 摘要几条最有共鸣的：
+`cases/` 目录里都是脱敏后的真实场景，入口见 [Case Index](cases/INDEX.md)。最适合第一次了解 Netfix 的故事是：[普通用户第一次部署代理的 9 个坑](cases/2026-06-29-普通用户代理部署体验审查.md)。它解释了为什么 Netfix 把流程做成“粘贴参数 → 预检 → 部署 → 回滚”，而不是让用户自己猜系统代理、IPv6、出口 IP 和密码保存位置。
 
-- **「Codex 报连不上，其实是 API Key 失效」** — 见 `cases/20260617-1405-codex-reachable-needs-key.md`。网络层一切正常，Netfix 会指出根因不在你这边。
-- **「普通用户第一次部署代理的 9 个坑」** — 见 `cases/2026-06-29-普通用户代理部署体验审查.md`。粘贴参数 → 预检 → 部署 → 回滚的完整人话流程。
-- **「健康基线快照」** — 见 `cases/2026-06-17-healthy-baseline.md`。问题解决前后做对照，作为以后同类故障的快速比对模板。
+另外几条有代表性的 case：
+
+- **[Codex 报连不上，其实是 API Key 失效](cases/20260617-1405-codex-reachable-needs-key.md)**：网络层一切正常，Netfix 会指出根因不在你这边。
+- **[健康基线快照](cases/2026-06-17-healthy-baseline.md)**：问题解决前后做对照，作为以后同类故障的快速比对模板。
 
 新 case 欢迎按 `cases/TEMPLATE.md` 提交，PR 前请读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [SECURITY.md](SECURITY.md)。
 
@@ -343,6 +349,10 @@ netfix/
 ├── assets/github/         GitHub 中英双语视觉资产
 └── docs/github/           GitHub 发布、截图、运营说明
 ```
+
+---
+
+如果 Netfix 帮你定位过一次 Mac 网络问题，欢迎点右上角 Star。这样你能看到签名版、截图/GIF 和新 case 的后续进展。
 
 ---
 
