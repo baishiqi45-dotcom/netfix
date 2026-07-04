@@ -15,6 +15,7 @@ struct DashboardView: View {
     @State private var showLogsSheet = false
     @State private var showAIQuestionSheet = false
     @State private var aiQuestionContext: AIQuestionContext = .diagnosis
+    @State private var aiQuestionPrompt: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +26,8 @@ struct DashboardView: View {
 
             ScrollView {
                 VStack(spacing: 16) {
+                    landingStateBanner
+
                     statusCards
 
                     firstAidSection
@@ -42,6 +45,8 @@ struct DashboardView: View {
                     if let report = viewModel.report {
                         resultSection(report: report)
                     }
+
+                    aiQuickActionsSection
 
                     if !healthMonitor.events.isEmpty {
                         eventsSection
@@ -99,11 +104,13 @@ struct DashboardView: View {
             AIQuestionSheet(
                 isWorking: viewModel.isWorking,
                 context: aiQuestionContext,
+                initialPrompt: aiQuestionPrompt,
                 onOpenAISettings: {
                     NSApp.sendAction(#selector(AppDelegate.showAISettings), to: nil, from: nil)
                 }
             ) { question, images in
                 showAIQuestionSheet = false
+                aiQuestionPrompt = nil
                 Task {
                     await viewModel.explainWithAI(
                         question: question,
@@ -394,29 +401,16 @@ struct DashboardView: View {
     }
 
     private func friendlyErrorMessage(_ message: String) -> String {
-        let lower = message.lowercased()
-        if lower.contains("command timed out") || lower.contains("timed out") {
-            return "网络太慢或代理没响应。可以重试一次，或者点“粘贴代理参数”换一组代理。"
+        let card = UserFacingMessages.classify(message)
+        let combined = "\(card.headline)\n\(card.nextStep)"
+        if let tech = card.technical, !tech.isEmpty {
+            return combined
         }
-        if lower.contains("407") || lower.contains("proxy authentication") || lower.contains("auth_failed") || lower.contains("authentication") {
-            return "代理账号或密码没有通过。请从服务商后台重新复制完整的地址、端口、用户名和密码，再粘贴保存。"
-        }
-        if lower.contains("unsupported") || lower.contains("ss://") || lower.contains("vmess://") || lower.contains("subscription") || lower.contains("订阅") {
-            return "这类链接暂时不能直接部署。请到服务商后台复制 HTTP 或 SOCKS5 的地址、端口、用户名和密码。"
-        }
-        if lower.contains("dns") || lower.contains("could not resolve") || lower.contains("name_not_resolved") {
-            return "DNS 解析失败。可能是当前网络打不开这个域名，也可能是代理服务商给的地址写错。"
-        }
-        if lower.contains("connection refused") || lower.contains("could not connect") {
-            return "目标服务或本机转发没有响应。可以先重试；如果是刚部署代理，请确认 Netfix 仍在运行。"
-        }
-        if lower.contains("ipv6_leak") && lower.contains("no public ipv6 observed") {
-            return "没有检测到公网 IPv6 泄漏，只是系统仍保留 IPv6 默认路由。一般可以继续使用；如果某些 App 启动卡住，再按建议处理 IPv6。"
-        }
-        if lower.contains("decode") || lower.contains("解析失败") {
-            return "App 与后端返回的数据格式不匹配，可能是版本不一致。请尝试重启应用。"
-        }
-        return message
+        return combined
+    }
+
+    private func structuredErrorCard(for message: String) -> UserFacingMessage {
+        UserFacingMessages.classify(message)
     }
 
     private func openNetfixLogsFolder() {
@@ -480,6 +474,109 @@ struct DashboardView: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Color.blue.opacity(0.16), lineWidth: 1)
         )
+    }
+
+    // MARK: - 首页状态条（一句人话）
+
+    @ViewBuilder
+    private var landingStateBanner: some View {
+        if let state = viewModel.dashboardState {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: state.iconName)
+                    .font(.title3)
+                    .foregroundStyle(state.tintColor)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(state.headline)
+                        .font(.headline)
+                    Text(state.nextStep)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding()
+            .background(state.tintColor.opacity(0.10))
+            .cornerRadius(10)
+        } else {
+            EmptyView()
+        }
+    }
+
+    // MARK: - AI 快捷按钮（没 API Key 也能用本地版本）
+
+    @ViewBuilder
+    private var aiQuickActionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.purple)
+                Text("下一步想干嘛？")
+                    .font(.headline)
+                Spacer()
+            }
+            Text(viewModel.hasCloudAI
+                 ? "下面按钮既能用本地规则解释，也能再请求云端 AI。"
+                 : "下面按钮走本地规则，不需要 API Key；想用云端 AI 再到「设置 → AI」启用。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                aiQuickButton(
+                    title: "解释当前问题",
+                    systemImage: "questionmark.bubble",
+                    prompt: "请用普通人能听懂的话，解释当前诊断报告里最严重的一个问题，并告诉我下一步应该点什么。"
+                )
+                aiQuickButton(
+                    title: "我该点哪个按钮",
+                    systemImage: "hand.point.up.left.fill",
+                    prompt: "基于当前诊断结果，告诉我现在该先点哪个按钮、要不要确认、会有什么后果。"
+                )
+                aiQuickButton(
+                    title: "复制脱敏报告给客服/AI",
+                    systemImage: "doc.on.clipboard",
+                    prompt: nil,
+                    action: { Task { await viewModel.copySupportBundle() } }
+                )
+                aiQuickButton(
+                    title: "检查我的代理参数格式",
+                    systemImage: "checklist",
+                    prompt: "我想知道我刚才粘的代理参数格式对不对；贴在这里麻烦帮我确认是不是 host:port:user:pass 或 http://user:pass@host:port 这种。"
+                )
+            }
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(10)
+    }
+
+    private func aiQuickButton(
+        title: String,
+        systemImage: String,
+        prompt: String?,
+        action: (() -> Void)? = nil
+    ) -> some View {
+        Button {
+            if let action {
+                action()
+            } else if let prompt {
+                aiQuestionContext = .diagnosis
+                aiQuestionPrompt = prompt
+                showAIQuestionSheet = true
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                Text(title).font(.caption).fontWeight(.medium)
+                Spacer()
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.purple.opacity(0.08))
+            .cornerRadius(8)
+        }
+        .buttonStyle(.plain)
+        .disabled(!backend.isReady)
     }
 
     // MARK: - 结果区
@@ -867,14 +964,30 @@ private enum AIQuestionContext {
 private struct AIQuestionSheet: View {
     let isWorking: Bool
     let context: AIQuestionContext
+    let initialPrompt: String?
     let onOpenAISettings: () -> Void
     let onSend: (String, [String]) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var question = ""
+    @State private var question: String
     @State private var images: [AIQuestionImage] = []
     @State private var uploadConfirmed = false
     @State private var errorMessage: String?
+
+    init(
+        isWorking: Bool,
+        context: AIQuestionContext,
+        initialPrompt: String? = nil,
+        onOpenAISettings: @escaping () -> Void,
+        onSend: @escaping (String, [String]) -> Void
+    ) {
+        self.isWorking = isWorking
+        self.context = context
+        self.initialPrompt = initialPrompt
+        self.onOpenAISettings = onOpenAISettings
+        self.onSend = onSend
+        self._question = State(initialValue: initialPrompt ?? "")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1073,6 +1186,25 @@ final class DashboardViewModel: ObservableObject {
     @Published var llmError: String?
     @Published var activeJobID: String?
     @Published private var proxyBridgeState: ProxyBridgeResponse?
+    @Published var dashboardState: DashboardUIStateInfo?
+    @Published var hasCloudAI: Bool = false
+    @Published var copyFeedback: String?
+
+    struct DashboardUIStateInfo {
+        let uiState: DashboardUIState
+        let headline: String
+        let nextStep: String
+        let iconName: String
+        let tintColor: Color
+
+        init(_ state: DashboardUIState) {
+            self.uiState = state
+            self.headline = state.headline
+            self.nextStep = state.nextStep
+            self.iconName = state.iconName
+            self.tintColor = state.tintColor
+        }
+    }
 
     var recommendedAction: Action? {
         report?.explanation?.primaryAction ?? report?.explanation?.actions.first
@@ -1150,8 +1282,46 @@ final class DashboardViewModel: ObservableObject {
             updateHeadline(backend: backend)
             if backend.isReady, let url = backend.apiURL, let token = backend.apiToken, client == nil {
                 client = APIClient(baseURL: url, apiToken: token)
-                Task { await refreshProxyUsage() }
+                Task {
+                    await refreshProxyUsage()
+                    await refreshDashboardState()
+                    await refreshCloudAIStatus()
+                }
             }
+        }
+    }
+
+    func refreshDashboardState() async {
+        guard let client else { return }
+        do {
+            let response = try await client.dashboardState()
+            dashboardState = DashboardUIStateInfo(response.uiState)
+        } catch {
+            // 静默失败：dashboard state 是装饰性信息，主流程不依赖它。
+        }
+    }
+
+    func refreshCloudAIStatus() async {
+        guard let client else { return }
+        do {
+            let response = try await client.llmProviders()
+            hasCloudAI = response.providers.contains { $0.apiKeySet == true }
+        } catch {
+            hasCloudAI = false
+        }
+    }
+
+    func copySupportBundle() async {
+        guard let client else { return }
+        copyFeedback = nil
+        do {
+            let response = try await client.supportBundle()
+            let text = response.supportText ?? "暂无可复制的支持包。"
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            copyFeedback = "已复制支持包到剪贴板。"
+        } catch {
+            copyFeedback = UserFacingMessages.classify(error.localizedDescription).headline
         }
     }
 
@@ -1163,7 +1333,9 @@ final class DashboardViewModel: ObservableObject {
         if isWorking {
             return
         }
-        if let report = report {
+        if let dashboard = dashboardState {
+            headline = dashboard.headline
+        } else if let report = report {
             headline = report.summaryHeadline
         } else {
             headline = backend.isReady ? "就绪，可以开始" : backend.statusMessage
@@ -1189,6 +1361,7 @@ final class DashboardViewModel: ObservableObject {
             ]
         )
         await refreshProxyUsage()
+        await refreshDashboardState()
     }
 
     func fix() async {

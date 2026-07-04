@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from netfix import user_facing_errors
+
 
 def _normalize_manual_step(item: Any) -> Dict[str, Any]:
     """Convert a string, list or dict manual step into a structured dict."""
@@ -295,6 +297,10 @@ def explain_report(report: Dict[str, Any], rules: Optional[Dict[str, Any]] = Non
 
     headline = template.get("headline") or top.get("description") or "检测到网络问题"
     explanation = template.get("explanation") or top.get("description") or ""
+    # Scrub any leaked internal jargon out of the headline / explanation so the
+    # ordinary user never sees phrases like "ipv6_leak" or "proxy active".
+    headline = user_facing_errors.scrub_internal_phrases(headline)
+    explanation = user_facing_errors.scrub_internal_phrases(explanation)
 
     # If the report was produced by `fix --all` but no Tier 1 fix could be run,
     # tell the user honestly that the remaining issues need manual handling.

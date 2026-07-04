@@ -1923,7 +1923,8 @@ struct SettingsView: View {
             proxyExportResult = nil
             proxyStatus = result.ok ? "解析成功，未保存明文密码。" : "失败：\(result.errors?.joined(separator: "、") ?? "格式不正确")"
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -1942,7 +1943,8 @@ struct SettingsView: View {
             let invalid = result.summary.invalidCount ?? 0
             proxyStatus = result.ok ? "预检完成：\(valid) 条可用，\(invalid) 条需修正。" : "预检没有找到可用候选。"
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -1959,7 +1961,8 @@ struct SettingsView: View {
             let matrix = proxyValidationTargets.first(where: { $0.id == proxyTargetProfile })?.label ?? proxyTargetProfile
             proxyStatus = proxyValidationStatus(result, matrix: matrix)
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -1980,7 +1983,8 @@ struct SettingsView: View {
             let matrix = proxyValidationTargets.first(where: { $0.id == proxyTargetProfile })?.label ?? proxyTargetProfile
             proxyStatus = proxyValidationStatus(result, matrix: matrix)
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2020,7 +2024,8 @@ struct SettingsView: View {
                 await loadProxyMonitor()
             }
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2060,7 +2065,8 @@ struct SettingsView: View {
                 await loadProxyMonitor()
             }
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2084,7 +2090,8 @@ struct SettingsView: View {
                 proxyMonitorState = response.monitor
                 proxyStatus = response.ok ? "后台监控已重启。" : "失败：\(response.error ?? "无法重启监控")"
             } catch {
-                proxyStatus = "失败：\(error.localizedDescription)"
+                let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
             }
         case "import_preview":
             await importProxyPreview()
@@ -2116,7 +2123,8 @@ struct SettingsView: View {
             let response = try await client.proxyMonitor()
             proxyMonitorState = response.monitor
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2128,7 +2136,8 @@ struct SettingsView: View {
         do {
             proxyBridgeState = try await client.proxyBridge()
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2145,7 +2154,8 @@ struct SettingsView: View {
                 : "已关闭启动时自动恢复代理连接。"
             await loadProxyBridge()
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2159,7 +2169,8 @@ struct SettingsView: View {
             proxyMonitorState = response.monitor
             proxyStatus = response.ok ? "后台监控已启动。" : "失败：\(response.error ?? "无法启动监控")"
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2192,7 +2203,8 @@ struct SettingsView: View {
             proxyMonitorState = response.monitor
             proxyStatus = response.ok ? "后台监控已停止。" : "失败：\(response.error ?? "无法停止监控")"
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2224,7 +2236,8 @@ struct SettingsView: View {
                 proxyStatus = "失败：\(response.error ?? "无法删除配置")"
             }
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2239,7 +2252,8 @@ struct SettingsView: View {
             proxyStatus = response.ok ? "已生成客户端配置片段。" : "失败：\(response.error ?? "无法导出配置")"
         } catch {
             proxyExportResult = nil
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2280,7 +2294,8 @@ struct SettingsView: View {
         } catch {
             pendingSystemProxyProfile = nil
             pendingSystemProxyPlan = nil
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2301,7 +2316,8 @@ struct SettingsView: View {
                 proxyStatus = "失败：\(response.error ?? response.status ?? "无法恢复网络设置")"
             }
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2322,7 +2338,8 @@ struct SettingsView: View {
                 proxyStatus = "失败：\(response.error ?? response.status ?? "无法恢复桥接")"
             }
         } catch {
-            proxyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2345,7 +2362,8 @@ struct SettingsView: View {
             let removed = response.retention?.removed ?? 0
             privacyStatus = "已保存。事件日志已裁剪 \(removed) 条。"
         } catch {
-            privacyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            privacyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2358,7 +2376,8 @@ struct SettingsView: View {
             let result = try await client.clearLogs()
             privacyStatus = result.ok ? "已清理 \(result.removed.count) 个日志文件。" : "失败：部分日志无法清理。"
         } catch {
-            privacyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            privacyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2381,7 +2400,8 @@ struct SettingsView: View {
                 await loadCloudAndProxySettings()
             }
         } catch {
-            privacyStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            privacyStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 

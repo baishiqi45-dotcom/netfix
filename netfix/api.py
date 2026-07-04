@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from netfix import deepseek_sidecar, keychain, llm_budget, llm_explain, llm_provider, logs, proxy_bridge, proxy_monitor_service, residential_proxy, services, settings
+from netfix import deepseek_sidecar, dashboard_state, keychain, llm_budget, llm_explain, llm_provider, logs, proxy_bridge, proxy_monitor_service, residential_proxy, services, settings, user_facing_errors
 from netfix.constants import JOURNAL_DIR, REPO_ROOT, RULES_DIR, VERSION
 from netfix.detect import detect_environment, get_core
 from netfix.fix_engine import FixEngine
@@ -911,27 +911,40 @@ def _with_user_facing_fix_error(result: Dict[str, Any]) -> Dict[str, Any]:
         status = _friendly_diagnostic_status(diagnostic.get("status"))
         details = diagnostic.get("details") if isinstance(diagnostic.get("details"), dict) else {}
         reason = details.get("reason") or details.get("error") or diagnostic.get("error") or ""
-        message = f"修复命令已执行，但复查还没通过：{name} {status}。"
+        card = user_facing_errors.render_error(code="fix_verification_failed")
+        headline = card.get("headline", "修复命令已执行，但复查还没通过")
+        next_step = card.get("next_step", "再点一次诊断；如果仍然提示同一项，按下面手动步骤继续处理。")
+        message = f"{headline}（{name} {status}）。{next_step}"
         if reason:
-            message += f" 看到的情况：{_friendly_diagnostic_reason(reason)[:180]}"
-        message += " 请重新诊断；如果仍然提示同一项，说明系统或路由器侧还保留了这条网络路径，需要继续按建议处理。"
+            message += f"\n详情：{_friendly_diagnostic_reason(reason)[:180]}"
         result["error"] = message
+        result["error_card"] = card
         result["reason_code"] = "fix_verification_failed"
         return result
 
     status = str(result.get("status") or "").lower()
     command_reason = _first_failed_command_reason(result)
     if status == "cancelled" or "取消" in command_reason:
-        result["error"] = command_reason or "你取消了这次修复，系统设置没有改变。"
+        card = user_facing_errors.render_error(code="fix_cancelled")
+        result["error"] = command_reason or card.get("headline", "你取消了这次修复，系统设置没有改变。")
+        result["error_card"] = card
         result["reason_code"] = "fix_cancelled"
         return result
 
     if command_reason:
-        result["error"] = f"修复没有跑完：{command_reason}"
+        card = user_facing_errors.render_error(code="fix_command_failed")
+        result["error"] = f"{card.get('headline', '修复没有跑完')}：{command_reason}\n{card.get('next_step', '')}"
+        result["error_card"] = card
         result["reason_code"] = "fix_command_failed"
         return result
 
-    result["error"] = "修复没有完成，但后端没有给出明确原因。请点“查看日志”，把最近一次修复日志拿来排查。"
+    card = user_facing_errors.render_error(message=str(result.get("error") or ""))
+    result["error"] = (
+        card.get("headline", "修复没有完成，但后端没有给出明确原因。")
+        + " "
+        + card.get("next_step", "请点「查看日志」，把最近一次修复日志拿来排查。")
+    )
+    result["error_card"] = card
     result["reason_code"] = f"fix_{status}" if status else "fix_failed"
     return result
 
@@ -1108,6 +1121,43 @@ class APIRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/environment":
             return 200, _environment_summary()
+
+        if path == "/user-facing/errors":
+            return 200, {
+                "ok": True,
+                "schema_version": "netfix_user_facing_errors.v1",
+                "codes": user_facing_errors.all_codes(),
+            }
+
+        if path == "/dashboard/state":
+            bridge = _bridge_status_payload()
+            profiles = settings.get_proxy_profiles()
+            last_status: Optional[str] = None
+            latest_path = JOURNAL_DIR / "last_report.json"
+            if latest_path.exists():
+                try:
+                    import json as _json
+                    last_report = _json.loads(latest_path.read_text(encoding="utf-8"))
+                    diagnostics = last_report.get("diagnostics") if isinstance(last_report, dict) else None
+                    if isinstance(diagnostics, list):
+                        for item in diagnostics:
+                            status = (item or {}).get("status") if isinstance(item, dict) else None
+                            if status in {"fail", "warn", "ok"}:
+                                last_status = status
+                                break
+                except Exception:
+                    last_status = None
+            return 200, {
+                "ok": True,
+                "schema_version": "netfix_dashboard_state.v1",
+                "state": dashboard_state.resolve(
+                    saved_profile_count=len(profiles),
+                    bridge_status=bridge,
+                    last_diagnostic_status=last_status,
+                ),
+                "bridge": bridge,
+                "saved_profile_count": len(profiles),
+            }
 
         if path == "/llm/providers":
             return 200, {"ok": True, "providers": _llm_providers_with_status()}

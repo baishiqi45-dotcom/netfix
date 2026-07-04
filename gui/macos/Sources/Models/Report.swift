@@ -261,6 +261,69 @@ struct APIRunResponse: Codable {
     }
 }
 
+/// Mirrors the payload returned by GET /user-facing/errors.
+/// Used to keep Swift in sync with the Python reason code table.
+struct UserFacingErrorsResponse: Codable {
+    let ok: Bool
+    let codes: [UserFacingErrorCodeEntry]
+}
+
+/// Payload returned by GET /support/bundle. We only decode the fields
+/// the user-facing copy button needs.
+struct SupportBundleResponse: Codable {
+    let ok: Bool
+    let supportText: String?
+    let nextSteps: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case supportText = "support_text"
+        case nextSteps = "next_steps"
+    }
+}
+
+struct UserFacingErrorCodeEntry: Codable, Identifiable {
+    let code: String
+    let headline: String
+    let nextStep: String
+    let technical: String?
+
+    var id: String { code }
+
+    enum CodingKeys: String, CodingKey {
+        case code
+        case headline
+        case nextStep = "next_step"
+        case technical
+    }
+}
+
+/// Optional structured error card returned alongside failed API responses.
+struct ErrorCard: Codable {
+    let code: String
+    let headline: String
+    let nextStep: String?
+    let technical: String?
+    let source: String?
+
+    enum CodingKeys: String, CodingKey {
+        case code
+        case headline
+        case nextStep = "next_step"
+        case technical
+        case source
+    }
+
+    var toMessage: UserFacingMessage {
+        UserFacingMessage(
+            code: code,
+            headline: headline,
+            nextStep: nextStep ?? "可以重试或查看日志。",
+            technical: technical
+        )
+    }
+}
+
 struct APIJobResponse: Codable {
     let ok: Bool?
     let status: String
@@ -830,6 +893,7 @@ struct ProxyProfileResponse: Codable {
     let monitor: ProxyMonitorState?
     let warnings: [String]?
     let error: String?
+    let reasonCode: String?
 
     enum CodingKeys: String, CodingKey {
         case ok
@@ -838,6 +902,7 @@ struct ProxyProfileResponse: Codable {
         case monitor
         case warnings
         case error
+        case reasonCode = "reason_code"
     }
 }
 
@@ -1390,36 +1455,40 @@ struct ProxyApplyResponse: Codable {
 
 extension ProxyApplyResponse {
     var friendlyFailureMessage: String {
+        if let reasonCode, !reasonCode.isEmpty,
+           let entry = UserFacingMessages.lookup(reasonCode) {
+            return "\(entry.headline)\n\(entry.nextStep)"
+        }
         let code = (reasonCode ?? error ?? status ?? "").lowercased()
         if code.contains("verify_failed") || status == "rolled_back_after_verify_failure" {
-            return "这组代理没通过上网验证，Netfix 已恢复部署前的网络设置。请换一组代理参数，或先点“预检这行参数”看地址、端口、用户名、密码是否完整。"
+            return "这组代理没通过上网验证，Netfix 已恢复部署前的网络设置。\n请换一组代理参数，或先点「预检这行参数」看地址、端口、用户名、密码是否完整。"
         }
         if code.contains("bridge_unsupported_upstream_protocol") {
-            return "这类代理暂时不能直接接管整台 Mac。可以先导出客户端配置，或只给终端工具生成代理环境。"
+            return "这类代理暂时不能直接接管整台 Mac。\n可以先导出客户端配置，或只给终端工具生成代理环境。"
         }
         if code.contains("missing_keychain_password") {
-            return "本机密码库里找不到这组代理的密码。请重新粘贴完整参数并保存。"
+            return "本机密码库里找不到这组代理的密码。\n请重新粘贴完整参数并保存。"
         }
         if code.contains("current_authenticated_proxy_not_restorable") {
-            return "当前系统代理本身带账号密码，Netfix 无法保证能完整恢复。请先手动关闭现有系统代理，再重新部署。"
+            return "当前系统代理本身带账号密码，Netfix 无法保证能完整恢复。\n请先手动关闭现有系统代理，再重新部署。"
         }
         if code.contains("system_proxy_backup_failed") {
-            return "备份当前网络设置失败。请确认 Netfix 有权限修改网络设置，然后重试。"
+            return "备份当前网络设置失败。\n请确认 Netfix 有权限修改网络设置，然后重试。"
         }
         if code.contains("system_proxy_apply_failed") || code.contains("networksetup") {
-            return "macOS 没有接受这次网络代理修改。请确认管理员权限，或重启 Netfix 后再试。"
+            return "macOS 没有接受这次网络代理修改。\n请确认管理员权限，或重启 Netfix 后再试。"
         }
         if code.contains("bridge_start_failed") || code.contains("loopback_port_owned_by_unknown_process") {
-            return "本机转发端口被占用，Netfix 无法安全代管代理密码。请退出占用 127.0.0.1 端口的代理软件，或重启 Netfix。"
+            return "本机转发端口被占用，Netfix 无法安全代管代理密码。\n请退出占用 127.0.0.1 端口的代理软件，或重启 Netfix。"
         }
         if code.contains("system_apply_requires_macos") {
-            return "整机代理部署只支持 macOS。其他系统可以导出客户端配置或给终端工具生成代理环境。"
+            return "整机代理部署只支持 macOS。\n其他系统可以导出客户端配置或给终端工具生成代理环境。"
         }
         if status == "pending_confirmation" {
-            return "还需要你确认。请重新点“部署到这台 Mac”，并在弹出的中文确认框里确认。"
+            return "还需要你确认。\n请重新点「部署到这台 Mac」，并在弹出的中文确认框里确认。"
         }
         if let error, !error.isEmpty {
-            return error
+            return UserFacingMessages.classify(error).combined
         }
         if let reasonCode, !reasonCode.isEmpty {
             return reasonCode

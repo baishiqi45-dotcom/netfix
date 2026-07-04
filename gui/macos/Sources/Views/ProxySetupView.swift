@@ -218,10 +218,15 @@ struct ProxySetupView: View {
                     ? "已保存并启动健康监控。点下面“开始使用这台 Mac 上网”才会生效。"
                     : "已保存到本机，密码已写入本机密码库。点下面“开始使用这台 Mac 上网”才会生效。"
             } else {
-                proxySaveStatus = "失败：\(response.error ?? "无法保存代理")"
+                let card = UserFacingMessages.render(
+                    code: response.reasonCode,
+                    message: response.error ?? "无法保存代理"
+                )
+                proxySaveStatus = "\(card.headline)\n\(card.nextStep)"
             }
         } catch {
-            proxySaveStatus = "失败：\(error.localizedDescription)"
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            proxySaveStatus = "\(card.headline)\n\(card.nextStep)"
         }
         isProxyWorking = false
     }

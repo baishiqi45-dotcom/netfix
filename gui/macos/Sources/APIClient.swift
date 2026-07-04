@@ -166,6 +166,10 @@ actor APIClient {
         try await get(path: "report/latest", timeout: 20)
     }
 
+    func supportBundle() async throws -> SupportBundleResponse {
+        try await get(path: "support/bundle", timeout: 20)
+    }
+
     func events() async throws -> EventsResponse {
         try await get(path: "events", timeout: 20)
     }
@@ -176,6 +180,14 @@ actor APIClient {
 
     func environment() async throws -> EnvironmentResponse {
         try await get(path: "environment", timeout: 20)
+    }
+
+    func dashboardState() async throws -> DashboardStateResponse {
+        try await get(path: "dashboard/state", timeout: 20)
+    }
+
+    func userFacingErrors() async throws -> UserFacingErrorsResponse {
+        try await get(path: "user-facing/errors", timeout: 20)
     }
 
     func llmProviders() async throws -> LLMProvidersResponse {

@@ -17,6 +17,37 @@ Netfix 是 macOS 上的本地网络诊断与配置助手：把你从代理服务
 
 ---
 
+## 三步把已有代理部署到这台 Mac
+
+1. **下载 App**：双击 DMG，把 Netfix 拖进「应用程序」。第一次打开如果提示“无法验证开发者”，到「系统设置 → 隐私与安全性 → 仍要打开」。
+2. **粘贴参数**：在主界面点「粘贴代理参数」，把服务商后台那一行连接参数粘进去。Netfix 会先检查能不能用，再保存到本机密码库。
+3. **开始使用**：检查通过后点「开始使用这台 Mac 上网」。Netfix 会先备份当前网络设置，再启用代理；不用时到「设置 → 部署代理 → 更多 → 恢复原来的网络设置」一键回滚。
+
+支持的连接参数格式：
+
+```text
+socks5h://user:pass@proxy.example.com:1080
+http://user:pass@proxy.example.com:8000
+proxy.example.com:1080:user:pass
+host,port,username,password
+```
+
+不支持 ss://、vmess:// 或 Clash/sing-box 订阅链接 —— 请回服务商后台复制 HTTP 或 SOCKS5 的参数。
+
+主界面会用一个绿色 / 蓝色 / 橙色 / 红色卡片告诉你 **现在到底发生了什么**：
+
+* 蓝色「还没有粘贴代理参数」→ 去粘贴。
+* 绿色「正在通过 Netfix 使用代理上网」→ 一切正常。
+* 橙色「代理还在用，但刚才一次检测没通过」→ 点一键诊断看具体项。
+* 红色「系统网络需要恢复」→ 点「恢复原来的网络设置」。
+* 出错时不再显示工程日志，只说人话并告诉你下一步点什么；想看原始日志可以点「查看日志」。
+
+![Netfix 用户路径](assets/github/workflow.zh.png)
+
+有账号密码的 HTTP/HTTPS/SOCKS 代理会由 Netfix 本机转发；密码进入 macOS Keychain，不写进 shell 历史、日志或发布包。
+
+---
+
 ## ⚠️ 当前版本说明
 
 这是 **v0.2.0-qa.1 预览版**，DMG 还没有完成 Apple Developer ID 签名和公证。首次打开时，macOS 可能会提示“无法验证开发者”。请在 **系统设置 → 隐私与安全性** 里点击 **仍要打开**。现在适合技术测试用户试用；正式面向普通用户还需要 Developer ID 签名和公证。
@@ -42,16 +73,6 @@ curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scrip
 pip install -e .
 python3 netfix.py codex --json
 ```
-
----
-
-## 三步把已有代理部署到 Mac
-
-1. **复制**：去你的代理服务后台，复制一整行 HTTP/SOCKS5 连接参数。
-2. **粘贴**：在 Netfix 里粘贴，点「检查并保存到这台 Mac」。
-3. **确认**：检查通过后，点「开始使用这台 Mac 上网」。Netfix 会先备份当前网络设置，再应用代理。
-
-![Netfix 用户路径](assets/github/workflow.zh.png)
 
 ---
 
@@ -184,27 +205,6 @@ open .build/Netfix.app
 - **[健康基线快照](cases/2026-06-17-healthy-baseline.md)**：问题解决前后做对照，作为以后同类故障的快速比对模板。
 
 新 case 欢迎按 `cases/TEMPLATE.md` 提交，PR 前请读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [SECURITY.md](SECURITY.md)。
-
----
-
-## 代理到底复制什么
-
-不要复制"当前出口 IP"。出口 IP 只是检测结果，不能拿来连接。
-
-请从你自己合法获得的代理服务后台复制连接参数。Netfix 支持常见写法：
-
-```text
-socks5h://user:pass@proxy.example.com:1080
-http://user:pass@proxy.example.com:8000
-proxy.example.com:1080:user:pass
-host,port,username,password
-```
-
-在 App 里进入「设置 → 代理」，粘贴参数后点「检查并保存到这台 Mac」。检查通过后参数会保存到本机，需要让系统应用使用它时，再点「开始使用这台 Mac 上网」。有账号密码的 HTTP/HTTPS/SOCKS 代理会由 Netfix 本机转发，密码进入 macOS Keychain，不写进 shell 历史、日志或发布包。正式改系统代理前会备份原网络设置，失败或不用时可以恢复。
-
-边界也很清楚：Netfix 不卖代理，不内置节点，不承诺第三方服务一定可达，也不承诺任何特定出口质量。它只帮你解析、预检、保存、部署、监控和恢复你自己已有的连接参数。
-
-**暂不支持** `ss://`、`vmess://` 或 Clash/sing-box 订阅链接。
 
 ---
 
