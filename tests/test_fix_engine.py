@@ -185,6 +185,31 @@ class TestFixEngine(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertTrue(result["verification_failed"])
 
+    def test_ipv6_fallback_risk_after_disable_is_a_warning_not_failure(self):
+        engine = _make_engine_with_command(self.root, "echo fixed", tier=1)
+        engine.rules["fixes"]["disable-ipv6"] = engine.rules["fixes"].pop("test-command")
+        engine.rules["fixes"]["disable-ipv6"]["verify_diagnostic"] = "ipv6_leak"
+
+        with patch.object(diagnose, "run_diagnostic", return_value={
+            "name": "ipv6_leak",
+            "status": "warn",
+            "details": {
+                "public_ipv6": None,
+                "ipv6_default_route": True,
+                "proxy_active": True,
+                "leak_confirmed": False,
+                "fallback_risk": True,
+                "reason": "proxy active and IPv6 default route present; no public IPv6 observed",
+            },
+        }):
+            result = engine.execute("disable-ipv6")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["verified"])
+        self.assertFalse(result["verification_failed"])
+        self.assertEqual(result["verification_warning"]["code"], "ipv6_fallback_risk")
+
     def test_rollback_skips_dangerous_reverse_command(self):
         engine = FixEngine(journal_dir=self.root)
         engine._write_journal({

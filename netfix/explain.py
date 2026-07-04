@@ -97,11 +97,11 @@ _CAUSE_EXPLANATIONS: Dict[str, Dict[str, Any]] = {
         "manual_steps": ["如果你不想关闭系统 IPv6，可以在代理客户端里开启 IPv6 转发或关闭 IPv6。"],
     },
     "ipv6-fallback-risk": {
-        "headline": "IPv6 可能拖慢启动连接",
-        "explanation": "代理开启时系统仍有 IPv6 默认路由，但没有探到公网 IPv6。部分应用会先尝试 IPv6，再回退到 IPv4/代理路径，表现为启动时多次重连或卡住。",
-        "primary_action": "disable-ipv6",
+        "headline": "没有检测到 IPv6 泄漏",
+        "explanation": "代理开启时系统仍有 IPv6 默认路由，但没有探到公网 IPv6。一般可以继续使用；如果某些应用启动时反复重连，再考虑在代理客户端里开启 IPv6 转发或关闭 IPv6。",
+        "primary_action": None,
         "actions": [],
-        "manual_steps": ["如果你不想改系统 IPv6，可以先在代理客户端里开启 IPv6 转发或关闭 IPv6。"],
+        "manual_steps": ["如果某个 App 仍然启动卡住，再处理 IPv6；没有公网 IPv6 时不要把它当成已经泄漏。"],
     },
     "dhcp-misconfig": {
         "headline": "没拿到正确的上网地址",

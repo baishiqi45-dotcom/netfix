@@ -122,10 +122,10 @@ class TestExplainReport(unittest.TestCase):
             "manual_steps": [],
         }
         card = explain.explain_report(report, rules=_sample_rules())
-        self.assertEqual(card["headline"], "IPv6 可能拖慢启动连接")
+        self.assertEqual(card["headline"], "没有检测到 IPv6 泄漏")
         self.assertIn("没有探到公网 IPv6", card["explanation"])
-        self.assertEqual(card["primary_action"]["id"], "disable-ipv6")
-        self.assertTrue(card["primary_action"]["needs_confirm"])
+        self.assertEqual(card["primary_action"], None)
+        self.assertEqual(card["actions"], [])
         self.assertNotIn("Tier", str(card))
 
     def test_no_circular_technical_snapshot(self):

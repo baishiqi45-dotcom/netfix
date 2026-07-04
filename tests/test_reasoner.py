@@ -40,7 +40,7 @@ class TestReasoner(unittest.TestCase):
         self.assertIn("ipv6-fallback-risk", ids)
         self.assertNotIn("ipv6-exposed", ids)
         fallback = next(cause for cause in causes if cause["id"] == "ipv6-fallback-risk")
-        self.assertIn("disable-ipv6", fallback["fixes"])
+        self.assertEqual(fallback.get("fixes", []), [])
 
     def test_confirmed_ipv6_leak_is_reported_as_exposed(self):
         diagnostics = [

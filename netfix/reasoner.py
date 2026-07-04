@@ -188,11 +188,10 @@ def reason(env: Dict[str, Any], diagnostics: List[Dict[str, Any]]) -> List[Dict[
             add(
                 "ipv6-fallback-risk",
                 "代理开启时仍存在 IPv6 默认路由，部分目标可能先尝试 IPv6 后回退，导致启动变慢或重连",
-                0.65,
+                0.45,
                 manual_steps=[
-                    "如果你不想改系统 IPv6，可以先在代理客户端里开启 IPv6 转发或关闭 IPv6。",
+                    "没有检测到公网 IPv6 泄漏，一般可以继续使用；如果某些 App 启动卡住，再在代理客户端里开启 IPv6 转发或关闭 IPv6。",
                 ],
-                fixes=["disable-ipv6"],
             )
 
     # DNS leak.

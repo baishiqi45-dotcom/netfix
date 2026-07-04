@@ -839,6 +839,50 @@ def _friendly_diagnostic_status(status: Any) -> str:
     }.get(value, value or "未通过")
 
 
+def _ipv6_fallback_warning_from_diagnostic(diagnostic: Dict[str, Any]) -> Dict[str, Any] | None:
+    if diagnostic.get("name") != "ipv6_leak" or diagnostic.get("status") != "warn":
+        return None
+    details = diagnostic.get("details") if isinstance(diagnostic.get("details"), dict) else {}
+    if details.get("leak_confirmed") or details.get("public_ipv6"):
+        return None
+    if not details.get("fallback_risk"):
+        return None
+    return {
+        "code": "ipv6_fallback_risk",
+        "message": "没有检测到公网 IPv6 泄漏，但系统仍保留 IPv6 默认路由。一般可以继续使用；如果某些 App 启动卡住，再按建议处理 IPv6。",
+        "diagnostic": diagnostic.get("name"),
+    }
+
+
+def _friendly_diagnostic_reason(reason: Any) -> str:
+    text = str(reason or "").strip()
+    lower = text.lower()
+    if "proxy active and ipv6 default route present" in lower and "no public ipv6 observed" in lower:
+        return "没有检测到公网 IPv6 泄漏，只是系统仍保留 IPv6 默认路由。"
+    if "proxy active but public ipv6 address still reachable" in lower:
+        return "已经探测到公网 IPv6 仍可直连，IPv6 可能绕过代理。"
+    if "public ipv6 address present and default route exists" in lower:
+        return "已经探测到公网 IPv6 地址，并且系统存在 IPv6 默认路由。"
+    return text
+
+
+def _normalize_fix_verification_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    if not result.get("verification_failed"):
+        return result
+    diagnostic = result.get("verify_diagnostic") if isinstance(result.get("verify_diagnostic"), dict) else {}
+    warning = _ipv6_fallback_warning_from_diagnostic(diagnostic)
+    if not warning:
+        return result
+
+    normalized = dict(result)
+    normalized["ok"] = True
+    normalized["status"] = "ok"
+    normalized["verified"] = True
+    normalized["verification_failed"] = False
+    normalized["verification_warning"] = warning
+    return normalized
+
+
 def _first_failed_command_reason(result: Dict[str, Any]) -> str:
     for item in result.get("executed", []) or []:
         if not isinstance(item, dict) or item.get("ok", True):
@@ -869,7 +913,7 @@ def _with_user_facing_fix_error(result: Dict[str, Any]) -> Dict[str, Any]:
         reason = details.get("reason") or details.get("error") or diagnostic.get("error") or ""
         message = f"修复命令已执行，但复查还没通过：{name} {status}。"
         if reason:
-            message += f" 看到的情况：{str(reason)[:180]}"
+            message += f" 看到的情况：{_friendly_diagnostic_reason(reason)[:180]}"
         message += " 请重新诊断；如果仍然提示同一项，说明系统或路由器侧还保留了这条网络路径，需要继续按建议处理。"
         result["error"] = message
         result["reason_code"] = "fix_verification_failed"
@@ -928,6 +972,7 @@ def _execute_confirmed_fix(body: Dict[str, Any]) -> Tuple[int, Any]:
     )
     if body.get("dry_run"):
         return 200, result
+    result = _normalize_fix_verification_result(result)
     if not result.get("ok", True):
         return 400, _with_user_facing_fix_error(result)
 
@@ -939,7 +984,11 @@ def _execute_confirmed_fix(body: Dict[str, Any]) -> Tuple[int, Any]:
             "fix_result": result,
             "diagnosis": report,
         }
-    return 200, report.get("result") or report
+    payload = report.get("result") or report
+    if isinstance(payload, dict) and result.get("verification_warning"):
+        payload = dict(payload)
+        payload["fix_result"] = _strip_internal_secrets(result)
+    return 200, payload
 
 
 def _ensure_json_command(command: List[str], timeout: int) -> List[str]:

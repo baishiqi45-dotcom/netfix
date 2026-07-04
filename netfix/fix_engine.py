@@ -20,6 +20,26 @@ from netfix.safety import FixTier, audit_sudo, classify_command, is_dangerous
 from netfix.utils import admin_command_script, confirm, ensure_private_dir, human_time, run_command, secure_append_text
 
 
+def _acceptable_diagnostic_warning(fix_id: str, diagnostic: Dict[str, Any]) -> Dict[str, Any] | None:
+    """Return a non-failing verification warning for known residual states."""
+    if fix_id != "disable-ipv6":
+        return None
+    if diagnostic.get("name") != "ipv6_leak" or diagnostic.get("status") != "warn":
+        return None
+
+    details = diagnostic.get("details") if isinstance(diagnostic.get("details"), dict) else {}
+    if details.get("leak_confirmed") or details.get("public_ipv6"):
+        return None
+    if not details.get("fallback_risk"):
+        return None
+
+    return {
+        "code": "ipv6_fallback_risk",
+        "message": "没有检测到公网 IPv6 泄漏，但系统仍保留 IPv6 默认路由。一般可以继续使用；如果某些 App 启动卡住，再按建议处理 IPv6。",
+        "diagnostic": diagnostic.get("name"),
+    }
+
+
 class FixEngine:
     """Run fixes safely and keep an audit journal."""
 
@@ -286,7 +306,12 @@ class FixEngine:
                 verify_diagnostic, env or {}, core, timeout=20
             )
             result["verify_diagnostic"] = diag_res
-            result["verified"] = diag_res.get("status") == "ok"
+            warning = _acceptable_diagnostic_warning(fix_id, diag_res)
+            if warning:
+                result["verified"] = True
+                result["verification_warning"] = warning
+            else:
+                result["verified"] = diag_res.get("status") == "ok"
 
         # Journal entry.
         journal_entry = {

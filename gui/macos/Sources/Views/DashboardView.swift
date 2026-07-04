@@ -410,6 +410,9 @@ struct DashboardView: View {
         if lower.contains("connection refused") || lower.contains("could not connect") {
             return "目标服务或本机转发没有响应。可以先重试；如果是刚部署代理，请确认 Netfix 仍在运行。"
         }
+        if lower.contains("ipv6_leak") && lower.contains("no public ipv6 observed") {
+            return "没有检测到公网 IPv6 泄漏，只是系统仍保留 IPv6 默认路由。一般可以继续使用；如果某些 App 启动卡住，再按建议处理 IPv6。"
+        }
         if lower.contains("decode") || lower.contains("解析失败") {
             return "App 与后端返回的数据格式不匹配，可能是版本不一致。请尝试重启应用。"
         }
