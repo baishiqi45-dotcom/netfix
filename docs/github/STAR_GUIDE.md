@@ -7,7 +7,7 @@ Stars follow usefulness, not promotion. This file keeps the repository honest, a
 README 首屏必须在 5 秒内回答四个问题：
 
 1. **这是什么？** 帮普通 Mac 用户把买来的代理参数粘贴进去、检查可用、让 Mac 使用它的本地小工具。
-2. **能帮我做什么？** 代理连不上时，告诉我是不是地址抄错、节点挂了、账号失效、DNS 问题，还是系统代理没切过去。
+2. **能帮我做什么？** 代理连不上时，告诉我是不是地址抄错、代理线路暂时不可用、账号失效、DNS 问题，还是系统代理没切过去。
 3. **怎么安全试用？** 先看到 `--dry-run`，再看到未签名 QA 版的安装命令；恢复网络的方法一眼可见。
 4. **跟 Clash/Surge 有什么不同？** 它们负责转发流量，Netfix 负责告诉你“这台 Mac 现在能不能让代理连上”，并在改之前预检、改之后可恢复。
 
@@ -96,7 +96,7 @@ These exist already and are ready to be quoted (each must be sanitized before li
 ```text
 很多人买了代理，手机能用，Mac 却不会配。Netfix 是 macOS 上的本地小工具：
 把服务商给你的 host:port:用户名:密码 粘贴进来，它先测试、再保存到钥匙串、最后由你确认是否开始使用。
-连不上时，它会告诉你是地址抄错、节点挂了、账号失效，还是系统代理没切过去。
+连不上时，它会告诉你是地址抄错、代理线路暂时不可用、账号失效，还是系统代理没切过去。
 不需要 API Key，不上传密码，改网络前先备份，随时可恢复。
 ```
 
@@ -122,7 +122,7 @@ https://github.com/baishiqi45-dotcom/netfix/blob/main/cases/2026-06-29-%E6%99%AE
 【工具】做了个 macOS 本地网络自救小工具：粘贴代理参数 → 预检 → 一键使用
 
 场景：买了代理，手机能用，Mac 不会配；或者 Codex/GitHub/ChatGPT 突然连不上，
-不知道是 DNS、系统代理、节点挂了，还是账号失效。
+不知道是 DNS、系统代理、代理线路暂时不可用，还是账号失效。
 
 Netfix 做的事：
 • 粘贴 host:port:用户名:密码，先检查能不能连

@@ -48,7 +48,7 @@ USER_FACING_CODES: Dict[str, Dict[str, str]] = {
     },
     "timeout": {
         "headline": "网络太慢或代理没响应",
-        "next_step": "等几秒再点重试；如果是 SOCKS5/HTTP 一直超时，看下是不是节点挂了。",
+        "next_step": "等几秒再点重试；如果是 SOCKS5/HTTP 一直超时，看下是不是代理线路暂时不可用。",
         "technical": "向上游或代理建立的请求在时间内没收到响应。",
     },
     # ---- system proxy / routing ----

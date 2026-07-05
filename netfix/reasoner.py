@@ -97,7 +97,7 @@ def reason(env: Dict[str, Any], diagnostics: List[Dict[str, Any]]) -> List[Dict[
     elif direct == "fail" and via_proxy == "ok":
         add("direct-blocked", "直连无法访问 OpenAI，但经本地代理可通；代理当前正常", 0.95)
     elif direct == "fail" and via_proxy == "fail":
-        add("node-failed", "直连和走代理都无法访问 OpenAI，可能是当前节点挂了，或代理软件没运行", 0.8,
+        add("node-failed", "直连和走代理都无法访问 OpenAI，可能是代理线路暂时不可用，或代理软件没运行", 0.8,
             fixes=["check-proxy-core", "flush-dns-cache"],
             manual_steps=["在代理软件里切换到其他节点", "检查节点配置地址与端口"])
 

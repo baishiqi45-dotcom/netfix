@@ -74,7 +74,7 @@ struct ProxySetupView: View {
                 Text("复制下来大概是：地址:端口:用户名:密码 这种样子。不要只复制出口 IP。没有这类参数也可以先跳过。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                Picker("参数类型", selection: $proxyProtocolHint) {
+                Picker("服务商写的类型", selection: $proxyProtocolHint) {
                     Text("自动判断").tag("auto")
                     Text("HTTP 代理").tag("http")
                     Text("SOCKS5").tag("socks5h")

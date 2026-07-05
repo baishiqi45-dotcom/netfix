@@ -108,13 +108,18 @@ def wifi_signal(env: Dict[str, Any], core: Any, timeout: int = 30) -> Dict[str, 
         )
 
     rssi = info.get("rssi")
+    noise = info.get("noise")
+    snr = None
+    if isinstance(rssi, int) and isinstance(noise, int):
+        snr = rssi - noise
     status = status_from_rssi(rssi)
     details = {
         "source": source,
         "ssid": info.get("ssid"),
         "bssid": info.get("bssid"),
         "rssi": rssi,
-        "noise": info.get("noise"),
+        "noise": noise,
+        "snr": snr,
         "tx_rate": info.get("tx_rate"),
         "channel": info.get("channel"),
     }

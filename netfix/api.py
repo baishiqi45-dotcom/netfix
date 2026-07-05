@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from netfix import deepseek_sidecar, dashboard_state, keychain, llm_budget, llm_explain, llm_provider, logs, proxy_bridge, proxy_monitor_service, residential_proxy, services, settings, user_facing_errors
+from netfix import deepseek_sidecar, dashboard_state, keychain, llm_budget, llm_explain, llm_provider, logs, network_monitor_service, proxy_bridge, proxy_monitor_service, residential_proxy, services, settings, user_facing_errors
 from netfix.constants import JOURNAL_DIR, REPO_ROOT, RULES_DIR, VERSION
 from netfix.detect import detect_environment, get_core
 from netfix.fix_engine import FixEngine
@@ -1116,6 +1116,12 @@ class APIRequestHandler(BaseHTTPRequestHandler):
         if path == "/logs":
             return 200, logs.load_logs()
 
+        if path == "/timeline/lag":
+            return 200, logs.load_lag_timeline(limit=5)
+
+        if path == "/dashboard/insights":
+            return 200, network_monitor_service.dashboard_insights(sample=True)
+
         if path == "/support/bundle":
             return 200, _support_bundle()
 
@@ -1171,6 +1177,9 @@ class APIRequestHandler(BaseHTTPRequestHandler):
         if path == "/settings/privacy":
             return 200, {"ok": True, "settings": settings.get_privacy_settings()}
 
+        if path == "/settings/network-activity":
+            return 200, {"ok": True, "settings": settings.get_network_activity_settings()}
+
         if path == "/settings/proxy-bridge":
             return 200, {"ok": True, "settings": settings.get_proxy_bridge_settings()}
 
@@ -1182,6 +1191,12 @@ class APIRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/proxy/monitor":
             return 200, proxy_monitor_service.status()
+
+        if path == "/proxy/monitor/trend":
+            return 200, logs.load_proxy_health_trend(limit=10)
+
+        if path == "/network/monitor":
+            return 200, network_monitor_service.status()
 
         if path == "/proxy/bridge":
             return 200, _bridge_status_payload()
@@ -1271,6 +1286,14 @@ class APIRequestHandler(BaseHTTPRequestHandler):
             saved = settings.update_privacy_settings(body)
             prune = logs.apply_retention_policy()
             return 200, {"ok": True, "settings": saved, "retention": prune}
+
+        if path == "/settings/network-activity":
+            saved = settings.update_network_activity_settings(body)
+            if saved.get("enabled"):
+                monitor = network_monitor_service.start(interval=int(saved.get("interval") or 300), persist=False)
+            else:
+                monitor = network_monitor_service.stop(persist=False)
+            return 200, {"ok": True, "settings": saved, "monitor": monitor.get("monitor")}
 
         if path == "/settings/proxy-bridge":
             saved = settings.update_proxy_bridge_settings(body)
@@ -1455,6 +1478,13 @@ class APIRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/proxy/monitor/stop":
             return 200, proxy_monitor_service.stop()
+
+        if path == "/network/monitor/start":
+            interval = int(body.get("interval") or settings.get_network_activity_settings().get("interval") or 300)
+            return 200, network_monitor_service.start(interval=interval)
+
+        if path == "/network/monitor/stop":
+            return 200, network_monitor_service.stop()
 
         if path == "/proxy/bridge/recover":
             result = residential_proxy.recover_stale_bridge(
@@ -1675,6 +1705,7 @@ def run_server(host: str = "127.0.0.1", port: int = 0, timeout: int = 60) -> Non
     token_file = _write_api_token_file()
     print(f"netfix API listening on http://{addr[0]}:{addr[1]} token_file={token_file}", flush=True)
     proxy_monitor_service.restore_from_settings()
+    network_monitor_service.restore_from_settings()
     _record_startup_bridge_check()
 
     try:
@@ -1696,6 +1727,7 @@ def run_server(host: str = "127.0.0.1", port: int = 0, timeout: int = 60) -> Non
             server.server_close()
             _remove_api_token_file()
             proxy_monitor_service.stop(persist=False)
+            network_monitor_service.stop(persist=False)
 
 
 if __name__ == "__main__":

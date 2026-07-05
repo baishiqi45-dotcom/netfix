@@ -39,7 +39,7 @@ _STATES = {
     },
     "proxy_degraded": {
         "headline": "代理还在用，但刚才一次检测没通过",
-        "next_step": "点「一键诊断」看哪一项失败；常见原因是节点挂了或账号临时失效。",
+        "next_step": "点「一键诊断」看哪一项失败；常见原因是代理线路暂时不可用或账号临时失效。",
         "color": "orange",
         "icon": "exclamationmark.triangle.fill",
     },

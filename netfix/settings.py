@@ -65,6 +65,13 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "idle_timeout": 0,
         "updated_at": "",
     },
+    "network_activity": {
+        "enabled": False,
+        "interval": 300,
+        "lag_event_cooldown_s": 600,
+        "process_whitelist": [],
+        "updated_at": "",
+    },
     "privacy": {
         "log_retention_enabled": True,
         "log_retention_days": 7,
@@ -111,6 +118,14 @@ _PROXY_MONITOR_ALLOWED_KEYS = {
 _PROXY_BRIDGE_ALLOWED_KEYS = {
     "auto_restart_enabled",
     "idle_timeout",
+    "updated_at",
+}
+
+_NETWORK_ACTIVITY_ALLOWED_KEYS = {
+    "enabled",
+    "interval",
+    "lag_event_cooldown_s",
+    "process_whitelist",
     "updated_at",
 }
 
@@ -404,6 +419,69 @@ def update_proxy_bridge_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
     bridge["updated_at"] = str(bridge.get("updated_at") or "")
     save_settings(data)
     return get_proxy_bridge_settings()
+
+
+def _sanitize_process_whitelist(value: Any) -> list:
+    items = value if isinstance(value, list) else []
+    out = []
+    seen = set()
+    for item in items:
+        if isinstance(item, str):
+            match = item.strip()
+            label = match
+            enabled = True
+            reason = ""
+        elif isinstance(item, dict):
+            match = str(item.get("match") or item.get("process") or "").strip()
+            label = str(item.get("label") or match).strip()
+            enabled = bool(item.get("enabled", True))
+            reason = str(item.get("reason") or "").strip()
+        else:
+            continue
+        if not match:
+            continue
+        match = match[:80]
+        key = match.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "match": match,
+            "label": label[:80] or match,
+            "reason": reason[:80],
+            "enabled": enabled,
+        })
+        if len(out) >= 30:
+            break
+    return out
+
+
+def get_network_activity_settings() -> Dict[str, Any]:
+    """Return local network-activity detection preferences."""
+    data = load_settings().get("network_activity", {})
+    out = copy.deepcopy(data) if isinstance(data, dict) else copy.deepcopy(DEFAULT_SETTINGS["network_activity"])
+    out["enabled"] = bool(out.get("enabled", False))
+    out["interval"] = max(60, min(int(out.get("interval") or 300), 3600))
+    out["lag_event_cooldown_s"] = max(60, min(int(out.get("lag_event_cooldown_s") or 600), 86400))
+    out["process_whitelist"] = _sanitize_process_whitelist(out.get("process_whitelist"))
+    out["updated_at"] = str(out.get("updated_at") or "")
+    return out
+
+
+def update_network_activity_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Persist local network-activity detection preferences."""
+    data = load_settings()
+    network_activity = data.setdefault("network_activity", copy.deepcopy(DEFAULT_SETTINGS["network_activity"]))
+    for key, value in payload.items():
+        if key in _NETWORK_ACTIVITY_ALLOWED_KEYS:
+            network_activity[key] = value
+    network_activity["enabled"] = bool(network_activity.get("enabled", False))
+    network_activity["interval"] = max(60, min(int(network_activity.get("interval") or 300), 3600))
+    network_activity["lag_event_cooldown_s"] = max(60, min(int(network_activity.get("lag_event_cooldown_s") or 600), 86400))
+    network_activity["process_whitelist"] = _sanitize_process_whitelist(network_activity.get("process_whitelist"))
+    network_activity["updated_at"] = str(network_activity.get("updated_at") or "")
+    save_settings(data)
+    return get_network_activity_settings()
 
 
 def get_privacy_settings() -> Dict[str, Any]:

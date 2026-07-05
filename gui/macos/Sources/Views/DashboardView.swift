@@ -236,6 +236,9 @@ struct DashboardView: View {
                 responsivenessMetric(label: "延迟", value: summary.latencyLabel, hint: summary.latencyHint, color: summary.latencyColor)
                 responsivenessMetric(label: "稳定性", value: summary.stabilityLabel, hint: summary.stabilityHint, color: summary.stabilityColor)
             }
+            networkActivityTop3Section
+            recentLagEventsSection
+            proxyHealthTrendSection
             if let hog = summary.bandwidthHint {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: hog.icon)
@@ -284,7 +287,7 @@ struct DashboardView: View {
                     if summary.responsivenessRPM == nil && summary.baseRTTMs == nil
                         && summary.dlThroughputKbps == nil && summary.ulThroughputKbps == nil
                         && summary.packetLossPercent == nil {
-                        Text("还没有 network_quality / bandwidth_hog 诊断数据。点「一键诊断」后会出现在这里。")
+                        Text("还没有速度、延迟和后台占用数据。点「一键诊断」后会出现在这里。")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -320,6 +323,203 @@ struct DashboardView: View {
         .padding(8)
         .background(color.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    @ViewBuilder
+    private var networkActivityTop3Section: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("谁在占用网络", systemImage: "arrow.up.arrow.down.circle")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer()
+                if viewModel.insights?.monitor?.running == true {
+                    Text("后台检测中")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                }
+            }
+
+            if let activity = viewModel.insights?.networkActivity {
+                let processes = activity.topProcesses.filter { $0.ignored != true }
+                if activity.state == "notSampled" {
+                    Text("还没采样。点「一键诊断」后会显示哪个 App 在大量上传或下载。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if activity.state == "unavailable" {
+                    Text(activity.headline ?? "暂时没法读取后台占用。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if processes.isEmpty {
+                    Text(activity.headline ?? "没有看到明显后台占用。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(processes.prefix(3)) { process in
+                        HStack(spacing: 8) {
+                            Image(systemName: process.direction == "upload" ? "arrow.up.circle" : "arrow.down.circle")
+                                .foregroundStyle(process.direction == "upload" ? Color.orange : Color.blue)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(process.displayName) · \(directionLabel(process.direction)) · \(rateLabel(process))")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                Text(process.direction == "upload" ? "如果 Codex 或视频会议很卡，先暂停它试试。" : "如果网页和 AI 都变慢，先暂停下载任务试试。")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("别再提醒这个 App") {
+                                Task { await viewModel.ignoreNetworkProcess(process) }
+                            }
+                            .font(.caption2)
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+            } else {
+                Text("还没读取后台占用。点「一键诊断」后会显示。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    @ViewBuilder
+    private var recentLagEventsSection: some View {
+        let events = Array((viewModel.insights?.lagEvents ?? []).reversed())
+        VStack(alignment: .leading, spacing: 6) {
+            Label("最近卡顿", systemImage: "clock.arrow.circlepath")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+            if events.isEmpty {
+                Text("最近没有记录到明显卡顿。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(events.prefix(2)), id: \.stableID) { event in
+                    lagEventRow(event)
+                }
+                if events.count > 2 {
+                    DisclosureGroup("再看 \(min(events.count - 2, 3)) 条") {
+                        ForEach(Array(events.dropFirst(2).prefix(3)), id: \.stableID) { event in
+                            lagEventRow(event)
+                        }
+                    }
+                    .font(.caption)
+                }
+            }
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    @ViewBuilder
+    private var proxyHealthTrendSection: some View {
+        let trend = viewModel.insights?.proxyHealthTrend
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("代理近 10 次", systemImage: "waveform.path.ecg")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer()
+                proxyHealthDots(trend?.samples ?? [])
+            }
+            Text(proxyTrendSummary(trend))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func lagEventRow(_ event: LagEventSummary) -> some View {
+        let top = event.evidence?.topProcesses?.first
+        let cause = event.suspectedCause?.isEmpty == false
+            ? event.suspectedCause!
+            : (top?.displayName ?? "后台任务")
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.headline ?? "网络有点卡")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Text("\(eventTimeLabel(event.timestamp)) · 疑似：\(cause)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+    }
+
+    private func proxyHealthDots(_ samples: [ProxyHealthSample]) -> some View {
+        HStack(spacing: 3) {
+            ForEach(Array(samples.suffix(10).enumerated()), id: \.offset) { _, sample in
+                Circle()
+                    .fill(proxyHealthColor(sample.status))
+                    .frame(width: 7, height: 7)
+            }
+            if samples.isEmpty {
+                Text("暂无")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func proxyHealthColor(_ status: String?) -> Color {
+        switch status {
+        case "ok": return .green
+        case "warn": return .orange
+        case "fail": return .red
+        default: return .secondary
+        }
+    }
+
+    private func proxyTrendSummary(_ trend: ProxyHealthTrend?) -> String {
+        guard let trend, !trend.samples.isEmpty else {
+            return "还没有代理健康记录。保存代理后，Netfix 会记录脱敏的成功/失败趋势。"
+        }
+        let ok = trend.okCount ?? 0
+        let warn = trend.warnCount ?? 0
+        let fail = trend.failCount ?? 0
+        let latency = trend.medianLatencyMs.map { " · 中位延迟 \($0)ms" } ?? ""
+        return "近 \(trend.samples.count) 次：\(ok) 次正常，\(warn) 次不稳，\(fail) 次失败\(latency)。"
+    }
+
+    private func directionLabel(_ value: String?) -> String {
+        switch value {
+        case "upload": return "上传"
+        case "download": return "下载"
+        default: return "占用"
+        }
+    }
+
+    private func rateLabel(_ process: NetworkActivityProcess) -> String {
+        if let bucket = process.rateBucket, !bucket.isEmpty {
+            return bucket
+        }
+        guard let kbps = process.rateKbps else { return "粗略速率未知" }
+        if kbps >= 1_000 {
+            return String(format: "%.1f Mbps", kbps / 1_000)
+        }
+        return "\(Int(kbps)) Kbps"
+    }
+
+    private func eventTimeLabel(_ timestamp: String?) -> String {
+        guard let timestamp, !timestamp.isEmpty else { return "刚才" }
+        let formatter = ISO8601DateFormatter()
+        if let date = formatter.date(from: timestamp) {
+            let relative = RelativeDateTimeFormatter()
+            relative.unitsStyle = .short
+            return relative.localizedString(for: date, relativeTo: Date())
+        }
+        return timestamp
     }
 
     private enum PlainSummaryKey { case network, proxy, targets }
@@ -1370,6 +1570,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var activeJobID: String?
     @Published private var proxyBridgeState: ProxyBridgeResponse?
     @Published var dashboardState: DashboardUIStateInfo?
+    @Published var insights: DashboardInsightsResponse?
     @Published var hasCloudAI: Bool = false
     @Published var copyFeedback: String?
 
@@ -1468,6 +1669,7 @@ final class DashboardViewModel: ObservableObject {
                 Task {
                     await refreshProxyUsage()
                     await refreshDashboardState()
+                    await refreshDashboardInsights()
                     await refreshCloudAIStatus()
                 }
             }
@@ -1481,6 +1683,42 @@ final class DashboardViewModel: ObservableObject {
             dashboardState = DashboardUIStateInfo(response.uiState)
         } catch {
             // 静默失败：dashboard state 是装饰性信息，主流程不依赖它。
+        }
+    }
+
+    func refreshDashboardInsights() async {
+        guard let client else { return }
+        do {
+            insights = try await client.dashboardInsights()
+        } catch {
+            // insights 是辅助信息，失败时不阻断诊断、部署和修复主流程。
+        }
+    }
+
+    func ignoreNetworkProcess(_ process: NetworkActivityProcess) async {
+        guard let client else { return }
+        let match = (process.process?.isEmpty == false ? process.process : process.label) ?? ""
+        guard !match.isEmpty else { return }
+        do {
+            let current = try await client.networkActivitySettings().settings
+            var rules = current.processWhitelist
+            if !rules.contains(where: { $0.match.caseInsensitiveCompare(match) == .orderedSame }) {
+                rules.append(NetworkActivityIgnoreRule(
+                    match: match,
+                    label: process.displayName,
+                    reason: "user_ignored",
+                    enabled: true
+                ))
+            }
+            _ = try await client.saveNetworkActivitySettings(
+                enabled: current.enabled,
+                interval: current.interval,
+                processWhitelist: rules
+            )
+            copyFeedback = "以后不再提醒 \(process.displayName)。"
+            await refreshDashboardInsights()
+        } catch {
+            copyFeedback = "保存忽略名单失败：\(error.localizedDescription)"
         }
     }
 
@@ -1628,6 +1866,7 @@ final class DashboardViewModel: ObservableObject {
         )
         await refreshProxyUsage()
         await refreshDashboardState()
+        await refreshDashboardInsights()
     }
 
     func fix() async {
@@ -1653,6 +1892,7 @@ final class DashboardViewModel: ObservableObject {
             let result = try await client.executeFix(fixId: action.id, timeout: 60)
             self.report = result
             headline = result.explanation?.headline ?? result.summaryHeadline
+            await refreshDashboardInsights()
         } catch {
             errorMessage = error.localizedDescription
             headline = "修复失败"
@@ -1680,6 +1920,7 @@ final class DashboardViewModel: ObservableObject {
                     errorMessage = "已恢复代理部署前网络，但重新检测失败：\(error.localizedDescription)"
                 }
                 await refreshProxyUsage()
+                await refreshDashboardInsights()
                 stopWork()
                 return
             }
@@ -1688,6 +1929,7 @@ final class DashboardViewModel: ObservableObject {
                 self.report = result
                 headline = "已恢复"
                 await refreshProxyUsage()
+                await refreshDashboardInsights()
                 stopWork()
                 return
             } else {
@@ -1726,6 +1968,7 @@ final class DashboardViewModel: ObservableObject {
                 "正在汇总结果…",
             ]
         )
+        await refreshDashboardInsights()
     }
 
     func loadLogs() async {
@@ -2037,7 +2280,7 @@ final class DashboardViewModel: ObservableObject {
                 if rpm < 200 { return ("偶尔卡", "tortoise", Color.orange, "响应性 \(rpm)，AI 流式输出会出现延迟。") }
                 return ("顺畅", "hare.fill", Color.green, "响应性 \(rpm)，日常使用没问题。")
             }
-            return ("未知", "questionmark.circle", Color.secondary, "还没有 network_quality 诊断结果。")
+            return ("未知", "questionmark.circle", Color.secondary, "还没有速度和延迟检测结果。")
         }()
 
         let bandwidthHint: BandwidthHint? = {

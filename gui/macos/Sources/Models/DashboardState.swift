@@ -27,7 +27,7 @@ enum DashboardUIState: String, CaseIterable {
         case .noProxy:        return "点「粘贴代理参数」，把服务商给的那一行粘进来。"
         case .proxySaved:     return "点「开始使用代理」。"
         case .proxyInUse:     return "Netfix 会持续检查网络状态；出问题时主动提示你。"
-        case .proxyDegraded:  return "点「一键诊断」看哪一项失败；常见原因是节点挂了或账号临时失效。"
+        case .proxyDegraded:  return "点「一键诊断」看哪一项失败；常见原因是代理线路暂时不可用或账号临时失效。"
         case .networkRecovery: return "点「恢复原来的网络设置」；不想恢复也可以直接退出 App。"
         case .ready:          return "保持现状即可；想再确认一次就点「一键诊断」。"
         }

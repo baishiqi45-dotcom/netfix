@@ -186,6 +186,10 @@ actor APIClient {
         try await get(path: "dashboard/state", timeout: 20)
     }
 
+    func dashboardInsights() async throws -> DashboardInsightsResponse {
+        try await get(path: "dashboard/insights", timeout: 25)
+    }
+
     func userFacingErrors() async throws -> UserFacingErrorsResponse {
         try await get(path: "user-facing/errors", timeout: 20)
     }
@@ -477,6 +481,26 @@ actor APIClient {
 
     func proxyMonitor() async throws -> ProxyMonitorResponse {
         try await get(path: "proxy/monitor", timeout: 20)
+    }
+
+    func networkActivitySettings() async throws -> NetworkActivitySettingsResponse {
+        try await get(path: "settings/network-activity", timeout: 20)
+    }
+
+    func saveNetworkActivitySettings(
+        enabled: Bool,
+        interval: Int,
+        processWhitelist: [NetworkActivityIgnoreRule]
+    ) async throws -> NetworkActivitySettingsSaveResponse {
+        try await post(
+            path: "settings/network-activity",
+            body: [
+                "enabled": enabled,
+                "interval": interval,
+                "process_whitelist": processWhitelist.map { $0.apiBody() },
+            ],
+            timeout: 20
+        )
     }
 
     func proxyBridge() async throws -> ProxyBridgeResponse {

@@ -149,7 +149,7 @@ _CAUSE_EXPLANATIONS: Dict[str, Dict[str, Any]] = {
     },
     "node-failed": {
         "headline": "当前代理节点连不上目标服务",
-        "explanation": "直连和走代理都无法访问目标服务，可能是当前节点挂了，或代理软件没运行。",
+        "explanation": "直连和走代理都无法访问目标服务，可能是代理线路暂时不可用，或代理软件没运行。",
         "primary_action": "check-proxy-core",
         "actions": ["flush-dns-cache"],
         "manual_steps": ["在代理软件里切换到其他节点", "检查节点配置地址与端口"],

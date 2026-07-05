@@ -150,7 +150,7 @@ enum UserFacingMessages {
         .timeout: UserFacingMessage(
             code: "timeout",
             headline: "网络太慢或代理没响应",
-            nextStep: "等几秒再点重试；如果是 SOCKS5/HTTP 一直超时，看下是不是节点挂了。",
+            nextStep: "等几秒再点重试；如果是 SOCKS5/HTTP 一直超时，看下是不是代理线路暂时不可用。",
             technical: "请求在时间内没收到响应。"
         ),
         .systemProxyNotSet: UserFacingMessage(

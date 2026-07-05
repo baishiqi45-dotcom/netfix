@@ -69,6 +69,11 @@ struct SettingsView: View {
     @State private var logRetentionDays = 7
     @State private var saveLatestReport = true
     @State private var persistProxyIdentityReport = false
+    @State private var networkActivityEnabled = false
+    @State private var networkActivityInterval = 300
+    @State private var networkActivityWhitelist: [NetworkActivityIgnoreRule] = []
+    @State private var networkActivityDraft = ""
+    @State private var networkActivityStatus: String?
     @State private var privacyStatus: String?
     @State private var notificationStatus = UNAuthorizationStatus.notDetermined
     @State private var loadError: String?
@@ -306,7 +311,7 @@ struct SettingsView: View {
 
     private var generalSection: some View {
         Section {
-            Toggle("登录时启动 netfix", isOn: $launchAtLogin)
+            Toggle("登录时自动打开 Netfix", isOn: $launchAtLogin)
                 .onChange(of: launchAtLogin) { newValue in
                     setLoginItem(enabled: newValue)
                 }
@@ -355,7 +360,7 @@ struct SettingsView: View {
     private var generalTab: some View {
         Form {
             Section {
-                Toggle("登录时启动 netfix", isOn: $launchAtLogin)
+                Toggle("登录时自动打开 Netfix", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { newValue in
                         setLoginItem(enabled: newValue)
                     }
@@ -522,10 +527,10 @@ struct SettingsView: View {
                     HStack {
                         Image(systemName: "sparkles")
                             .foregroundStyle(.purple)
-                        Text("让云端 AI 解释诊断报告")
+                        Text("让 AI 帮我看诊断报告")
                             .font(.headline)
                         Spacer()
-                        Toggle("让云端 AI 解释诊断报告", isOn: $llmEnabled)
+                        Toggle("让 AI 帮我看诊断报告", isOn: $llmEnabled)
                             .labelsHidden()
                     }
 
@@ -574,7 +579,7 @@ struct SettingsView: View {
                     Text("严格").tag("strict")
                 }
 
-                Picker("发报告前", selection: $uploadConsent) {
+                Picker("发送给 AI 前", selection: $uploadConsent) {
                     Text("每次问我").tag("ask_each_time")
                     Text("总是发送").tag("always")
                     Text("从不发送").tag("never")
@@ -793,14 +798,14 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    Picker("参数类型", selection: $proxyProtocolHint) {
+                    Picker("服务商写的类型", selection: $proxyProtocolHint) {
                         Text("自动判断").tag("auto")
                         Text("HTTP 代理").tag("http")
                         Text("SOCKS5").tag("socks5h")
                     }
                     .pickerStyle(.segmented)
 
-                    Text("如果服务商后台只给四段参数，例如 host:port:username:password，直接粘贴即可；如果服务商明确写 SOCKS5，就把参数类型切到 SOCKS5。")
+                    Text("如果服务商后台只给四段参数，例如 host:port:username:password，直接粘贴即可；如果服务商明确写 SOCKS5，就把这里切到 SOCKS5。")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
@@ -1271,6 +1276,58 @@ private func cleanupDuplicateProxyProfiles() async {
                 }
             }
 
+            Section("卡顿检测与隐私") {
+                Toggle("显示哪个 App 正在大量上传或下载", isOn: $networkActivityEnabled)
+                Stepper("每 \(networkActivityInterval / 60) 分钟检查一次", value: $networkActivityInterval, in: 60...3600, step: 60)
+
+                Text("只记录 App 名称、上传/下载方向和粗略速度；不看网址、远端 IP、聊天内容，也不抓包。只有明显卡顿事件会写进本地日志。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if networkActivityWhitelist.isEmpty {
+                    Text("哪些 App 不提醒我：暂无。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("哪些 App 不提醒我")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(networkActivityWhitelist) { rule in
+                            HStack {
+                                Text(rule.displayLabel)
+                                Spacer()
+                                Button("恢复提醒") {
+                                    networkActivityWhitelist.removeAll { $0.match == rule.match }
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                            .font(.caption)
+                        }
+                    }
+                }
+
+                HStack {
+                    TextField("App 名称，比如百度网盘或 iCloud", text: $networkActivityDraft)
+                    Button("添加") {
+                        addNetworkActivityIgnoreRule()
+                    }
+                    .disabled(networkActivityDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                HStack {
+                    Button("保存卡顿检测设置") {
+                        Task { await saveNetworkActivitySettings() }
+                    }
+                    .disabled(!backend.isReady)
+                    if let networkActivityStatus {
+                        Text(networkActivityStatus)
+                            .font(.caption)
+                            .foregroundStyle(networkActivityStatus.hasPrefix("失败") ? Color.red : Color.secondary)
+                    }
+                }
+            }
+
             Section("本地数据") {
                 Toggle("保留最近诊断报告", isOn: $saveLatestReport)
                 Toggle("自动裁剪事件日志", isOn: $logRetentionEnabled)
@@ -1515,6 +1572,10 @@ private func cleanupDuplicateProxyProfiles() async {
             logRetentionDays = privacy.logRetentionDays
             saveLatestReport = privacy.saveLatestReport
             persistProxyIdentityReport = privacy.persistProxyIdentityReport
+            let networkActivity = try await client.networkActivitySettings().settings
+            networkActivityEnabled = networkActivity.enabled
+            networkActivityInterval = networkActivity.interval
+            networkActivityWhitelist = networkActivity.processWhitelist
             aiStatus = nil
         } catch {
             aiStatus = "失败：\(error.localizedDescription)"
@@ -2780,6 +2841,43 @@ private func cleanupDuplicateProxyProfiles() async {
         } catch {
             let card = UserFacingMessages.classify(error.localizedDescription)
             proxyStatus = "\(card.headline)\n\(card.nextStep)"
+        }
+    }
+
+    private func addNetworkActivityIgnoreRule() {
+        let match = networkActivityDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !match.isEmpty else { return }
+        if !networkActivityWhitelist.contains(where: { $0.match.caseInsensitiveCompare(match) == .orderedSame }) {
+            networkActivityWhitelist.append(NetworkActivityIgnoreRule(
+                match: match,
+                label: match,
+                reason: "user_ignored",
+                enabled: true
+            ))
+        }
+        networkActivityDraft = ""
+    }
+
+    private func saveNetworkActivitySettings() async {
+        guard let client = client() else {
+            networkActivityStatus = "失败：Netfix 还没准备好。"
+            return
+        }
+        do {
+            let response = try await client.saveNetworkActivitySettings(
+                enabled: networkActivityEnabled,
+                interval: networkActivityInterval,
+                processWhitelist: networkActivityWhitelist
+            )
+            networkActivityEnabled = response.settings.enabled
+            networkActivityInterval = response.settings.interval
+            networkActivityWhitelist = response.settings.processWhitelist
+            networkActivityStatus = networkActivityEnabled
+                ? "已保存。Netfix 会在本机后台轻量检测卡顿。"
+                : "已关闭后台卡顿检测。"
+        } catch {
+            let card = UserFacingMessages.classify(error.localizedDescription)
+            networkActivityStatus = "\(card.headline)\n\(card.nextStep)"
         }
     }
 

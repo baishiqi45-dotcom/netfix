@@ -58,3 +58,76 @@ def test_load_events_redacts_legacy_plaintext_events():
             assert "user:***@" in encoded
     finally:
         logs.EVENTS_FILE = original_events
+
+
+def test_proxy_health_trend_strips_urls_from_legacy_events():
+    original_events = logs.EVENTS_FILE
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            logs.EVENTS_FILE = Path(tmp) / "events.jsonl"
+            logs.EVENTS_FILE.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-01T00:00:00+00:00",
+                        "type": "proxy_monitor",
+                        "status": "ok",
+                        "proxy_check": {
+                            "profile_id": "p1",
+                            "status": "ok",
+                            "auth": "not_required",
+                            "target": "https://www.gstatic.com/generate_204",
+                            "checked_via": "http://proxy.example.com:8000",
+                            "latency_ms": 120,
+                            "http_code": 204,
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = logs.load_proxy_health_trend(limit=10)
+            encoded = json.dumps(result, ensure_ascii=False)
+            assert result["ok"]
+            assert result["samples"][0]["latency_ms"] == 120
+            assert "gstatic" not in encoded
+            assert "proxy.example.com" not in encoded
+            assert "checked_via" not in encoded
+            assert "target" not in encoded
+    finally:
+        logs.EVENTS_FILE = original_events
+
+
+def test_proxy_health_trend_categorizes_error_without_host_leak():
+    original_events = logs.EVENTS_FILE
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            logs.EVENTS_FILE = Path(tmp) / "events.jsonl"
+            logs.EVENTS_FILE.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-01T00:00:00+00:00",
+                        "type": "proxy_monitor",
+                        "status": "fail",
+                        "proxy_check": {
+                            "profile_id": "p1",
+                            "status": "fail",
+                            "error": "connect to proxy.example.com:8000 timed out",
+                            "latency_ms": 0,
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = logs.load_proxy_health_trend(limit=10)
+            encoded = json.dumps(result, ensure_ascii=False)
+            assert result["ok"]
+            assert result["samples"][0]["error"] == "timeout"
+            assert "proxy.example.com" not in encoded
+            assert "8000" not in encoded
+    finally:
+        logs.EVENTS_FILE = original_events

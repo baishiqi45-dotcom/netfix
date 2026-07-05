@@ -881,6 +881,54 @@ class TestAPI(unittest.TestCase):
         self.assertTrue(stopped["ok"])
         stop.assert_called_once()
 
+    def test_dashboard_insights_endpoint_uses_network_monitor_service(self):
+        payload = {
+            "ok": True,
+            "network_activity": {"state": "quiet", "top_processes": []},
+            "lag_events": [],
+            "proxy_health_trend": {"samples": []},
+        }
+        with patch("netfix.api.network_monitor_service.dashboard_insights", return_value=payload) as insights:
+            data = self._get("/dashboard/insights")
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["network_activity"]["state"], "quiet")
+        insights.assert_called_once_with(sample=True)
+
+    def test_network_activity_settings_endpoint_can_start_and_stop_monitor(self):
+        saved_on = {"enabled": True, "interval": 120, "process_whitelist": []}
+        saved_off = {"enabled": False, "interval": 120, "process_whitelist": []}
+        with patch("netfix.api.settings.update_network_activity_settings", return_value=saved_on) as save, \
+                patch("netfix.api.network_monitor_service.start", return_value={"ok": True, "monitor": {"running": True}}) as start:
+            data = self._post_json("/settings/network-activity", {"enabled": True, "interval": 120})
+        self.assertTrue(data["ok"])
+        self.assertTrue(data["monitor"]["running"])
+        save.assert_called_once()
+        start.assert_called_once_with(interval=120, persist=False)
+
+        with patch("netfix.api.settings.update_network_activity_settings", return_value=saved_off), \
+                patch("netfix.api.network_monitor_service.stop", return_value={"ok": True, "monitor": {"running": False}}) as stop:
+            data = self._post_json("/settings/network-activity", {"enabled": False})
+        self.assertTrue(data["ok"])
+        self.assertFalse(data["monitor"]["running"])
+        stop.assert_called_once_with(persist=False)
+
+    def test_network_monitor_status_and_controls(self):
+        with patch("netfix.api.network_monitor_service.status", return_value={"ok": True, "monitor": {"running": False}}):
+            status = self._get("/network/monitor")
+        self.assertTrue(status["ok"])
+        self.assertFalse(status["monitor"]["running"])
+
+        with patch("netfix.api.network_monitor_service.start", return_value={"ok": True, "monitor": {"running": True, "interval": 180}}) as start:
+            data = self._post_json("/network/monitor/start", {"interval": 180})
+        self.assertTrue(data["ok"])
+        self.assertTrue(data["monitor"]["running"])
+        start.assert_called_once_with(interval=180)
+
+        with patch("netfix.api.network_monitor_service.stop", return_value={"ok": True, "monitor": {"running": False}}) as stop:
+            stopped = self._post_json("/network/monitor/stop", {})
+        self.assertTrue(stopped["ok"])
+        stop.assert_called_once()
+
     def test_proxy_profile_save_can_start_monitor_without_system_apply(self):
         saved = {
             "ok": True,

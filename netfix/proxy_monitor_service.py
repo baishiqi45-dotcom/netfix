@@ -160,11 +160,12 @@ def _record_check(profile: Dict[str, Any], result: Dict[str, Any], run_count: in
     check = dict(result.get("proxy_check") or {})
     check["checked_at"] = _utc_now()
     repair_actions = repair_actions_for_check(check)
-    check["repair_actions"] = repair_actions
+    check_summary = logs.proxy_check_summary(check)
+    check_summary["repair_actions"] = repair_actions
     updated = dict(profile)
-    updated["last_check"] = check
+    updated["last_check"] = check_summary
     settings.upsert_proxy_profile(updated)
-    status = str(check.get("status") or "fail")
+    status = str(check_summary.get("status") or "fail")
     event = {
         "type": "proxy_monitor",
         "event": "proxy_check",
@@ -173,7 +174,7 @@ def _record_check(profile: Dict[str, Any], result: Dict[str, Any], run_count: in
         "profile_name": profile.get("name"),
         "run": run_count,
         "headline": f"Proxy {profile.get('name') or profile.get('id')} {status}",
-        "proxy_check": check,
+        "proxy_check": check_summary,
         "repair_actions": repair_actions,
     }
     logs.append_event(event)

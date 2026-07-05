@@ -77,6 +77,19 @@ class TestLocalDiagnostics(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["details"]["packet_loss"], 0.0)
 
+    def test_wifi_signal_includes_snr_without_changing_source_fields(self):
+        with patch("netfix.layers.local._wdutil_available", return_value=True), \
+             patch("netfix.layers.local.run_command", return_value={
+                 "ok": True,
+                 "stdout": "SSID : Office\nBSSID : aa:bb:cc:dd:ee:ff\nRSSI : -55\nNoise : -92\nTx Rate : 866\nChannel : 44",
+                 "stderr": "",
+                 "returncode": 0,
+             }):
+            result = diagnose.run_diagnostic("wifi_signal", {}, None, 10)
+        self.assertEqual(result["details"]["rssi"], -55)
+        self.assertEqual(result["details"]["noise"], -92)
+        self.assertEqual(result["details"]["snr"], 37)
+
     def test_ipv4_route_ok(self):
         outputs = {"route -n get": "interface: en0\ngateway: 192.168.1.1"}
         with patch("netfix.layers._helpers.run_command", side_effect=self._fake_run(outputs)):

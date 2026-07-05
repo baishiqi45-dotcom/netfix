@@ -112,7 +112,7 @@ def test_macos_proxy_tab_prioritizes_plain_one_paste_wizard():
     assert "去哪里复制？" in settings
     assert "复制包含地址、端口、用户名、密码的整行" in settings
     assert "proxy.example.com:8001:username:password" in settings
-    assert 'Picker("参数类型", selection: $proxyProtocolHint)' in settings
+    assert 'Picker("服务商写的类型", selection: $proxyProtocolHint)' in settings
     assert "自动判断" in settings
     assert "如果服务商明确写 SOCKS5" in settings
     assert "保存不会改网络" in settings

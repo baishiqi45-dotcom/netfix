@@ -43,9 +43,14 @@ class TestProxyMonitorService(unittest.TestCase):
         saved = upsert.call_args.args[0]
         self.assertEqual(saved["last_check"]["status"], "ok")
         self.assertIn("checked_at", saved["last_check"])
+        self.assertNotIn("target", saved["last_check"])
+        self.assertNotIn("checked_via", saved["last_check"])
         event = append_event.call_args.args[0]
         self.assertEqual(event["type"], "proxy_monitor")
         self.assertEqual(event["status"], "ok")
+        self.assertNotIn("target", event["proxy_check"])
+        self.assertNotIn("checked_via", event["proxy_check"])
+        self.assertNotIn("proxy.example.com", str(event))
 
     def test_failed_check_records_repair_actions(self):
         failed_check = dict(CHECK)

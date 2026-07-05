@@ -34,7 +34,7 @@ def test_macos_proxy_import_preview_is_visible_and_secret_safe():
     assert "打开你的代理服务后台" in settings
     assert "复制包含地址、端口、用户名、密码的整行" in settings
     assert "proxy.example.com:8001:username:password" in settings
-    assert 'Picker("参数类型", selection: $proxyProtocolHint)' in settings
+    assert 'Picker("服务商写的类型", selection: $proxyProtocolHint)' in settings
     assert "自动判断" in settings
     assert "SOCKS5" in settings
     assert "不要只复制出口 IP" in settings

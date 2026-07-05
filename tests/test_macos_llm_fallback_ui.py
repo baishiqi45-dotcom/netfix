@@ -104,7 +104,7 @@ def test_macos_ai_settings_has_plain_minimax_setup_path():
     assert 'Text("普通设置")' in view
     assert 'Text("诊断与日志")' in view
     assert 'Text("高级与开发者")' in view
-    assert "让云端 AI 解释诊断报告" in view
+    assert "让 AI 帮我看诊断报告" in view
     assert "这是可选的 AI 看报告功能" in view
     assert "没有 API Key 也能诊断、部署代理和处理 IPv6" in view
     assert "用 MiniMax 配置" in view
