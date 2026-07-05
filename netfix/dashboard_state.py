@@ -21,19 +21,19 @@ from typing import Any, Dict, Optional
 _STATES = {
     "no_proxy": {
         "headline": "还没有粘贴代理参数",
-        "next_step": "点下方「粘贴代理参数」，把服务商后台给的那一行粘进来。",
+        "next_step": "点「粘贴代理参数」，把服务商给的那一行粘进来。",
         "color": "secondary",
         "icon": "tray",
     },
     "proxy_saved": {
         "headline": "代理已保存到这台 Mac，但还没开始使用",
-        "next_step": "点「开始使用这台 Mac 上网」，Netfix 会先备份当前网络设置再帮你切。",
+        "next_step": "点「开始使用代理」。",
         "color": "blue",
         "icon": "tray.and.arrow.down.fill",
     },
     "proxy_in_use": {
-        "headline": "正在通过 Netfix 使用代理上网",
-        "next_step": "后台健康监控会持续检查；出问题时 Netfix 会主动提示。",
+        "headline": "正在使用代理上网",
+        "next_step": "Netfix 会持续检查网络状态；出问题时主动提示你。",
         "color": "green",
         "icon": "checkmark.shield.fill",
     },
@@ -45,7 +45,7 @@ _STATES = {
     },
     "network_recovery": {
         "headline": "系统网络需要恢复",
-        "next_step": "到「部署代理 → 更多 → 恢复原来的网络设置」点恢复；不想恢复也可以直接退出 App。",
+        "next_step": "点「恢复原来的网络设置」；不想恢复也可以直接退出 App。",
         "color": "red",
         "icon": "arrow.uturn.backward.circle.fill",
     },

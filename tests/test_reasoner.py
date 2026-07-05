@@ -19,7 +19,8 @@ class TestReasoner(unittest.TestCase):
         causes = reasoner.reason({}, diagnostics)
 
         self.assertEqual(causes[0]["id"], "mixed-proxy-pac")
-        self.assertIn("PAC", causes[0]["description"])
+        self.assertIn("手动代理", causes[0]["description"])
+        self.assertIn("自动代理", causes[0]["description"])
         self.assertIn("disable-auto-proxy", causes[0]["fixes"])
 
     def test_ipv6_fallback_risk_not_reported_as_exposed(self):

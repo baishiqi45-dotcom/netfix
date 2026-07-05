@@ -59,18 +59,18 @@ USER_FACING_CODES: Dict[str, Dict[str, str]] = {
     },
     "system_proxy_recovery_required": {
         "headline": "系统网络需要恢复",
-        "next_step": "到「部署代理 → 更多 → 恢复原来的网络设置」，点「恢复」。",
+        "next_step": "到「设置 → 代理 → 恢复原来的网络设置」，点「恢复」。",
         "technical": "Detect stale proxy bridge; last apply journal exists but bridge is not alive.",
     },
     "auto_proxy_pac_conflict": {
         "headline": "手动代理和自动代理同时开着，App 启动容易卡住",
-        "next_step": "在「部署代理 → 更多」里关闭自动代理（PAC / WPAD），只留 Netfix 帮你设的代理。",
+        "next_step": "打开 Netfix 设置，在代理区域关闭自动代理（PAC / WPAD），只留 Netfix 帮你设的代理。",
         "technical": "Mixed PAC + manual proxy detected; recommend disable-auto-proxy.",
     },
     # ---- IPv6 ----
     "ipv6_leak_confirmed": {
         "headline": "IPv6 可能正在绕过代理",
-        "next_step": "到「设置 → AI 编程助手」外的「部署代理 → 更多」里点关闭 IPv6；之后能完整走代理。",
+        "next_step": "打开 Netfix 设置，在代理区域关闭 IPv6；之后能完整走代理。",
         "technical": "Confirmed IPv6 leakage: public IPv6 reachable while proxy active.",
     },
     "ipv6_fallback_risk": {
@@ -102,23 +102,23 @@ USER_FACING_CODES: Dict[str, Dict[str, str]] = {
         "technical": "用户在 Tier 2 确认弹窗点了取消；fix.status = cancelled。",
     },
     "fix_verification_failed": {
-        "headline": "修复命令跑了，但复查还没过",
+        "headline": "处理了一下，但还没完全好",
         "next_step": "再点一次诊断；如果仍然提示同一项，按下面手动步骤继续处理。",
         "technical": "fix.executed == ok 但 verify_diagnostic.status != ok。",
     },
     "fix_command_failed": {
         "headline": "修复没有跑完",
-        "next_step": "点「查看日志」，把最近一次失败记录拿来排查；可以换个时间再试一次。",
+        "next_step": "重试一次；如果仍然失败，再点「查看日志」把最近一次失败记录拿来排查。",
         "technical": "fix.executed[*].ok == false；具体见 executed 数组里的 stderr。",
     },
     # ---- backend / app ----
     "backend_unreachable": {
-        "headline": "App 没连上后端",
+        "headline": "Netfix 本地服务还没准备好",
         "next_step": "等几秒重试；如果一直是这个，退出 Netfix 再打开一次。",
-        "technical": "本地 HTTP API 没有响应或 token 校验失败；常见于后端未启动。",
+        "technical": "本地 HTTP API 没有响应或 token 校验失败；常见于本地服务未启动。",
     },
     "decode_failed": {
-        "headline": "App 与后端版本对不上",
+        "headline": "App 和本地服务没对上话",
         "next_step": "点「查看日志」记录错误；退出 Netfix 重开一次；仍然出错就到 GitHub 提 issue。",
         "technical": "JSON 数据结构与客户端解码模型不一致；常见于版本不匹配。",
     },
@@ -147,12 +147,12 @@ USER_FACING_CODES: Dict[str, Dict[str, str]] = {
 
 
 _HTTP_STATUS_FALLBACK: Dict[int, Tuple[str, str, str]] = {
-    400: ("请求被后端拒绝", "点重试或检查输入；如果仍然失败就查看日志。", "HTTP 400 通常表示请求参数不被后端接受。"),
-    401: ("后端要求登录或 token", "重启 Netfix；问题持续就看日志。", "HTTP 401，多为本地 API token 失效。"),
+    400: ("请求被本地服务拒绝", "点重试或检查输入；如果仍然失败就查看日志。", "HTTP 400 通常表示请求参数不被本地服务接受。"),
+    401: ("本地服务要求登录或 token", "重启 Netfix；问题持续就看日志。", "HTTP 401，多为本地 API token 失效。"),
     403: ("操作被拒绝（权限或来源）", "按上面给的授权说明再试一次。", "HTTP 403 cross-origin / 权限不足。"),
-    404: ("后端没找到这条", "可能接口改版；查看日志或更新 Netfix。", "HTTP 404。"),
+    404: ("本地服务没找到这条", "可能接口改版；查看日志或更新 Netfix。", "HTTP 404。"),
     409: ("需要先确认", "按提示在 App 里点确认。", "HTTP 409 confirmation required。"),
-    502: ("后端链路失败", "稍后重试；持续出错就查看日志。", "HTTP 502 upstream failure。"),
+    502: ("本地服务链路失败", "稍后重试；持续出错就查看日志。", "HTTP 502 upstream failure。"),
 }
 
 
@@ -209,7 +209,7 @@ def lookup_http_status(status: int) -> Dict[str, str]:
             "code": f"http_{status}",
             "headline": f"请求返回 {status}",
             "next_step": "重试一次；若仍失败查看日志或重新打开 Netfix。",
-            "technical": f"后端返回 HTTP {status}。",
+            "technical": f"本地服务返回 HTTP {status}。",
         }
     return {"code": f"http_{status}", "headline": entry[0], "next_step": entry[1], "technical": entry[2]}
 
@@ -293,6 +293,7 @@ def scrub_internal_phrases(text: str) -> str:
         "tier 3": "只能手动",
         "verification_failed": "复查还没过",
         "exit IP": "出口 IP",
+        "backend": "本地服务",
     }
     lower = out.lower()
     for src, dst in replacements.items():

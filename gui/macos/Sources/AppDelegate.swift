@@ -98,7 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showAISettings() {
-        UserDefaults.standard.set("ai", forKey: "netfix.settings.selectedTab")
+        UserDefaults.standard.set("advanced", forKey: "netfix.settings.selectedTab")
         showSettings()
     }
 

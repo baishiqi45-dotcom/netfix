@@ -11,7 +11,8 @@ def test_macos_settings_has_app_bundle_mcp_copy_tab():
     source = SETTINGS.read_text(encoding="utf-8")
 
     assert "private var agentTab: some View" in source
-    assert 'Label("AI 编程助手", systemImage: "terminal")' in source
+    # AI 编程助手入口已经合并到「AI 设置」分层下，不再单独是一个 Tab。
+    assert "aiLayerView" in source
     assert "把 Netfix 接进 AI 编程助手" in source
     assert "已下载 App 的用户不用找仓库脚本" in source
     assert 'appendingPathComponent("netfix/mcp_server.py")' in source

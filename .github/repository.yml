@@ -1,6 +1,6 @@
 repository:
   name: netfix
-  description: "Mac 网络自救工具：Codex、ChatGPT、GitHub 连不上时先定位层级；也能粘贴 HTTP/SOCKS5 代理、预检、部署和回滚。"
+  description: "买了代理不会配 Mac？把 HTTP/SOCKS5 参数粘贴进来，Netfix 先检查、再保存、一键开始使用，还能随时恢复原来的网络设置。"
   private: false
   has_issues: true
   has_projects: false

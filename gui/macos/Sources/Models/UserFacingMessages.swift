@@ -82,16 +82,16 @@ enum UserFacingMessages {
             return table[.decodeFailed] ?? unknownCard()
         }
         if lower.contains("401") {
-            return UserFacingMessage(code: "http_401", headline: "后端要求登录或 token", nextStep: "重启 Netfix；问题持续就看日志。", technical: "HTTP 401")
+            return UserFacingMessage(code: "http_401", headline: "本地服务要求登录或 token", nextStep: "重启 Netfix；问题持续就看日志。", technical: "HTTP 401")
         }
         if lower.contains("403") {
             return UserFacingMessage(code: "http_403", headline: "操作被拒绝（权限或来源）", nextStep: "按上面给的授权说明再试一次。", technical: "HTTP 403")
         }
         if lower.contains("404") {
-            return UserFacingMessage(code: "http_404", headline: "后端没找到这条", nextStep: "可能接口改版；查看日志或更新 Netfix。", technical: "HTTP 404")
+            return UserFacingMessage(code: "http_404", headline: "本地服务没找到这条", nextStep: "可能接口改版；查看日志或更新 Netfix。", technical: "HTTP 404")
         }
         if lower.contains("502") {
-            return UserFacingMessage(code: "http_502", headline: "后端链路失败", nextStep: "稍后重试；持续出错就查看日志。", technical: "HTTP 502")
+            return UserFacingMessage(code: "http_502", headline: "本地服务链路失败", nextStep: "稍后重试；持续出错就查看日志。", technical: "HTTP 502")
         }
         return unknownCard(technical: text)
     }
@@ -159,19 +159,19 @@ enum UserFacingMessages {
         .systemProxyRecoveryRequired: UserFacingMessage(
             code: "system_proxy_recovery_required",
             headline: "系统网络需要恢复",
-            nextStep: "到「部署代理 → 更多 → 恢复原来的网络设置」点恢复。",
+            nextStep: "到「设置 → 代理 → 恢复原来的网络设置」点恢复。",
             technical: "Stale proxy bridge detected."
         ),
         .autoProxyPacConflict: UserFacingMessage(
             code: "auto_proxy_pac_conflict",
             headline: "手动代理和自动代理同时开着，App 启动容易卡住",
-            nextStep: "在「部署代理 → 更多」里关闭自动代理（PAC / WPAD），只留 Netfix 帮你设的代理。",
+            nextStep: "打开 Netfix 设置，在代理区域关闭自动代理（PAC / WPAD），只留 Netfix 帮你设的代理。",
             technical: "Mixed PAC + manual proxy detected."
         ),
         .ipv6LeakConfirmed: UserFacingMessage(
             code: "ipv6_leak_confirmed",
             headline: "IPv6 可能正在绕过代理",
-            nextStep: "到「部署代理 → 更多」里点关闭 IPv6；之后能完整走代理。",
+            nextStep: "打开 Netfix 设置，在代理区域关闭 IPv6；之后能完整走代理。",
             technical: "Confirmed IPv6 leak."
         ),
         .ipv6FallbackRisk: UserFacingMessage(
@@ -206,25 +206,25 @@ enum UserFacingMessages {
         ),
         .fixVerificationFailed: UserFacingMessage(
             code: "fix_verification_failed",
-            headline: "修复命令跑了，但复查还没过",
+            headline: "处理了一下，但还没完全好",
             nextStep: "再点一次诊断；如果仍然提示同一项，按下面手动步骤继续处理。",
             technical: "fix.executed ok，但 verify_diagnostic 仍非 ok。"
         ),
         .fixCommandFailed: UserFacingMessage(
             code: "fix_command_failed",
             headline: "修复没有跑完",
-            nextStep: "点「查看日志」，把最近一次失败记录拿来排查；可以换个时间再试一次。",
+            nextStep: "重试一次；如果仍然失败，再点「查看日志」把最近一次失败记录拿来排查。",
             technical: "fix.executed[*].ok == false。"
         ),
         .backendUnreachable: UserFacingMessage(
             code: "backend_unreachable",
-            headline: "App 没连上后端",
+            headline: "Netfix 本地服务还没准备好",
             nextStep: "等几秒重试；如果一直是这个，退出 Netfix 再打开一次。",
-            technical: "本地 HTTP API 没有响应或 token 校验失败。"
+            technical: "本地 HTTP API 没有响应或 token 校验失败；常见于本地服务未启动。"
         ),
         .decodeFailed: UserFacingMessage(
             code: "decode_failed",
-            headline: "App 与后端版本对不上",
+            headline: "App 和本地服务没对上话",
             nextStep: "点「查看日志」记录错误；退出 Netfix 重开一次；仍然出错就到 GitHub 提 issue。",
             technical: "JSON 数据结构与客户端解码模型不一致。"
         ),

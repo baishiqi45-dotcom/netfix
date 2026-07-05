@@ -7,24 +7,22 @@
 ![license: MIT](https://img.shields.io/badge/license-MIT-green)
 ![platform: macOS](https://img.shields.io/badge/platform-macOS-blue)
 ![privacy: local first](https://img.shields.io/badge/privacy-local--first-0f766e)
-![agent: MCP ready](https://img.shields.io/badge/agent-MCP%20ready-111827)
 
-## What it does
+> **Bought a proxy but can't configure your Mac? Paste the connection line, let Netfix precheck it, then start using it with one click.**
 
-Got legal proxy credentials but do not know how to configure your Mac? Netfix lets you paste one complete proxy line, precheck it, save it locally, and only then confirm whether this Mac should start using it.
+Netfix is a small macOS utility: paste the connection parameters from your proxy provider, it tests whether they work, saves them to the macOS Keychain, and only then asks you to confirm whether this Mac should start using the proxy. It backs up your original network settings before changing anything, so you can restore them in one click.
 
 When Codex, ChatGPT, GitHub, or any API client suddenly stops connecting, **Netfix also tells you which layer broke**:
-DNS, system proxy, proxy core (xray / sing-box / mihomo / Clash), IPv6, TLS, the target service — or the proxy parameters you pasted yourself.
-It only changes network settings after you confirm, and it backs up your original config so you can roll back with one click.
+DNS, system proxy, the proxy app you are running (xray / sing-box / mihomo / Clash), IPv6, TLS, the target service — or the proxy parameters you pasted yourself.
 No API key is required. If you do configure one, the model only ever sees an on-device-redacted version of the diagnostic.
 
 ## Get started in 60 seconds
 
 > ⚠️ The current DMG is the **v0.2.0-qa.1 preview build, unsigned and not notarized**. On first launch, macOS will block it; open System Settings → Privacy & Security → Open Anyway. This is suitable for technical testing, not a finished non-technical public installer.
 
-Prepare the HTTP/SOCKS5 connection parameters from your proxy provider dashboard, such as `host:port:username:password`. Do not paste the current exit IP from an IP lookup page; that is only a result, not a connection string. Netfix is not a Clash client and does not import subscriptions; `ss://`, `vmess://`, and Clash/sing-box subscription links are not supported yet.
+Prepare the HTTP/SOCKS5 connection parameters from your proxy provider dashboard, such as `host:port:username:password`. These are usually found under "Connection Info", "Endpoint", or "My Subscription" in the provider dashboard — copy the HTTP or SOCKS5 line, not the current exit IP shown on an IP lookup page. Netfix is not a Clash client and does not import subscriptions; `ss://`, `vmess://`, and Clash/sing-box subscription links are not supported yet.
 
-Requirements: macOS 13 or newer; Apple Silicon and Intel Macs are both in scope; macOS may ask for your local password when system proxy settings are changed; optional MCP setup needs `python3`.
+Requirements: macOS 13 or newer; Apple Silicon and Intel Macs are both in scope; macOS may ask for your local password when system proxy settings are changed.
 
 ```bash
 # Preview installer actions without installing or changing configuration
@@ -33,11 +31,8 @@ curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scrip
 # Technical testers: install Netfix.app (QA build, unsigned)
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
 
-# Uninstall the local app and Codex MCP registration
+# Uninstall the local app
 curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash -s -- --uninstall
-
-# Developer / Agent users: one-line Codex MCP registration. Kimi / Claude / Cursor / MiniMax-compatible hosts can use the printed stdio config.
-curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_codex_mcp_from_github.sh | bash
 ```
 
 From source:

@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage("netfix.iconStyle") private var iconStyle = 0
     @AppStorage("netfix.autoFixTier1") private var autoFixTier1 = false
     @AppStorage("netfix.settings.selectedTab") private var selectedSettingsTab = "general"
+    @AppStorage("netfix.settings.showAdvanced") private var showAdvanced = false
     @State private var showAdvancedAISettings = false
     @State private var showAdvancedProxyControls = false
 
@@ -72,44 +73,24 @@ struct SettingsView: View {
     @State private var showClearAllDataConfirmation = false
 
     var body: some View {
-        TabView(selection: $selectedSettingsTab) {
-            generalTab
-                .tabItem {
-                    Label("通用", systemImage: "gear")
-                }
-                .tag("general")
+        VStack(spacing: 0) {
+            settingsLayerPicker
 
-            proxyTab
-                .tabItem {
-                    Label("部署代理", systemImage: "point.3.connected.trianglepath.dotted")
-                }
-                .tag("proxy")
+            Divider()
 
-            agentTab
-                .tabItem {
-                    Label("AI 编程助手", systemImage: "terminal")
+            Group {
+                switch selectedSettingsTab {
+                case "diagnostics":
+                    diagnosticsLayerView
+                case "advanced":
+                    advancedLayerView
+                default:
+                    generalLayerView
                 }
-                .tag("agent")
-
-            aiTab
-                .tabItem {
-                    Label("AI", systemImage: "sparkles")
-                }
-                .tag("ai")
-
-            permissionsTab
-                .tabItem {
-                    Label("权限", systemImage: "lock.shield")
-                }
-                .tag("permissions")
-
-            aboutTab
-                .tabItem {
-                    Label("关于", systemImage: "info.circle")
-                }
-                .tag("about")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(width: 720, height: 620)
+        .frame(width: 720, height: 640)
         .task {
             await refreshNotificationStatus()
             await loadServiceGroups()
@@ -133,7 +114,7 @@ struct SettingsView: View {
         } message: {
             Text("这会删除 Netfix 最近报告、事件日志、AI 本地预算账本、非敏感设置，以及已保存的 AI 密钥和代理密码。不会删除 App 本体或系统网络配置。")
         }
-        .confirmationDialog("开始使用这台 Mac 上网？", isPresented: $showSystemProxyConfirmation, titleVisibility: .visible) {
+        .confirmationDialog("开始使用代理？", isPresented: $showSystemProxyConfirmation, titleVisibility: .visible) {
             Button("确认开始使用", role: .none) {
                 if let profile = pendingSystemProxyProfile {
                     Task { await applyProxyProfile(profile, mode: "system", confirmed: true) }
@@ -192,6 +173,160 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - 顶层分层选择器
+
+    private var settingsLayerPicker: some View {
+        Picker("设置分组", selection: $selectedSettingsTab) {
+            Text("普通设置").tag("general")
+            Text("诊断与日志").tag("diagnostics")
+            Text("高级与开发者").tag("advanced")
+        }
+        .pickerStyle(.segmented)
+        .padding(12)
+        .help("普通设置 = 开机启动、通知、代理部署、权限、本地数据；诊断与日志 = 服务分组、本地报告和日志清理；高级与开发者 = 让 AI 解释报告、接进 AI 编程助手、底层系统设置。")
+    }
+
+    // MARK: - 普通设置（默认）
+
+    private var generalLayerView: some View {
+        Form {
+            generalSection
+            proxyTab
+            permissionsTab
+            aboutSection
+        }
+        .padding(.top, 4)
+    }
+
+    // MARK: - 诊断与日志
+
+    private var diagnosticsLayerView: some View {
+        Form {
+            diagnosticsIntroSection
+            servicesTab
+        }
+        .padding(.top, 4)
+    }
+
+    private var diagnosticsIntroSection: some View {
+        Section {
+            Text("这里按分组查看可检测的网站，以及管理本地报告和日志。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - 高级与开发者
+
+    private var advancedLayerView: some View {
+        Form {
+            advancedIntroSection
+            aiLayerView
+            advancedProxyControlsSection
+        }
+        .padding(.top, 4)
+    }
+
+    // MARK: - AI 与 MCP（合并到高级与开发者）
+
+    private var aiLayerView: some View {
+        Form {
+            aiTab
+            agentTab
+        }
+        .padding(.top, 4)
+    }
+
+    private var advancedProxyControlsSection: some View {
+        Section("高级代理与系统设置") {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("重启时自动恢复上次代理连接", isOn: $proxyBridgeAutoRestartEnabled)
+                    .onChange(of: proxyBridgeAutoRestartEnabled) { newValue in
+                        Task { await saveProxyBridgeSettings(autoRestartEnabled: newValue) }
+                    }
+                Text("只在上次部署没有正常退出时尝试恢复；不会静默修改网络代理设置。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Text(proxyBridgeLabel(proxyBridgeState))
+                    .font(.caption)
+                    .foregroundStyle(proxyBridgeState?.lifecycle?.needsAttention == true || proxyBridgeState?.staleCheck?.recoveryAvailable == true ? Color.orange : Color.secondary)
+
+                HStack {
+                    Button("刷新部署状态") {
+                        Task { await loadProxyBridge() }
+                    }
+                    .disabled(!backend.isReady)
+
+                    Button("修复失效部署", role: .destructive) {
+                        showBridgeRecoveryConfirmation = true
+                    }
+                    .disabled(!backend.isReady || !(proxyBridgeState?.staleCheck?.recoveryAvailable ?? false))
+
+                    Button("恢复原来的网络设置", role: .destructive) {
+                        showProxyRollbackConfirmation = true
+                    }
+                    .disabled(!backend.isReady)
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private var advancedIntroSection: some View {
+        Section {
+            Text("这一层给高级用户和排查故障时使用。普通使用只需要看「普通设置」。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var generalSection: some View {
+        Section {
+            Toggle("登录时启动 netfix", isOn: $launchAtLogin)
+                .onChange(of: launchAtLogin) { newValue in
+                    setLoginItem(enabled: newValue)
+                }
+
+            Toggle("启用通知", isOn: $notificationsEnabled)
+                .onChange(of: notificationsEnabled) { newValue in
+                    if newValue {
+                        requestNotificationAuthorization()
+                    }
+                }
+
+            Toggle("自动处理低风险问题", isOn: $autoFixTier1)
+                .help("只自动处理不会改系统网络设置的小问题")
+
+            Picker("菜单栏图标样式", selection: $iconStyle) {
+                Text("彩色状态灯").tag(0)
+                Text("单色图标").tag(1)
+            }
+        }
+    }
+
+    private var aboutSection: some View {
+        Section("关于") {
+            HStack {
+                Text("Netfix 版本")
+                Spacer()
+                Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.2.0")
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Button("打开本地 Web 控制台（高级）") {
+                    if let url = backend.apiURL {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .disabled(!backend.isReady)
+                Button("退出 netfix") {
+                    NSApplication.shared.terminate(nil)
+                }
+            }
+        }
+    }
+
     // MARK: - General
 
     private var generalTab: some View {
@@ -209,7 +344,8 @@ struct SettingsView: View {
                         }
                     }
 
-                Toggle("自动修复不用动系统设置的小问题", isOn: $autoFixTier1)
+                Toggle("自动处理低风险问题", isOn: $autoFixTier1)
+                .help("只自动处理不会改系统网络设置的小问题")
 
                 Picker("菜单栏图标样式", selection: $iconStyle) {
                     Text("彩色状态灯").tag(0)
@@ -363,10 +499,10 @@ struct SettingsView: View {
                     HStack {
                         Image(systemName: "sparkles")
                             .foregroundStyle(.purple)
-                        Text("让 AI 解释诊断结果")
+                        Text("让云端 AI 解释诊断报告")
                             .font(.headline)
                         Spacer()
-                        Toggle("启用", isOn: $llmEnabled)
+                        Toggle("让云端 AI 解释诊断报告", isOn: $llmEnabled)
                             .labelsHidden()
                     }
 
@@ -530,7 +666,7 @@ struct SettingsView: View {
                 proxyStepBadge("4", "开始使用")
             }
 
-            Text("保存不会改网络；点“开始使用这台 Mac 上网”才会让浏览器和其他 App 使用这个代理。")
+            Text("保存不会改网络；点“开始使用代理”才会让浏览器和其他 App 使用这个代理。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -591,6 +727,10 @@ struct SettingsView: View {
                         Spacer()
                     }
 
+                    Text("把你的代理参数粘贴进来，确认可用后再开始使用。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     proxyDeployStepGuide
 
                     proxyPasteGuideCard
@@ -631,9 +771,9 @@ struct SettingsView: View {
                     .pickerStyle(.segmented)
 
                     Picker("参数类型", selection: $proxyProtocolHint) {
-                        Text("自动判断（大多数选这个）").tag("auto")
+                        Text("自动判断").tag("auto")
                         Text("HTTP 代理").tag("http")
-                        Text("SOCKS5 代理").tag("socks5h")
+                        Text("SOCKS5").tag("socks5h")
                     }
                     .pickerStyle(.segmented)
 
@@ -663,7 +803,7 @@ struct SettingsView: View {
                     }
 
                     Toggle("保存后自动启动健康监控", isOn: $proxyStartMonitorOnSave)
-                    Text("检查并保存只是把参数放到本机，暂不影响浏览器。要开始使用，请在已保存代理里点“开始使用这台 Mac 上网”。")
+                    Text("检查并保存只是把参数放到本机，暂不影响浏览器。要开始使用，请在已保存代理里点“开始使用代理”。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -699,14 +839,14 @@ struct SettingsView: View {
                         Button {
                             Task { await prepareProxyDeployment(profile) }
                         } label: {
-                            Label("下一步：开始使用这台 Mac 上网", systemImage: "play.circle.fill")
+                            Label("下一步：开始使用代理", systemImage: "play.circle.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(!backend.isReady)
                     }
                 } else {
-                        Text("下一步：粘贴整行参数 → 检查并保存到这台 Mac → 开始使用这台 Mac 上网。")
+                        Text("下一步：粘贴整行参数 → 检查并保存到这台 Mac → 开始使用代理。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -751,47 +891,6 @@ struct SettingsView: View {
                         Task { await stopProxyMonitor() }
                     }
                     .disabled(!backend.isReady || !(proxyMonitorState?.running ?? false))
-                }
-            }
-
-            Section {
-                DisclosureGroup("更多：导出、恢复网络设置", isExpanded: $showAdvancedProxyControls) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        if let proxyExportResult {
-                            proxyExportBlock(proxyExportResult)
-                            Divider()
-                        }
-
-                        Toggle("重启时自动恢复上次代理连接", isOn: $proxyBridgeAutoRestartEnabled)
-                            .onChange(of: proxyBridgeAutoRestartEnabled) { newValue in
-                                Task { await saveProxyBridgeSettings(autoRestartEnabled: newValue) }
-                            }
-                        Text("只在上次部署没有正常退出时尝试恢复；不会静默修改网络代理设置。")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-
-                        Text(proxyBridgeLabel(proxyBridgeState))
-                            .font(.caption)
-                            .foregroundStyle(proxyBridgeState?.lifecycle?.needsAttention == true || proxyBridgeState?.staleCheck?.recoveryAvailable == true ? Color.orange : Color.secondary)
-
-                        HStack {
-                            Button("刷新部署状态") {
-                                Task { await loadProxyBridge() }
-                            }
-                            .disabled(!backend.isReady)
-
-                            Button("修复失效部署", role: .destructive) {
-                                showBridgeRecoveryConfirmation = true
-                            }
-                            .disabled(!backend.isReady || !(proxyBridgeState?.staleCheck?.recoveryAvailable ?? false))
-
-                            Button("恢复原来的网络设置", role: .destructive) {
-                                showProxyRollbackConfirmation = true
-                            }
-                            .disabled(!backend.isReady)
-                        }
-                    }
-                    .padding(.top, 4)
                 }
             }
         }
@@ -907,7 +1006,7 @@ struct SettingsView: View {
 
             HStack(spacing: 12) {
                 Link("支持网站", destination: URL(string: "https://github.com/netfix/netfix")!)
-                Button("开发者：打开本地 API") {
+                Button("打开本地 Web 控制台（高级）") {
                     if let url = backend.apiURL {
                         NSWorkspace.shared.open(url)
                     }
@@ -1162,7 +1261,7 @@ struct SettingsView: View {
                             .font(.caption2)
                             .foregroundStyle(check.status == "ok" ? Color.secondary : Color.orange)
                     } else {
-                        Text("已保存但尚未验证。点“开始使用这台 Mac 上网”前，建议先检查或保存时自动检测。")
+                        Text("已保存但尚未验证。点“开始使用代理”前，建议先检查或保存时自动检测。")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -1172,7 +1271,7 @@ struct SettingsView: View {
                     Button {
                         Task { await prepareProxyDeployment(profile) }
                     } label: {
-                        Label("开始使用这台 Mac 上网", systemImage: "play.circle.fill")
+                        Label("开始使用代理", systemImage: "play.circle.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!backend.isReady)
@@ -1397,7 +1496,7 @@ struct SettingsView: View {
             return "这组参数还不能让这台 Mac 使用"
         }
         if decision.systemApply?.status == "available" {
-            return "可以开始使用这台 Mac 上网"
+            return "可以开始使用代理"
         }
         return "已识别代理参数"
     }
@@ -1410,7 +1509,7 @@ struct SettingsView: View {
         case "blocked":
             return "还缺信息，先修正代理地址、端口、账号或密码。"
         case "available":
-            return "保存到这台 Mac 后，可以点“开始使用这台 Mac 上网”。"
+            return "保存到这台 Mac 后，可以点“开始使用代理”。"
         default:
             return "保存后可以继续检测，再决定是否让这台 Mac 使用。"
         }
@@ -2010,11 +2109,11 @@ struct SettingsView: View {
             proxyExportResult = nil
             if result.ok {
                 if result.monitor?.running == true {
-                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库，后台监控已启动。还没有影响浏览器，下一步点“开始使用这台 Mac 上网”。"
+                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库，后台监控已启动。还没有影响浏览器，下一步点“开始使用代理”。"
                 } else if result.monitor != nil {
-                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库，但后台监控未启动。还没有影响浏览器，下一步点“开始使用这台 Mac 上网”。"
+                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库，但后台监控未启动。还没有影响浏览器，下一步点“开始使用代理”。"
                 } else {
-                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库。还没有影响浏览器，下一步点“开始使用这台 Mac 上网”。"
+                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库。还没有影响浏览器，下一步点“开始使用代理”。"
                 }
             } else {
                 lastSavedProxyProfile = nil
@@ -2059,7 +2158,7 @@ struct SettingsView: View {
             proxyValidateResult = nil
             proxyExportResult = nil
             proxyStatus = result.ok
-                ? "已更新代理连接参数。新密码已写入本机密码库；要切全机流量请点“开始使用这台 Mac 上网”。"
+                ? "已更新代理连接参数。新密码已写入本机密码库；要切全机流量请点“开始使用代理”。"
                 : "失败：\(result.error ?? "无法更新凭据")"
             if result.monitor == nil {
                 await loadProxyMonitor()
@@ -2287,7 +2386,7 @@ struct SettingsView: View {
                 return
             }
             if response.ok && response.status == "pending_confirmation" {
-                proxyStatus = "还需要确认。请重新点“开始使用这台 Mac 上网”，并在中文确认框里确认。"
+                proxyStatus = "还需要确认。请重新点“开始使用代理”，并在中文确认框里确认。"
                 return
             }
             proxyStatus = "失败：\(response.friendlyFailureMessage)"
@@ -2335,7 +2434,7 @@ struct SettingsView: View {
                     : "恢复状态：\(response.status ?? "unknown")。\(stop)"
                 await loadProxyBridge()
             } else {
-                proxyStatus = "失败：\(response.error ?? response.status ?? "无法恢复桥接")"
+                proxyStatus = "失败：\(response.error ?? response.status ?? "无法恢复原来的网络设置")"
             }
         } catch {
             let card = UserFacingMessages.classify(error.localizedDescription)

@@ -594,7 +594,8 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(data["reason_code"], "fix_verification_failed")
         # Plain-language headline now lives in netfix/user_facing_errors.py;
         # keep the assertion in sync with that central table.
-        self.assertIn("复查", data["error"])
+        self.assertIn("处理了一下", data["error"])
+        self.assertIn("还没完全好", data["error"])
         self.assertIn("IPv6 泄漏检查", data["error"])
         self.assertNotEqual(data["error"], "failed")
 

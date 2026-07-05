@@ -7,7 +7,6 @@ import UniformTypeIdentifiers
 struct DashboardView: View {
     @ObservedObject var backend: Backend
     @ObservedObject var healthMonitor: HealthMonitor
-    @AppStorage("netfix.autoFixTier1") private var autoFixTier1 = false
     @StateObject private var viewModel = DashboardViewModel()
     @State private var pendingAction: Action?
     @State private var showConfirmation = false
@@ -28,11 +27,11 @@ struct DashboardView: View {
                 VStack(spacing: 16) {
                     landingStateBanner
 
+                    proxyDeploySection
+
                     statusCards
 
                     firstAidSection
-
-                    proxyDeploySection
 
                     if viewModel.isWorking {
                         progressSection
@@ -143,14 +142,30 @@ struct DashboardView: View {
 
     private var subtitle: String {
         if !backend.isReady {
-            return backend.statusMessage
+            return friendlyStatusMessage(backend.statusMessage)
         }
         if let date = healthMonitor.lastCheck {
             let formatter = RelativeDateTimeFormatter()
             formatter.unitsStyle = .short
             return "上次检测：\(formatter.localizedString(for: date, relativeTo: Date()))"
         }
-        return backend.statusMessage
+        return friendlyStatusMessage(backend.statusMessage)
+    }
+
+    private func friendlyStatusMessage(_ message: String) -> String {
+        if message.hasPrefix("正在启动 Netfix") {
+            return "Netfix 正在启动…"
+        }
+        if message.hasPrefix("Netfix 已就绪") {
+            return "Netfix 已就绪"
+        }
+        if message.hasPrefix("Netfix 异常") {
+            return "Netfix 启动出错，可以查看日志或重启 App"
+        }
+        if message.hasPrefix("Netfix 已停止") {
+            return "Netfix 已停止"
+        }
+        return message
     }
 
     @ViewBuilder
@@ -177,23 +192,64 @@ struct DashboardView: View {
 
     // MARK: - 状态卡片
 
-    private let statusGroups: [(ids: [String], title: String, icon: String)] = [
-        (["network", "dns", "path"], "网络连接", "wifi"),
-        (["proxy", "egress"], "代理状态", "network"),
-        (["service"], "目标网站", "server.rack"),
+    /// 三张人话卡片：网络 / 代理 / 目标。技术细节折叠在「查看技术详情」。
+    private let statusGroups: [(ids: [String], title: String, icon: String, summaryKey: PlainSummaryKey)] = [
+        (["network", "dns", "path"], "网络连接", "wifi", .network),
+        (["proxy", "egress"], "代理状态", "network", .proxy),
+        (["service"], "目标网站", "server.rack", .targets),
     ]
 
     private var statusCards: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
             ForEach(statusGroups, id: \.title) { group in
                 let items = group.ids.flatMap { viewModel.items(for: $0) }
-                layerCard(title: group.title, icon: group.icon, items: items)
+                layerCard(title: group.title, icon: group.icon, summary: plainSummary(for: group.summaryKey, items: items), items: items)
             }
         }
     }
 
-    private func layerCard(title: String, icon: String, items: [DiagnosticItem]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private enum PlainSummaryKey { case network, proxy, targets }
+
+    private func plainSummary(for key: PlainSummaryKey, items: [DiagnosticItem]) -> (label: String, hint: String) {
+        if items.isEmpty {
+            switch key {
+            case .network: return ("未检测", "运行一次诊断后这里会显示网络情况")
+            case .proxy:   return ("未配置", "粘贴代理参数后会显示这里")
+            case .targets: return ("未检测", "点「检查常用网站」会显示能不能打开")
+            }
+        }
+        let hasFail = items.contains { $0.status == "fail" }
+        let hasWarn = items.contains { $0.status == "warn" }
+        if hasFail {
+            switch key {
+            case .network: return ("异常", "Wi-Fi / DNS / 路由有问题")
+            case .proxy:   return ("异常", "代理没在用或被拒绝")
+            case .targets: return ("失败", "目标网站大多打不开")
+            }
+        }
+        if hasWarn {
+            switch key {
+            case .network: return ("需关注", "网络能通但有风险点")
+            case .proxy:   return ("需关注", "代理在用，但刚才一次检查没通过")
+            case .targets: return ("部分失败", "只有部分目标网站能打开")
+            }
+        }
+        switch key {
+        case .network: return ("正常", "本机网络、网关和 DNS 都正常")
+        case .proxy:   return ("已就绪", "代理参数已保存或正在使用")
+        case .targets: return ("可访问", "常用网站都能打开")
+        }
+    }
+
+    private func layerCard(title: String, icon: String, summary: (label: String, hint: String), items: [DiagnosticItem]) -> some View {
+        let status: DiagnosticStatus = {
+            if items.isEmpty { return .unknown }
+            if items.contains(where: { $0.status == "fail" }) { return .fail }
+            if items.contains(where: { $0.status == "warn" }) { return .warn }
+            return .ok
+        }()
+
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: icon)
                     .foregroundStyle(.blue)
@@ -202,25 +258,28 @@ struct DashboardView: View {
                 Spacer()
             }
 
-            if let status = items.layerStatus {
-                StatusIconView(status: status, label: statusLabel(status))
-            } else {
-                StatusIconView(status: .unknown, label: "未检测")
-            }
+            StatusIconView(status: status, label: summary.label)
+                .help(summary.hint)
 
-            let visibleItems = Array(items.sorted { lhs, rhs in
-                diagnosticPriority(lhs) > diagnosticPriority(rhs)
-            }.prefix(5))
+            Text(summary.hint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
 
-            if !visibleItems.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(visibleItems) { item in
-                        Text("• \(item.displayTitle)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+            if !items.isEmpty {
+                DisclosureGroup("查看技术详情") {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(items) { item in
+                            Text("• \(item.displayTitle)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
+                    .padding(.top, 4)
                 }
+                .font(.caption2)
             }
         }
         .padding()
@@ -238,15 +297,6 @@ struct DashboardView: View {
         case .warn: return "注意"
         case .fail: return "异常"
         case .unknown: return "未检测"
-        }
-    }
-
-    private func diagnosticPriority(_ item: DiagnosticItem) -> Int {
-        switch DiagnosticStatus(item.status) {
-        case .fail: return 4
-        case .warn: return 3
-        case .unknown: return 2
-        case .ok: return 1
         }
     }
 
@@ -317,12 +367,16 @@ struct DashboardView: View {
     }
 
     private func errorBanner(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let card = UserFacingMessages.classify(message)
+        let humanReadable = "\(card.headline)\n\(card.nextStep)"
+        let technicalDetail = card.technical ?? message
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .padding(.top, 2)
-                Text(friendlyErrorMessage(message))
+                Text(humanReadable)
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer()
@@ -344,12 +398,13 @@ struct DashboardView: View {
                     .controlSize(.small)
                 }
 
-                Button("复制错误") {
+                Button("复制这段说明") {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(message, forType: .string)
+                    NSPasteboard.general.setString(humanReadable, forType: .string)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .help("复制普通人能看懂的一句话 + 下一步；不会带 reason_code、HTTP 状态或技术错误码。")
 
                 Button("查看日志") {
                     openNetfixLogsFolder()
@@ -357,10 +412,41 @@ struct DashboardView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
+
+            DisclosureGroup("查看技术详情") {
+                Text(technicalDetail.isEmpty ? "暂无技术详情。" : scrubInternalPhrases(technicalDetail))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .padding(.top, 4)
+            }
+            .font(.caption)
         }
         .padding()
         .background(Color.orange.opacity(0.15))
         .cornerRadius(10)
+    }
+
+    /// 把 reason_code / HTTP 400 / proxy_used / layer / traceback / raw JSON
+    /// 这类普通用户不该看到的词替换成人话。
+    private func scrubInternalPhrases(_ raw: String) -> String {
+        var out = raw
+        let replacements: [(String, String)] = [
+            ("reason_code", "原因代号"),
+            ("proxy_used", "代理通道"),
+            ("layer", "网络层"),
+            ("traceback", "堆栈信息"),
+            ("raw JSON", "原始数据"),
+            ("HTTP 400", "请求被后端拒绝"),
+            ("HTTP 401", "后端要求登录"),
+            ("HTTP 403", "操作被拒绝"),
+            ("HTTP 404", "后端没找到这条"),
+            ("HTTP 502", "后端链路失败"),
+        ]
+        for (src, dst) in replacements {
+            out = out.replacingOccurrences(of: src, with: dst)
+        }
+        return out
     }
 
     private func actionabilityBadge(_ explanation: Explanation) -> some View {
@@ -400,15 +486,6 @@ struct DashboardView: View {
         )
     }
 
-    private func friendlyErrorMessage(_ message: String) -> String {
-        let card = UserFacingMessages.classify(message)
-        let combined = "\(card.headline)\n\(card.nextStep)"
-        if let tech = card.technical, !tech.isEmpty {
-            return combined
-        }
-        return combined
-    }
-
     private func structuredErrorCard(for message: String) -> UserFacingMessage {
         UserFacingMessages.classify(message)
     }
@@ -431,7 +508,7 @@ struct DashboardView: View {
     private var proxyDeploySection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("粘贴你已有的代理参数", systemImage: "point.3.connected.trianglepath.dotted")
+                Label("粘贴代理参数", systemImage: "point.3.connected.trianglepath.dotted")
                     .font(.headline)
                 Spacer()
                 Text("不需要 API Key 也能用")
@@ -443,7 +520,7 @@ struct DashboardView: View {
                     .cornerRadius(6)
             }
 
-            Text("从你的代理服务后台复制完整一行：地址、端口、用户名、密码。Netfix 不卖代理，也不能只靠出口 IP 部署。")
+            Text("从服务商后台复制一整行，包含地址、端口、账号、密码。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -451,7 +528,7 @@ struct DashboardView: View {
                 Button {
                     openProxySettings()
                 } label: {
-                    Label("粘贴代理参数", systemImage: "square.and.arrow.down")
+                    Label("去粘贴代理参数", systemImage: "square.and.arrow.down")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -510,39 +587,45 @@ struct DashboardView: View {
             HStack {
                 Image(systemName: "sparkles")
                     .foregroundStyle(.purple)
-                Text("下一步想干嘛？")
+                Text("看不懂诊断结果？")
                     .font(.headline)
                 Spacer()
             }
             Text(viewModel.hasCloudAI
-                 ? "下面按钮既能用本地规则解释，也能再请求云端 AI。"
-                 : "下面按钮走本地规则，不需要 API Key；想用云端 AI 再到「设置 → AI」启用。")
+                 ? "用本地规则解释当前报告，也可以请求云端 AI 再确认。"
+                 : "走本地规则解释，不需要 API Key；想用云端 AI 再到设置里开启。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+            HStack(spacing: 10) {
                 aiQuickButton(
                     title: "解释当前问题",
                     systemImage: "questionmark.bubble",
                     prompt: "请用普通人能听懂的话，解释当前诊断报告里最严重的一个问题，并告诉我下一步应该点什么。"
                 )
                 aiQuickButton(
-                    title: "我该点哪个按钮",
-                    systemImage: "hand.point.up.left.fill",
-                    prompt: "基于当前诊断结果，告诉我现在该先点哪个按钮、要不要确认、会有什么后果。"
-                )
-                aiQuickButton(
-                    title: "复制脱敏报告给客服/AI",
+                    title: "复制脱敏报告",
                     systemImage: "doc.on.clipboard",
                     prompt: nil,
                     action: { Task { await viewModel.copySupportBundle() } }
                 )
-                aiQuickButton(
-                    title: "检查我的代理参数格式",
-                    systemImage: "checklist",
-                    prompt: "我想知道我刚才粘的代理参数格式对不对；贴在这里麻烦帮我确认是不是 host:port:user:pass 或 http://user:pass@host:port 这种。"
-                )
+                Menu {
+                    Button("我该点哪个按钮") {
+                        Task {
+                            await viewModel.answerQuickQuestion(
+                                prompt: "基于当前诊断结果，告诉我现在该先点哪个按钮、要不要确认、会有什么后果。",
+                                context: aiQuestionContext
+                            )
+                        }
+                    }
+                    Button("检查代理参数格式") {
+                        Task { await viewModel.checkProxyInputFormat() }
+                    }
+                } label: {
+                    Label("更多", systemImage: "ellipsis.circle")
+                }
             }
+            .controlSize(.small)
         }
         .padding()
         .background(Color(NSColor.controlBackgroundColor))
@@ -559,23 +642,14 @@ struct DashboardView: View {
             if let action {
                 action()
             } else if let prompt {
-                aiQuestionContext = .diagnosis
-                aiQuestionPrompt = prompt
-                showAIQuestionSheet = true
+                Task { await viewModel.answerQuickQuestion(prompt: prompt, context: aiQuestionContext) }
             }
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                Text(title).font(.caption).fontWeight(.medium)
-                Spacer()
-            }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.purple.opacity(0.08))
-            .cornerRadius(8)
+            Label(title, systemImage: systemImage)
+                .font(.caption)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
         .disabled(!backend.isReady)
     }
 
@@ -877,14 +951,14 @@ struct DashboardView: View {
             .buttonStyle(.borderedProminent)
             .disabled(!backend.isReady || viewModel.isWorking)
 
-            Button("处理建议") {
-                if let action = viewModel.recommendedAction {
-                    requestAction(action)
+            if let recommendedAction = viewModel.recommendedAction {
+                Button("处理建议") {
+                    requestAction(recommendedAction)
                 }
+                .buttonStyle(.bordered)
+                .disabled(!backend.isReady || viewModel.isWorking)
+                .help("按上方报告里的建议处理。")
             }
-            .buttonStyle(.bordered)
-            .disabled(!backend.isReady || viewModel.isWorking || viewModel.recommendedAction == nil)
-            .help(viewModel.recommendedAction == nil ? "先诊断；Netfix 找到明确建议后才能处理。" : "按上方报告里的建议处理。")
 
             if viewModel.rollbackAvailable {
                 Button("恢复原来的网络设置") {
@@ -898,11 +972,6 @@ struct DashboardView: View {
 
     private var secondaryActionToolbar: some View {
         HStack(spacing: 10) {
-            Toggle("自动处理低风险问题", isOn: $autoFixTier1)
-                .toggleStyle(.switch)
-                .fixedSize()
-                .help("只自动处理不会改系统网络设置的低风险问题")
-
             Spacer(minLength: 8)
 
             Button("代理") {
@@ -938,7 +1007,7 @@ private struct AIQuestionImage: Identifiable, Equatable {
     let preview: NSImage?
 }
 
-private enum AIQuestionContext {
+fileprivate enum AIQuestionContext: Equatable {
     case diagnosis
     case proxy
 
@@ -1322,6 +1391,89 @@ final class DashboardViewModel: ObservableObject {
             copyFeedback = "已复制支持包到剪贴板。"
         } catch {
             copyFeedback = UserFacingMessages.classify(error.localizedDescription).headline
+        }
+    }
+
+    /// 让普通用户点 AI 按钮时不再依赖 API Key：先按本地规则给出结论，
+    /// 只有当云端 AI 已启用时再让云端覆盖本地结论。
+    fileprivate func answerQuickQuestion(prompt: String, context: AIQuestionContext) async {
+        guard let client else { return }
+        llmError = nil
+        copyFeedback = nil
+        let localAnswer = buildLocalAnswer(prompt: prompt, context: context)
+        llmExplanation = LLMExplainResult(
+            source: "local_rule",
+            fallbackReason: nil,
+            fallbackReasonLabel: nil,
+            failureReasonCode: nil,
+            providerUsed: nil,
+            fallbackChain: nil,
+            needsUploadConfirmation: false,
+            headline: localAnswer.headline,
+            severity: localAnswer.severity,
+            explanation: localAnswer.body,
+            redactedReportHash: nil
+        )
+        headline = localAnswer.headline
+        if hasCloudAI {
+            startWork(steps: ["本地已给出结论，正在请云端 AI 再确认…"])
+            do {
+                let response = try await client.explainWithLLM(
+                    question: prompt,
+                    mode: "explain",
+                    uploadConfirmed: false,
+                    images: []
+                )
+                llmExplanation = response.result
+                headline = response.result.headline ?? headline
+            } catch {
+                llmError = "云端 AI 没回：\(friendlyAIError(error.localizedDescription))。先按上方本地结论处理即可。"
+            }
+            stopWork()
+        } else {
+            copyFeedback = "已给出本地结论（无需 API Key）。需要更详细的解释时，到「设置 → AI」粘贴 API Key。"
+        }
+    }
+
+    /// 「检查我的代理参数格式」专用：基于本地规则给出人话提示。
+    func checkProxyInputFormat() async {
+        let headline = "代理参数格式参考"
+        let body = "支持的格式：\n• host:port:user:pass（最常见）\n• http://user:pass@host:port\n• socks5h://user:pass@host:port\n• 多行带表头的列表\n不支持：ss://、vmess://、Clash 订阅链接。\n保存时密码只写入本机密码库。"
+        llmExplanation = LLMExplainResult(
+            source: "local_rule",
+            fallbackReason: nil,
+            fallbackReasonLabel: nil,
+            failureReasonCode: nil,
+            providerUsed: nil,
+            fallbackChain: nil,
+            needsUploadConfirmation: false,
+            headline: headline,
+            severity: "info",
+            explanation: body,
+            redactedReportHash: nil
+        )
+        self.headline = headline
+        copyFeedback = "格式参考已显示。"
+    }
+
+    private func buildLocalAnswer(prompt: String, context: AIQuestionContext) -> (headline: String, body: String, severity: String) {
+        switch context {
+        case .diagnosis:
+            if let report = report {
+                let detail = report.explanation?.explanation ?? report.firstRootCause ?? "当前没有可解释的诊断条目。"
+                let action = report.explanation?.primaryAction?.label
+                let next = report.explanation?.actions.first?.label
+                let extra = (action ?? next).map { "\n建议先点：\($0)。" } ?? ""
+                let severity = report.overallStatus == .ok ? "ok" : (report.overallStatus == .fail ? "fail" : "warn")
+                return (report.summaryHeadline, detail + extra, severity)
+            }
+            return ("还没有诊断结果", "请先点「一键诊断」；结果出来后这里会基于本地规则直接告诉你现在该怎么办，不需要 API Key。", "info")
+        case .proxy:
+            return (
+                "代理部署的常见问题",
+                "一般流程：1) 粘贴 host:port:user:pass；2) 点「检查并保存」；3) 点「开始使用代理」。\n中间会备份你现在的网络设置；不用时点「恢复原来的网络设置」即可。\n需要账号密码的代理会由 Netfix 在本机安全代管。",
+                "info"
+            )
         }
     }
 

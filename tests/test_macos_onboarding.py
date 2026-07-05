@@ -27,7 +27,8 @@ def test_proxy_setup_does_not_claim_client_detected_when_environment_has_no_clie
 
     assert 'Text("添加你的代理")' in proxy_setup
     assert 'if let client = env.guiClient, !client.isEmpty {' in proxy_setup
-    assert 'client: client,' in proxy_setup
+    assert 'headline:' in proxy_setup
+    assert '"没检测到代理客户端，直接粘贴参数"' in proxy_setup
     assert '"已识别代理客户端"' not in proxy_setup
 
 
@@ -37,8 +38,8 @@ def test_proxy_setup_exposes_one_paste_proxy_onboarding_path():
     assert "你有合法代理参数吗？有的话复制粘贴" in proxy_setup
     assert "TextEditor(text: $proxyInput)" in proxy_setup
     assert 'Label("检查并保存到这台 Mac", systemImage: "tray.and.arrow.down")' in proxy_setup
-    assert 'Button("只检查，不保存")' in proxy_setup
-    assert 'Label("开始使用这台 Mac 上网", systemImage: "play.circle.fill")' in proxy_setup
+    assert 'Button("只检查")' in proxy_setup
+    assert 'Label("开始使用代理", systemImage: "play.circle.fill")' in proxy_setup
     assert "showProxyDeployConfirmation" in proxy_setup
     assert "applyProxyDryRun(profileID: profile.id, mode: \"system\")" in proxy_setup
     assert "applyProxyProfile(profileID: profile.id, mode: \"system\", confirmed: true" in proxy_setup
@@ -47,7 +48,7 @@ def test_proxy_setup_exposes_one_paste_proxy_onboarding_path():
     assert "密码保存到本机密码库" in proxy_setup
     assert "去你的代理服务后台，复制一整行连接信息" in proxy_setup
     assert "不要只复制出口 IP" in proxy_setup
-    assert "点下面“开始使用这台 Mac 上网”才会生效" in proxy_setup
+    assert "点下面“开始使用代理”才会生效" in proxy_setup
     assert "NSApp.sendAction(#selector(AppDelegate.showProxySettings)" not in proxy_setup
     save_fn = proxy_setup.split("private func saveProxyInput() async", 1)[1].split("private func bindClient()", 1)[0]
     assert "onContinue()" not in save_fn

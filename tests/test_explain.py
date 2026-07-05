@@ -109,8 +109,10 @@ class TestExplainReport(unittest.TestCase):
             "manual_steps": [],
         }
         card = explain.explain_report(report, rules=_sample_rules())
-        self.assertEqual(card["headline"], "系统代理路径有两套规则")
-        self.assertIn("PAC", card["explanation"])
+        self.assertEqual(card["headline"], "系统里同时开了手动代理和自动代理")
+        self.assertIn("手动代理", card["explanation"])
+        self.assertIn("自动代理", card["explanation"])
+        self.assertNotIn("PAC", card["explanation"])
         self.assertEqual(card["primary_action"]["id"], "disable-auto-proxy")
         self.assertTrue(card["primary_action"]["needs_confirm"])
 
@@ -123,7 +125,7 @@ class TestExplainReport(unittest.TestCase):
         }
         card = explain.explain_report(report, rules=_sample_rules())
         self.assertEqual(card["headline"], "没有检测到 IPv6 泄漏")
-        self.assertIn("没有探到公网 IPv6", card["explanation"])
+        self.assertIn("没有检测到公网 IPv6", card["explanation"])
         self.assertEqual(card["primary_action"], None)
         self.assertEqual(card["actions"], [])
         self.assertNotIn("Tier", str(card))

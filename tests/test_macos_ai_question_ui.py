@@ -52,10 +52,10 @@ def test_macos_dashboard_surfaces_proxy_deployment_without_ai_api_requirement():
     source = DASHBOARD.read_text(encoding="utf-8")
 
     assert "proxyDeploySection" in source
-    assert 'Label("粘贴你已有的代理参数", systemImage: "point.3.connected.trianglepath.dotted")' in source
+    assert 'Label("粘贴代理参数", systemImage: "point.3.connected.trianglepath.dotted")' in source
     assert "不需要 API Key 也能用" in source
-    assert "Netfix 不卖代理，也不能只靠出口 IP 部署" in source
-    assert 'Label("粘贴代理参数", systemImage: "square.and.arrow.down")' in source
+    assert "从服务商后台复制一整行" in source
+    assert 'Label("去粘贴代理参数", systemImage: "square.and.arrow.down")' in source
     assert 'Label("问 AI", systemImage: "sparkles")' in source
     assert "aiQuestionContext = .proxy" in source
     assert 'Button("我该复制什么？")' not in source

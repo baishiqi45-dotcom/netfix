@@ -15,7 +15,7 @@ enum DashboardUIState: String, CaseIterable {
         switch self {
         case .noProxy:        return "还没有粘贴代理参数"
         case .proxySaved:     return "代理已保存到这台 Mac，但还没开始使用"
-        case .proxyInUse:     return "正在通过 Netfix 使用代理上网"
+        case .proxyInUse:     return "正在使用代理上网"
         case .proxyDegraded:  return "代理还在用，但刚才一次检测没通过"
         case .networkRecovery: return "系统网络需要恢复"
         case .ready:          return "网络看起来正常"
@@ -24,11 +24,11 @@ enum DashboardUIState: String, CaseIterable {
 
     var nextStep: String {
         switch self {
-        case .noProxy:        return "点下方「粘贴代理参数」，把服务商后台给的那一行粘进来。"
-        case .proxySaved:     return "点「开始使用这台 Mac 上网」，Netfix 会先备份当前网络设置再帮你切。"
-        case .proxyInUse:     return "后台健康监控会持续检查；出问题时 Netfix 会主动提示。"
+        case .noProxy:        return "点「粘贴代理参数」，把服务商给的那一行粘进来。"
+        case .proxySaved:     return "点「开始使用代理」。"
+        case .proxyInUse:     return "Netfix 会持续检查网络状态；出问题时主动提示你。"
         case .proxyDegraded:  return "点「一键诊断」看哪一项失败；常见原因是节点挂了或账号临时失效。"
-        case .networkRecovery: return "到「部署代理 → 更多 → 恢复原来的网络设置」点恢复；不想恢复也可以直接退出 App。"
+        case .networkRecovery: return "点「恢复原来的网络设置」；不想恢复也可以直接退出 App。"
         case .ready:          return "保持现状即可；想再确认一次就点「一键诊断」。"
         }
     }

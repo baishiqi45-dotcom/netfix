@@ -138,7 +138,7 @@ def _record_startup_bridge_check() -> Dict[str, Any]:
                     "type": "proxy_bridge_startup",
                     "status": "ok",
                     "headline": "本地桥接已按设置自动恢复",
-                    "root_cause": "系统代理仍指向上次 Netfix 桥接端口，后端已重新启动本地桥接；没有改写系统代理。",
+                    "root_cause": "系统代理仍指向上次 Netfix 桥接端口，当前 Netfix 已重新启动本地桥接；没有改写系统代理。",
                     "bridge_lifecycle": "running_system",
                     "profile_id": auto_restart.get("profile_id"),
                     "network_service": auto_restart.get("network_service"),
@@ -940,7 +940,7 @@ def _with_user_facing_fix_error(result: Dict[str, Any]) -> Dict[str, Any]:
 
     card = user_facing_errors.render_error(message=str(result.get("error") or ""))
     result["error"] = (
-        card.get("headline", "修复没有完成，但后端没有给出明确原因。")
+        card.get("headline", "修复没有完成，但 Netfix 内部服务没有给出明确原因。")
         + " "
         + card.get("next_step", "请点「查看日志」，把最近一次修复日志拿来排查。")
     )
