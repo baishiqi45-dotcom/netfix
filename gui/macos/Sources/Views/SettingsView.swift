@@ -38,6 +38,9 @@ struct SettingsView: View {
     @State private var showLLMProviderTestConfirmation = false
     @State private var showLLMChainTestConfirmation = false
     @State private var proxyProfiles: [ProxyProfile] = []
+@State private var groupedProxyProfiles: ProxyProfilesGroupedResponse?
+@State private var showDuplicateHistory: Bool = false
+@State private var pendingRenameProfile: ProxyProfile?
     @State private var proxyValidationTargets: [ProxyValidationTargetProfile] = [
         ProxyValidationTargetProfile(id: "baseline", label: "通用连通性", description: nil, probes: nil),
         ProxyValidationTargetProfile(id: "ai_dev", label: "AI / 开发工具", description: nil, probes: nil),
@@ -171,7 +174,27 @@ struct SettingsView: View {
         } message: {
             Text("这会真实调用当前已配置的供应商，并可能计入供应商用量或账单。不会读取或显示 API Key。")
         }
+        .alert("给代理起个名字", isPresented: Binding(
+            get: { pendingRenameProfile != nil },
+            set: { if !$0 { pendingRenameProfile = nil } }
+        )) {
+            Button("保存") {
+                if let profile = pendingRenameProfile {
+                    let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        Task { await commitRename(profile: profile, newName: trimmed) }
+                    } else {
+                        pendingRenameProfile = nil
+                    }
+                }
+            }
+            Button("取消", role: .cancel) { pendingRenameProfile = nil }
+        } message: {
+            Text("改完名字不会影响地址、端口或密码，只用来让你一眼认出。")
+        }
     }
+
+    @State private var renameDraft: String = ""
 
     // MARK: - 顶层分层选择器
 
@@ -858,8 +881,66 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(proxyProfiles) { profile in
-                        proxyProfileRow(profile)
+                    let deployedID = proxyBridgeState?.lifecycle?.profileId
+                    let activeProfile = proxyProfiles.first(where: { $0.id == deployedID })
+                        ?? proxyProfiles.first(where: { $0.passwordSet == true })
+                    let recentCandidates = proxyProfiles
+                        .filter { $0.id != activeProfile?.id }
+                        .sorted { lhs, rhs in
+                            (rhs.lastSavedAt ?? "") < (lhs.lastSavedAt ?? "")
+                        }
+                        .prefix(3)
+                    if let active = activeProfile {
+                        proxyActiveCard(profile: active, isDeployed: active.id == deployedID)
+                    }
+                    if !recentCandidates.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("最近候选")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            ForEach(Array(recentCandidates), id: \.id) { profile in
+                                proxyCandidateRow(profile: profile)
+                            }
+                        }
+                    }
+                    if let grouped = groupedProxyProfiles, (grouped.duplicateGroups ?? 0) > 0 {
+                        DisclosureGroup(isExpanded: $showDuplicateHistory) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(grouped.groups.filter { $0.count > 1 }) { group in
+                                    proxyDuplicateGroupRow(group: group)
+                                }
+                                Button {
+                                    Task { await cleanupDuplicateProxyProfiles() }
+                                } label: {
+                                    Label("合并重复代理", systemImage: "rectangle.compress.vertical")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(!backend.isReady)
+                                Text("只保留最近保存的那一条；其它同地址、同账号的旧记录会被删除。密码已经写在本机密码库，不会丢。")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 4)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .foregroundStyle(.orange)
+                                Text("发现 \(grouped.duplicateGroups ?? 0) 组重复代理（共 \(grouped.duplicateProfileIds?.count ?? 0) 条旧记录，默认折叠）")
+                                    .font(.caption)
+                            }
+                        }
+                        .font(.caption)
+                    } else {
+                        DisclosureGroup("查看所有已保存代理") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(proxyProfiles) { profile in
+                                    proxyFullHistoryRow(profile: profile)
+                                }
+                            }
+                            .padding(.top, 4)
+                        }
+                        .font(.caption)
                     }
                 }
             }
@@ -897,7 +978,266 @@ struct SettingsView: View {
         .padding()
     }
 
-    // MARK: - Permissions
+    // MARK: - 代理列表分组展示（P0-A）
+
+@ViewBuilder
+private func proxyActiveCard(profile: ProxyProfile, isDeployed: Bool) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 8) {
+            Image(systemName: isDeployed ? "checkmark.shield.fill" : "tray.full.fill")
+                .foregroundStyle(isDeployed ? Color.green : Color.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(profile.name ?? profile.host ?? profile.id)
+                    .font(.headline)
+                Text(friendlyProxyProfileSummary(profile))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            proxyFriendlyStatusBadge(profile: profile, isDeployed: isDeployed)
+        }
+        if let check = profile.lastCheck {
+            Text(proxyCheckSummary(check))
+                .font(.caption2)
+                .foregroundStyle(check.status == "ok" ? Color.secondary : Color.orange)
+        } else {
+            Text("已保存但还没验证。点「开始使用代理」前建议先检查一下。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        HStack(spacing: 8) {
+            Button {
+                Task { await prepareProxyDeployment(profile) }
+            } label: {
+                Label("使用这条", systemImage: "play.circle.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(!backend.isReady)
+
+            Menu {
+                Button("更新参数") {
+                    Task { await replaceProxyProfile(profile) }
+                }
+                Button("重命名") {
+                    renameDraft = profile.name ?? profile.host ?? ""
+                    pendingRenameProfile = profile
+                }
+                Divider()
+                Button("删除", role: .destructive) {
+                    pendingDeleteProxyProfile = profile
+                    showDeleteProxyProfileConfirmation = true
+                }
+            } label: {
+                Label("更多", systemImage: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .controlSize(.small)
+            .disabled(!backend.isReady)
+        }
+    }
+    .padding(10)
+    .background(Color.blue.opacity(0.06))
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+}
+
+@ViewBuilder
+private func proxyCandidateRow(profile: ProxyProfile) -> some View {
+    HStack(alignment: .top, spacing: 8) {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(profile.name ?? profile.host ?? profile.id)
+                .font(.caption)
+                .fontWeight(.semibold)
+            Text(friendlyProxyProfileSummary(profile))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        Spacer()
+        proxyFriendlyStatusBadge(profile: profile, isDeployed: false)
+        Button {
+            Task { await prepareProxyDeployment(profile) }
+        } label: {
+            Text("使用这条")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+        .disabled(!backend.isReady)
+    }
+    .padding(.vertical, 2)
+}
+
+@ViewBuilder
+private func proxyFullHistoryRow(profile: ProxyProfile) -> some View {
+    HStack(alignment: .top, spacing: 8) {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(profile.name ?? profile.host ?? profile.id)
+                .font(.caption)
+            Text(friendlyProxyProfileSummary(profile))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        Spacer()
+        proxyFriendlyStatusBadge(profile: profile, isDeployed: false)
+        Menu {
+            Button("使用这条") {
+                Task { await prepareProxyDeployment(profile) }
+            }
+            Button("更新参数") {
+                Task { await replaceProxyProfile(profile) }
+            }
+            Button("重命名") {
+                renameDraft = profile.name ?? profile.host ?? ""
+                pendingRenameProfile = profile
+            }
+            Divider()
+            Button("删除", role: .destructive) {
+                pendingDeleteProxyProfile = profile
+                showDeleteProxyProfileConfirmation = true
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .controlSize(.small)
+        .disabled(!backend.isReady)
+    }
+}
+
+@ViewBuilder
+private func proxyDuplicateGroupRow(group: ProxyProfileGroup) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+        Text("同一条代理出现 \(group.count) 次，保留最近一次：")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        ForEach(group.profiles) { member in
+            HStack(spacing: 6) {
+                Image(systemName: member.isCanonical == true ? "star.fill" : "circle")
+                    .foregroundStyle(member.isCanonical == true ? Color.orange : Color.secondary)
+                Text(member.name ?? member.host ?? member.id)
+                    .font(.caption2)
+                    .lineLimit(1)
+                Spacer()
+                Text(member.lastSavedAt?.isEmpty == false ? member.lastSavedAt! : "")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private func friendlyProxyProfileSummary(_ profile: ProxyProfile) -> String {
+    var parts: [String] = []
+    if let proto = profile.protocolName, !proto.isEmpty {
+        parts.append(proto)
+    }
+    if let host = profile.host, !host.isEmpty {
+        if let port = profile.port, port > 0 {
+            parts.append("\(host):\(port)")
+        } else {
+            parts.append(host)
+        }
+    }
+    if let username = profile.username, !username.isEmpty {
+        parts.append("账号 \(username)")
+    }
+    if profile.passwordSet == true {
+        parts.append("密码已存本机密码库")
+    }
+    return parts.joined(separator: " · ")
+}
+
+@ViewBuilder
+private func proxyFriendlyStatusBadge(profile: ProxyProfile, isDeployed: Bool) -> some View {
+    let (label, color, icon): (String, Color, String) = {
+        if isDeployed {
+            let lifecycle = proxyBridgeState?.lifecycle
+            if lifecycle?.needsAttention == true {
+                return ("上次部署需要处理", .orange, "exclamationmark.triangle.fill")
+            }
+            return ("正在使用", .green, "checkmark.shield.fill")
+        }
+        if let check = profile.lastCheck {
+            switch check.status {
+            case "ok":
+                return ("最近检测正常", .blue, "checkmark.circle")
+            case "fail", "failed", "error":
+                return ("最近检测失败", .orange, "exclamationmark.triangle")
+            case "warn":
+                return ("最近检测有风险", .orange, "exclamationmark.triangle")
+            case "timeout":
+                return ("最近检测超时", .orange, "clock.badge.exclamationmark")
+            default:
+                return ("已保存", .secondary, "tray")
+            }
+        }
+        if profile.passwordSet == true {
+            return ("已保存 · 还没用上", .secondary, "tray")
+        }
+        return ("没保存密码", .orange, "key.slash")
+    }()
+    Label(label, systemImage: icon)
+        .font(.caption2)
+        .fontWeight(.semibold)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(color.opacity(0.14))
+        .foregroundStyle(color)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+}
+
+private func commitRename(profile: ProxyProfile, newName: String) async {
+    guard let client = client() else {
+        proxyStatus = "失败：Netfix 还没准备好。"
+        pendingRenameProfile = nil
+        return
+    }
+    do {
+        let response = try await client.renameProxyProfile(profileID: profile.id, name: newName)
+        if let updated = response.profile {
+            proxyProfiles.removeAll { $0.id == updated.id }
+            proxyProfiles.append(updated)
+            proxyStatus = "已重命名。地址、端口和密码都没变。"
+        } else {
+            proxyStatus = "重命名完成。"
+        }
+        await loadGroupedProxyProfiles()
+    } catch {
+        let card = UserFacingMessages.classify(error.localizedDescription)
+        proxyStatus = "\(card.headline)\n\(card.nextStep)"
+    }
+    pendingRenameProfile = nil
+}
+
+private func loadGroupedProxyProfiles() async {
+    guard let client = client() else { return }
+    do {
+        groupedProxyProfiles = try await client.groupedProxyProfiles()
+    } catch {
+        groupedProxyProfiles = nil
+    }
+}
+
+private func cleanupDuplicateProxyProfiles() async {
+    guard let client = client() else {
+        proxyStatus = "失败：Netfix 还没准备好。"
+        return
+    }
+    do {
+        let response = try await client.cleanupDuplicateProxyProfiles()
+        let removed = response.removedIds?.count ?? 0
+        let kept = response.totalProfilesAfter ?? 0
+        proxyStatus = removed == 0
+            ? "没有可合并的重复代理。"
+            : "已合并 \(removed) 条重复代理，保留 \(kept) 条。"
+        await loadCloudAndProxySettings()
+        await loadGroupedProxyProfiles()
+    } catch {
+        let card = UserFacingMessages.classify(error.localizedDescription)
+        proxyStatus = "\(card.headline)\n\(card.nextStep)"
+    }
+}
+
+// MARK: - Permissions
 
     private var permissionsTab: some View {
         Form {
@@ -1169,6 +1509,7 @@ struct SettingsView: View {
             let bridgeSettings = try await client.proxyBridgeSettings().settings
             proxyBridgeAutoRestartEnabled = bridgeSettings.autoRestartEnabled
             proxyBridgeState = try await client.proxyBridge()
+            await loadGroupedProxyProfiles()
             let privacy = try await client.privacySettings().settings
             logRetentionEnabled = privacy.logRetentionEnabled
             logRetentionDays = privacy.logRetentionDays

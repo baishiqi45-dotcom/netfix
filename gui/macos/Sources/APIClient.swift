@@ -446,6 +446,26 @@ actor APIClient {
         )
     }
 
+    func groupedProxyProfiles() async throws -> ProxyProfilesGroupedResponse {
+        try await get(path: "proxy/profiles/grouped", timeout: 20)
+    }
+
+    func cleanupDuplicateProxyProfiles() async throws -> ProxyProfilesCleanupResponse {
+        try await postDecodingClientError(
+            path: "proxy/profiles/cleanup-dupes",
+            body: [:],
+            timeout: 30
+        )
+    }
+
+    func renameProxyProfile(profileID: String, name: String) async throws -> ProxyProfileResponse {
+        try await postDecodingClientError(
+            path: "proxy/profiles/\(profileID)/rename",
+            body: ["name": name],
+            timeout: 15
+        )
+    }
+
     func rollbackProxyProfile(confirmed: Bool = true) async throws -> ProxyRollbackResponse {
         var body: [String: Any] = [:]
         if confirmed {

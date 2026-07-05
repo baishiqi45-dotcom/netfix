@@ -230,13 +230,49 @@ def reason(env: Dict[str, Any], diagnostics: List[Dict[str, Any]]) -> List[Dict[
 
     # Network quality.
     nq = diag_map.get("network_quality", {})
+    bandwidth_hog = diag_map.get("bandwidth_hog", {})
+    bandwidth_reason = str(bandwidth_hog.get("details", {}).get("reason") or "")
+    bandwidth_status = bandwidth_hog.get("status")
     if nq.get("status") in ("warn", "fail"):
         rpm = nq.get("details", {}).get("responsiveness_rpm")
-        if rpm is not None and rpm < 50:
+        base_rtt = nq.get("details", {}).get("base_rtt_ms")
+        if bandwidth_status in {"warn", "fail"} and bandwidth_reason in {"upload_saturated", "download_saturated"}:
+            headline = "网络被后台上传/同步占满" if bandwidth_reason == "upload_saturated" else "网络被后台下载占满"
+            steps = [
+                item.get("label", item.get("process", ""))
+                for item in bandwidth_hog.get("details", {}).get("top_processes", [])
+                if isinstance(item, dict) and item.get("is_hog")
+            ]
+            if not steps:
+                steps = ["暂时看不出是哪个 App；可以打开活动监视器看上传/下载带宽"]
+            add(
+                "upload-congestion" if bandwidth_reason == "upload_saturated" else "download-congestion",
+                headline,
+                0.95,
+                manual_steps=steps + [
+                    "先暂停上面看到的 App 或下载器，等网络空闲后再用 Codex/ChatGPT 这类实时应用",
+                    "如果暂停后还是卡，再去检查代理节点或切换网络",
+                ],
+            )
+        elif rpm is not None and rpm < 50:
             add("network-quality-poor", "网络响应很慢，可能会很卡", 0.8,
                 manual_steps=["暂停大流量上传/下载", "切换网络或节点", "检查路由器有没有限速或 QoS 设置"])
+        elif base_rtt is not None and base_rtt > 200:
+            add("network-latency-high", "基础延迟偏高，实时应用会变慢", 0.6,
+                manual_steps=["切换网络或节点", "检查路由器是否拥塞"])
         else:
             add("network-quality-degraded", "网络质量下降，延迟偏高或网速低", 0.6)
+
+    # Standalone bandwidth hog without a quality drop (always report to give the user a hint).
+    if bandwidth_status in {"warn", "fail"} and nq.get("status") not in {"warn", "fail"}:
+        add(
+            "bandwidth-hog-detected",
+            "网络本身正常，但后台有大流量上传或下载" if bandwidth_reason == "upload_saturated" else "网络本身正常，但后台在大量下载",
+            0.45,
+            manual_steps=[
+                "暂停上一步列出的 App 或下载器，实时应用会更顺畅",
+            ],
+        )
 
     # Match symptom rules by diagnostic failures.
     # Warnings only trigger a symptom when it explicitly opts in via

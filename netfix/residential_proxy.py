@@ -18,6 +18,7 @@ from urllib.parse import quote, unquote, urlsplit
 from netfix import codex, ip_intel, keychain, proxy_bridge
 from netfix.constants import JOURNAL_DIR
 from netfix.redaction import redact_text
+from netfix import settings as netfix_settings
 from netfix.settings import delete_proxy_profile as delete_stored_proxy_profile
 from netfix.settings import get_proxy_profiles, upsert_proxy_profile
 from netfix.utils import secure_write_json
@@ -31,6 +32,33 @@ SYSTEM_APPLY_CONFIRMATION = "APPLY_PROXY_PROFILE"
 PROXY_ROLLBACK_CONFIRMATION = "ROLLBACK_PROXY_PROFILE"
 BRIDGE_RECOVERY_CONFIRMATION = "RESTORE_STALE_PROXY_BRIDGE"
 BRIDGE_RESTART_CONFIRMATION = "RESTART_STALE_PROXY_BRIDGE"
+
+
+def endpoint_fingerprint(protocol: str, host: str, port: Any, username: str) -> str:
+    """Return a stable fingerprint for ``protocol|host|port|username``.
+
+    The fingerprint intentionally does NOT include the password so that a
+    same-endpoint paste with a new password is treated as the same logical
+    proxy. Compare via :func:`fingerprint_matches` to stay forward-compatible
+    when the format version bumps.
+    """
+    proto = str(protocol or "").strip().lower()
+    host_norm = str(host or "").strip().lower()
+    try:
+        port_norm = int(port or 0)
+    except (TypeError, ValueError):
+        port_norm = 0
+    user_norm = str(username or "").strip()
+    payload = f"{proto}|{host_norm}|{port_norm}|{user_norm}"
+    digest = hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()[:16]
+    return f"v1:{digest}"
+
+
+def fingerprint_matches(fingerprint: Any, protocol: str, host: str, port: Any, username: str) -> bool:
+    """Return True if a stored fingerprint matches the supplied endpoint parts."""
+    if not fingerprint:
+        return False
+    return str(fingerprint) == endpoint_fingerprint(protocol, host, port, username)
 ALLOWED_VALIDATION_TARGET_HOSTS = {
     "www.gstatic.com",
     "cp.cloudflare.com",
@@ -1137,6 +1165,7 @@ def parse_proxy_input(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     profile_id = str(payload.get("id") or uuid.uuid4())
     credential_present = bool(username or password)
+    fingerprint = endpoint_fingerprint(protocol, host, port_i, username)
     profile = {
         "id": profile_id,
         "name": str(payload.get("name") or _safe_name(host, protocol)),
@@ -1144,6 +1173,7 @@ def parse_proxy_input(payload: Dict[str, Any]) -> Dict[str, Any]:
         "host": host,
         "port": port_i,
         "username": username,
+        "endpoint_fingerprint": fingerprint,
         "credential_ref": f"keychain://{keychain.PROXY_SERVICE}/{profile_id}" if credential_present else "",
         "provider": str(payload.get("provider") or ""),
         "expected_geo": payload.get("expected_geo") or {},
@@ -1251,13 +1281,33 @@ def parse_proxy_bundle(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def save_proxy_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Save a non-secret proxy profile and store its password in Keychain."""
+    """Save a non-secret proxy profile and store its password in Keychain.
+
+    If an existing saved profile shares the same
+    :func:`endpoint_fingerprint` (protocol/host/port/username), the existing
+    profile id is reused so repeated pastes do not pile up duplicates.
+    """
     parsed = parse_proxy_input(payload)
     if not parsed.get("ok"):
         parsed.pop("_secret", None)
         return parsed
     profile = dict(parsed["profile"])
     password = parsed.get("_secret", {}).get("password")
+    new_fingerprint = str(profile.get("endpoint_fingerprint") or "")
+    reused_profile_id: Optional[str] = None
+    if new_fingerprint:
+        for existing in get_proxy_profiles():
+            existing_fp = existing.get("endpoint_fingerprint")
+            if existing_fp and str(existing_fp) == new_fingerprint and existing.get("id"):
+                reused_profile_id = str(existing.get("id"))
+                break
+    if reused_profile_id and reused_profile_id != profile.get("id"):
+        profile["id"] = reused_profile_id
+        profile["credential_ref"] = (
+            f"keychain://{keychain.PROXY_SERVICE}/{reused_profile_id}"
+            if (profile.get("credential_ref") or profile.get("username"))
+            else ""
+        )
     if password:
         stored = keychain.set_secret(keychain.PROXY_SERVICE, profile["id"], password)
         if not stored.get("ok"):
@@ -1268,13 +1318,28 @@ def save_proxy_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "warnings": parsed.get("warnings", []),
             }
     profile.pop("password_set", None)
+    if reused_profile_id:
+        existing_meta = next(
+            (item for item in get_proxy_profiles() if item.get("id") == reused_profile_id),
+            None,
+        )
+        if isinstance(existing_meta, dict):
+            for field in ("name", "provider", "expected_geo", "rotation", "bypass_domains", "created_at"):
+                if not profile.get(field) and existing_meta.get(field):
+                    profile[field] = existing_meta[field]
+    now_iso = _utc_now()
+    if not profile.get("created_at"):
+        profile["created_at"] = now_iso
+    profile["last_saved_at"] = now_iso
     saved = upsert_proxy_profile(profile)
     saved["password_set"] = bool(password)
+    saved["deduplicated"] = bool(reused_profile_id)
     return {
         "ok": True,
         "profile": saved,
         "deployment_decision": deployment_decision(saved),
         "warnings": parsed.get("warnings", []),
+        "deduplicated": bool(reused_profile_id),
     }
 
 
@@ -2547,3 +2612,150 @@ def split_profile_path(path: str) -> Tuple[Optional[str], Optional[str]]:
     if len(parts) == 4 and parts[:2] == ["proxy", "profiles"]:
         return parts[2], parts[3]
     return None, None
+
+
+def group_proxy_profiles() -> Dict[str, Any]:
+    """Return profiles grouped by endpoint_fingerprint with a flat list.
+
+    Output shape::
+
+        {
+          "ok": True,
+          "groups": [
+             {
+                "fingerprint": "v1:abcdef...",
+                "canonical_id": "<id>",
+                "count": N,
+                "profile_ids": ["...", "..."],
+                "profiles": [...]
+             },
+             ...
+          ],
+          "duplicate_groups": N,
+          "duplicate_profile_ids": ["..."]
+        }
+
+    A group has ``count > 1`` whenever there are duplicates worth surfacing.
+    The canonical id is the most-recently-saved profile in the group.
+    """
+    active_profile_ids = _active_bridge_profile_ids()
+    profiles = sorted(
+        [dict(item) for item in get_proxy_profiles() if isinstance(item, dict)],
+        key=lambda item: (
+            1 if str(item.get("id") or "") in active_profile_ids else 0,
+            str(item.get("last_saved_at") or item.get("created_at") or ""),
+        ),
+        reverse=True,
+    )
+    by_fp: Dict[str, List[Dict[str, Any]]] = {}
+    for profile in profiles:
+        fingerprint = profile.get("endpoint_fingerprint") or endpoint_fingerprint(
+            profile.get("protocol"),
+            profile.get("host"),
+            profile.get("port"),
+            profile.get("username"),
+        )
+        by_fp.setdefault(str(fingerprint), []).append(profile)
+
+    groups: List[Dict[str, Any]] = []
+    duplicate_profile_ids: List[str] = []
+    for fingerprint, members in by_fp.items():
+        canonical = members[0]
+        canonical_id = str(canonical.get("id") or "")
+        profile_ids = [str(item.get("id") or "") for item in members]
+        if len(members) > 1:
+            duplicate_profile_ids.extend(profile_ids[1:])
+        groups.append({
+            "fingerprint": fingerprint,
+            "canonical_id": canonical_id,
+            "count": len(members),
+            "profile_ids": profile_ids,
+            "profiles": [
+                {
+                    "id": str(item.get("id") or ""),
+                    "name": str(item.get("name") or ""),
+                    "protocol": str(item.get("protocol") or ""),
+                    "host": str(item.get("host") or ""),
+                    "port": int(item.get("port") or 0),
+                    "username": str(item.get("username") or ""),
+                    "last_saved_at": str(item.get("last_saved_at") or ""),
+                    "created_at": str(item.get("created_at") or ""),
+                    "endpoint_fingerprint": str(item.get("endpoint_fingerprint") or fingerprint),
+                    "is_canonical": str(item.get("id") or "") == canonical_id,
+                }
+                for item in members
+            ],
+        })
+
+    groups.sort(key=lambda g: (-int(g.get("count") or 0), str(g.get("canonical_id") or "")))
+    return {
+        "ok": True,
+        "schema_version": "netfix_proxy_profiles_grouped.v1",
+        "groups": groups,
+        "duplicate_groups": sum(1 for g in groups if int(g.get("count") or 0) > 1),
+        "duplicate_profile_ids": duplicate_profile_ids,
+        "total_profiles": len(profiles),
+    }
+
+
+def cleanup_duplicate_profiles() -> Dict[str, Any]:
+    """Delete all but the canonical profile per endpoint_fingerprint group.
+
+    Returns a summary describing how many profiles were removed, which
+    canonical profiles were kept, and which profile ids were deleted.
+    """
+    grouped = group_proxy_profiles()
+    if not grouped.get("ok"):
+        return grouped
+    removed_ids: List[str] = []
+    kept_ids: List[str] = []
+    for group in grouped.get("groups", []):
+        if int(group.get("count") or 0) <= 1:
+            kept_ids.extend(group.get("profile_ids", []))
+            continue
+        canonical_id = str(group.get("canonical_id") or "")
+        for pid in group.get("profile_ids", []):
+            if pid and pid != canonical_id:
+                removed_ids.append(pid)
+        if canonical_id:
+            kept_ids.append(canonical_id)
+
+    removed: List[Dict[str, Any]] = []
+    failed_ids: List[str] = []
+    keychain_warnings: List[str] = []
+    for profile_id in removed_ids:
+        deleted = delete_proxy_profile(profile_id)
+        if deleted.get("ok"):
+            profile = deleted.get("profile")
+            if isinstance(profile, dict):
+                removed.append(profile)
+            if deleted.get("warnings"):
+                keychain_warnings.extend(str(item) for item in deleted.get("warnings", []))
+        else:
+            failed_ids.append(profile_id)
+    return {
+        "ok": not failed_ids,
+        "schema_version": "netfix_proxy_profiles_cleanup.v1",
+        "removed_ids": [str(item.get("id") or "") for item in removed],
+        "removed": removed,
+        "failed_ids": failed_ids,
+        "kept_ids": kept_ids,
+        "duplicate_groups_before": int(grouped.get("duplicate_groups") or 0),
+        "duplicate_groups_after": 0,
+        "total_profiles_after": len(kept_ids),
+        "warnings": keychain_warnings,
+    }
+
+
+def _active_bridge_profile_ids() -> set[str]:
+    """Return profile ids currently owned by an in-process Netfix bridge."""
+    active: set[str] = set()
+    try:
+        for bridge in proxy_bridge.status().get("bridges", []):
+            if isinstance(bridge, dict) and bridge.get("running"):
+                profile_id = str(bridge.get("profile_id") or "")
+                if profile_id:
+                    active.add(profile_id)
+    except Exception:
+        return set()
+    return active

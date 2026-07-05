@@ -203,6 +203,41 @@ _CAUSE_EXPLANATIONS: Dict[str, Dict[str, Any]] = {
         "actions": [],
         "manual_steps": ["如果你需要保留 IPv6，先处理自动代理或代理模式混用，再检查路由器 IPv6 设置。"],
     },
+    "upload-congestion": {
+        "headline": "不是断网，是后台上传把网络挤满了",
+        "explanation": "网络本身能通，但被本机的网盘、同步或下载器占满了。Codex、ChatGPT 这类实时应用会先被排队等待，所以你会感觉「很卡」。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": [
+            "先在「活动监视器」里暂停下面这些 App 的上传/同步，或直接退出",
+            "再重新打开 Codex；不需要去碰代理、IPv6 或 API Key",
+        ],
+    },
+    "download-congestion": {
+        "headline": "后台下载占满了网络",
+        "explanation": "网络本身能通，但被本机的下载器或系统更新占满了带宽。实时应用也会被拖慢。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": [
+            "暂停下面列出的下载器或系统更新，再重新打开 Codex",
+        ],
+    },
+    "bandwidth-hog-detected": {
+        "headline": "后台有大流量在跑",
+        "explanation": "网络本身没问题，但后台 App 在持续上传或下载。如果你要用 Codex 这类实时应用，先暂停它们会更稳。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": [
+            "暂停下面这些 App 的上传/同步或下载",
+        ],
+    },
+    "network-latency-high": {
+        "headline": "基础延迟偏高",
+        "explanation": "测得的基础延迟比平时高。视频会议、AI 流式输出等实时应用会感觉变慢。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": ["切换网络或节点", "检查路由器是否拥塞", "暂停后台上传/下载"],
+    },
 }
 
 

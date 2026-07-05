@@ -54,7 +54,7 @@ RESIDENTIAL_PROXY_PATTERNS: Sequence[re.Pattern[str]] = (
 RESIDENTIAL_SAFE_PATTERNS: Sequence[re.Pattern[str]] = (
     re.compile(r"\b(?:do(?:es)?\s+not|don't|must\s+not|should\s+not|cannot|can't|never|avoid|not\s+claim|not\s+imply|without\s+implying|not\s+guarantee|does\s+not\s+guarantee|no\s+guarantee|no\s+.{0,30}claims?|not\s+be\s+used\s+to)\b", re.I),
     re.compile(r"\b(?:does\s+not\s+provide|does\s+not\s+sell|does\s+not\s+resell|do\s+not\s+market|must\s+avoid)\b", re.I),
-    re.compile(r"不承诺|不保证|不销售|不提供|不内置|不推荐|不得|不能|不要|避免|禁止|不会|不应|不把|不可营销|确认式恢复", re.I),
+    re.compile(r"不承诺|不保证|不销售|不提供|不内置|不推荐|不得|不能|不要|不做|不做.{0,8}节点|避免|禁止|不会|不应|不把|不可营销|确认式恢复", re.I),
 )
 
 DEEPSEEK_VISION_PATTERNS: Sequence[re.Pattern[str]] = (

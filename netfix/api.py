@@ -1177,6 +1177,9 @@ class APIRequestHandler(BaseHTTPRequestHandler):
         if path == "/proxy/profiles":
             return 200, {"ok": True, "profiles": settings.get_proxy_profiles()}
 
+        if path == "/proxy/profiles/grouped":
+            return 200, residential_proxy.group_proxy_profiles()
+
         if path == "/proxy/monitor":
             return 200, proxy_monitor_service.status()
 
@@ -1405,6 +1408,14 @@ class APIRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/proxy/profiles":
             result = residential_proxy.save_proxy_profile(body)
+            if result.get("ok"):
+                result["deduplicated"] = bool(result.get("deduplicated"))
+                if result["deduplicated"] and not isinstance(result.get("warnings"), list):
+                    result["warnings"] = []
+                if result["deduplicated"]:
+                    result["warnings"].append(
+                        "profile_reused_by_endpoint_fingerprint"
+                    )
             if result.get("ok") and bool(body.get("start_monitor") or body.get("auto_start_monitor")):
                 profile = result.get("profile") if isinstance(result.get("profile"), dict) else {}
                 profile_id = str(profile.get("id") or "")
@@ -1599,6 +1610,17 @@ class APIRequestHandler(BaseHTTPRequestHandler):
             if result.get("ok"):
                 return 200, result
             return (404 if result.get("status") == "no_journal" else 400), result
+
+        if path == "/proxy/profiles/cleanup-dupes":
+            return 200, residential_proxy.cleanup_duplicate_profiles()
+
+        profile_id, operation = residential_proxy.split_profile_path(path)
+        if profile_id and operation == "rename":
+            new_name = str(body.get("name") or "")
+            result = settings.rename_proxy_profile(profile_id, new_name)
+            if not result.get("ok"):
+                return (404 if result.get("error") == "profile not found" else 400), result
+            return 200, result
 
         if path != "/run":
             return 404, {"ok": False, "error": "not found"}

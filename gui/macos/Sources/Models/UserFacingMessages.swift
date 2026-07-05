@@ -26,6 +26,9 @@ enum UserFacingErrorCode: String, CaseIterable {
     case permissionDenied = "permission_denied"
     case llmDisabled = "llm_disabled"
     case missingAPIKey = "missing_api_key"
+    case bandwidthHogDetected = "bandwidth_hog_detected"
+    case uploadCongestion = "upload_congestion"
+    case downloadCongestion = "download_congestion"
 }
 
 struct UserFacingMessage {
@@ -251,6 +254,24 @@ enum UserFacingMessages {
             headline: "还没填 AI 密钥",
             nextStep: "到「设置 → AI」选供应商并粘贴 API Key。不填也能照常用诊断和代理部署。",
             technical: "keychain has no API key."
+        ),
+        .bandwidthHogDetected: UserFacingMessage(
+            code: "bandwidth_hog_detected",
+            headline: "网络被后台 App 占满",
+            nextStep: "先在「活动监视器」里暂停看到的上传/下载 App，再重新打开实时应用。",
+            technical: "diagnostic bandwidth_hog detected active upload/download at the process level."
+        ),
+        .uploadCongestion: UserFacingMessage(
+            code: "upload_congestion",
+            headline: "网络被后台上传挤满",
+            nextStep: "先暂停百度网盘、OneDrive、iCloud、网盘或下载器的上传/同步，再试 Codex/ChatGPT 这类实时应用。",
+            technical: "diagnostic bandwidth_hog reason=upload_saturated; top_processes carries process names and direction."
+        ),
+        .downloadCongestion: UserFacingMessage(
+            code: "download_congestion",
+            headline: "网络被后台下载占满",
+            nextStep: "先暂停下载器或系统更新，再重新尝试。",
+            technical: "diagnostic bandwidth_hog reason=download_saturated."
         ),
     ]
 }

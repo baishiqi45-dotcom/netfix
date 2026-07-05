@@ -84,6 +84,7 @@ struct DiagnosticItem: Codable, Identifiable {
     let status: String
     let layer: String?
     let proxyUsed: String?
+    let details: [String: AnyCodable]?
 
     enum CodingKeys: String, CodingKey {
         case name
@@ -91,6 +92,7 @@ struct DiagnosticItem: Codable, Identifiable {
         case status
         case layer
         case proxyUsed = "proxy_used"
+        case details
     }
 
     var id: String { name }
@@ -936,6 +938,10 @@ struct ProxyProfile: Codable, Identifiable {
     let passwordSet: Bool?
     let lastCheck: ProxyCheck?
     let lastIdentityReport: ProxyIdentityReport?
+    let endpointFingerprint: String?
+    let lastSavedAt: String?
+    let createdAt: String?
+    let deduplicated: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -949,6 +955,94 @@ struct ProxyProfile: Codable, Identifiable {
         case passwordSet = "password_set"
         case lastCheck = "last_check"
         case lastIdentityReport = "last_identity_report"
+        case endpointFingerprint = "endpoint_fingerprint"
+        case lastSavedAt = "last_saved_at"
+        case createdAt = "created_at"
+        case deduplicated
+    }
+}
+
+struct ProxyProfileGroup: Codable, Identifiable {
+    let fingerprint: String
+    let canonicalId: String
+    let count: Int
+    let profileIds: [String]
+    let profiles: [ProxyProfileGroupMember]
+
+    var id: String { fingerprint }
+
+    enum CodingKeys: String, CodingKey {
+        case fingerprint
+        case canonicalId = "canonical_id"
+        case count
+        case profileIds = "profile_ids"
+        case profiles
+    }
+}
+
+struct ProxyProfileGroupMember: Codable, Identifiable {
+    let id: String
+    let name: String?
+    let protocolName: String?
+    let host: String?
+    let port: Int?
+    let username: String?
+    let lastSavedAt: String?
+    let createdAt: String?
+    let endpointFingerprint: String?
+    let isCanonical: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case protocolName = "protocol"
+        case host
+        case port
+        case username
+        case lastSavedAt = "last_saved_at"
+        case createdAt = "created_at"
+        case endpointFingerprint = "endpoint_fingerprint"
+        case isCanonical = "is_canonical"
+    }
+}
+
+struct ProxyProfilesGroupedResponse: Codable {
+    let ok: Bool
+    let schemaVersion: String?
+    let groups: [ProxyProfileGroup]
+    let duplicateGroups: Int?
+    let duplicateProfileIds: [String]?
+    let totalProfiles: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case schemaVersion = "schema_version"
+        case groups
+        case duplicateGroups = "duplicate_groups"
+        case duplicateProfileIds = "duplicate_profile_ids"
+        case totalProfiles = "total_profiles"
+    }
+}
+
+struct ProxyProfilesCleanupResponse: Codable {
+    let ok: Bool
+    let schemaVersion: String?
+    let removedIds: [String]?
+    let keptIds: [String]?
+    let duplicateGroupsBefore: Int?
+    let duplicateGroupsAfter: Int?
+    let totalProfilesAfter: Int?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case schemaVersion = "schema_version"
+        case removedIds = "removed_ids"
+        case keptIds = "kept_ids"
+        case duplicateGroupsBefore = "duplicate_groups_before"
+        case duplicateGroupsAfter = "duplicate_groups_after"
+        case totalProfilesAfter = "total_profiles_after"
+        case error
     }
 }
 

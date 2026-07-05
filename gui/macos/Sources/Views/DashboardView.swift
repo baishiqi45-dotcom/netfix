@@ -200,12 +200,126 @@ struct DashboardView: View {
     ]
 
     private var statusCards: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            ForEach(statusGroups, id: \.title) { group in
-                let items = group.ids.flatMap { viewModel.items(for: $0) }
-                layerCard(title: group.title, icon: group.icon, summary: plainSummary(for: group.summaryKey, items: items), items: items)
+        VStack(alignment: .leading, spacing: 12) {
+            responsivenessCard
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                ForEach(statusGroups, id: \.title) { group in
+                    let items = group.ids.flatMap { viewModel.items(for: $0) }
+                    layerCard(title: group.title, icon: group.icon, summary: plainSummary(for: group.summaryKey, items: items), items: items)
+                }
             }
         }
+    }
+
+    @ViewBuilder
+    private var responsivenessCard: some View {
+        let summary = viewModel.responsivenessSummary
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: summary.icon)
+                    .foregroundStyle(summary.color)
+                Text("实时响应")
+                    .font(.headline)
+                Spacer()
+                Label(summary.headline, systemImage: summary.icon)
+                    .font(.caption)
+                    .foregroundStyle(summary.color)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(summary.color.opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            Text(summary.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 12) {
+                responsivenessMetric(label: "延迟", value: summary.latencyLabel, hint: summary.latencyHint, color: summary.latencyColor)
+                responsivenessMetric(label: "稳定性", value: summary.stabilityLabel, hint: summary.stabilityHint, color: summary.stabilityColor)
+            }
+            if let hog = summary.bandwidthHint {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: hog.icon)
+                        .foregroundStyle(hog.color)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(hog.headline)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        Text(hog.detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(8)
+                .background(hog.color.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            DisclosureGroup("查看技术详情") {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let rpm = summary.responsivenessRPM {
+                        Text("• responsiveness_rpm: \(rpm)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let rtt = summary.baseRTTMs {
+                        Text("• base_rtt_ms: \(rtt)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let dl = summary.dlThroughputKbps {
+                        Text("• dl_throughput_kbps: \(dl)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let ul = summary.ulThroughputKbps {
+                        Text("• ul_throughput_kbps: \(ul)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let loss = summary.packetLossPercent {
+                        Text("• packet_loss_percent: \(loss)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if summary.responsivenessRPM == nil && summary.baseRTTMs == nil
+                        && summary.dlThroughputKbps == nil && summary.ulThroughputKbps == nil
+                        && summary.packetLossPercent == nil {
+                        Text("还没有 network_quality / bandwidth_hog 诊断数据。点「一键诊断」后会出现在这里。")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.top, 4)
+            }
+            .font(.caption)
+        }
+        .padding()
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func responsivenessMetric(label: String, value: String, hint: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(color)
+            Text(hint)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private enum PlainSummaryKey { case network, proxy, targets }
@@ -1795,6 +1909,198 @@ final class DashboardViewModel: ObservableObject {
 
     func items(for layer: String) -> [DiagnosticItem] {
         report?.diagnostics.filter { $0.layer?.lowercased() == layer } ?? []
+    }
+
+    // MARK: - 实时响应摘要
+
+    struct ResponsivenessMetric {
+        let label: String
+        let hint: String
+        let color: Color
+    }
+
+    struct BandwidthHint {
+        let icon: String
+        let color: Color
+        let headline: String
+        let detail: String
+    }
+
+    struct ResponsivenessSummary {
+        let headline: String
+        let detail: String
+        let icon: String
+        let color: Color
+        let latencyLabel: String
+        let latencyHint: String
+        let latencyColor: Color
+        let stabilityLabel: String
+        let stabilityHint: String
+        let stabilityColor: Color
+        let bandwidthHint: BandwidthHint?
+        let responsivenessRPM: Int?
+        let baseRTTMs: Int?
+        let dlThroughputKbps: Int?
+        let ulThroughputKbps: Int?
+        let packetLossPercent: Double?
+    }
+
+    var responsivenessSummary: ResponsivenessSummary {
+        guard let report else {
+            return ResponsivenessSummary(
+                headline: "还没诊断",
+                detail: "点「一键诊断」后这里会显示「实时响应 / 延迟 / 稳定性」三块人话结论。",
+                icon: "questionmark.circle",
+                color: .secondary,
+                latencyLabel: "未知",
+                latencyHint: "还没采集网络质量",
+                latencyColor: .secondary,
+                stabilityLabel: "未知",
+                stabilityHint: "还没采集丢包数据",
+                stabilityColor: .secondary,
+                bandwidthHint: nil,
+                responsivenessRPM: nil,
+                baseRTTMs: nil,
+                dlThroughputKbps: nil,
+                ulThroughputKbps: nil,
+                packetLossPercent: nil
+            )
+        }
+        let networkQuality = report.diagnostics.first { $0.name == "network_quality" }
+        let bandwidthHog = report.diagnostics.first { $0.name == "bandwidth_hog" }
+        let pathTrace = report.diagnostics.first { $0.name == "path_trace" }
+        let nqDetails = networkQuality?.details ?? [:]
+        let bandwidthDetails = bandwidthHog?.details ?? [:]
+        let pathDetails = pathTrace?.details ?? [:]
+
+        let rpm = nqDetails["responsiveness_rpm"]?.intValue
+        let baseRTT = nqDetails["base_rtt_ms"]?.doubleValue.map { Int($0) }
+        let dlKbps = nqDetails["dl_throughput_kbps"]?.doubleValue.map { Int($0) }
+        let ulKbps = nqDetails["ul_throughput_kbps"]?.doubleValue.map { Int($0) }
+        let packetLoss: Double? = pathDetails["hops"]?.arrayValue?
+            .compactMap { item -> Double? in
+                guard let dict = item.objectValue,
+                      let loss = dict["loss_percent"]?.doubleValue else { return nil }
+                return loss
+            }
+            .max()
+
+        let (latencyLabel, latencyHint, latencyColor): (String, String, Color) = {
+            if baseRTT == nil { return ("未知", "没有 base_rtt 数据", .secondary) }
+            if let rtt = baseRTT {
+                if rtt <= 60 { return ("低", "基础延迟 \(rtt)ms 附近", .green) }
+                if rtt <= 150 { return ("偏高", "基础延迟 \(rtt)ms，实时应用会感觉拖慢", .orange) }
+                return ("很高", "基础延迟 \(rtt)ms，Codex/ChatGPT 几乎不可用", .red)
+            }
+            return ("未知", "", .secondary)
+        }()
+
+        let (stabilityLabel, stabilityHint, stabilityColor): (String, String, Color) = {
+            if let loss = packetLoss {
+                if loss == 0 { return ("稳定", "路径上几乎没有丢包", .green) }
+                if loss <= 5 { return ("抖动", "路径上出现轻微丢包（\(Int(loss))%）", .orange) }
+                return ("丢包", "路径丢包 \(Int(loss))%，建议切换网络或节点", .red)
+            }
+            return ("未知", "没有路径丢包数据", .secondary)
+        }()
+
+        let (headline, icon, color, detail): (String, String, Color, String) = {
+            let bandwidthReason = bandwidthDetails["reason"]?.stringValue ?? ""
+            let bandwidthStatus = bandwidthHog?.status ?? ""
+            if bandwidthStatus == "warn" && bandwidthReason == "upload_saturated" {
+                let topNames = bandwidthTopProcessNames(bandwidthDetails["top_processes"])
+                return (
+                    "很卡",
+                    "tortoise.fill",
+                    Color.red,
+                    topNames.isEmpty
+                        ? "网络被后台上传挤满；先暂停网盘 / 同步，再开实时应用。"
+                        : "网络被后台上传挤满（疑似：\(topNames.joined(separator: "、"))）。先暂停它们再试。"
+                )
+            }
+            if bandwidthStatus == "warn" && bandwidthReason == "download_saturated" {
+                return (
+                    "很卡",
+                    "tortoise.fill",
+                    Color.red,
+                    "网络被后台下载占满；先暂停下载器或系统更新。"
+                )
+            }
+            if let rtt = baseRTT, rtt > 200 {
+                return ("很卡", "tortoise.fill", Color.red, "基础延迟偏高，实时应用会明显拖慢。")
+            }
+            if let rtt = baseRTT, rtt > 120 {
+                return ("偶尔卡", "tortoise", Color.orange, "基础延迟在 \(rtt)ms 附近，AI 流式输出可能掉字。")
+            }
+            if let rpm = rpm {
+                if rpm < 50 { return ("很卡", "tortoise.fill", Color.red, "响应性 \(rpm)，实时应用几乎不可用。") }
+                if rpm < 200 { return ("偶尔卡", "tortoise", Color.orange, "响应性 \(rpm)，AI 流式输出会出现延迟。") }
+                return ("顺畅", "hare.fill", Color.green, "响应性 \(rpm)，日常使用没问题。")
+            }
+            return ("未知", "questionmark.circle", Color.secondary, "还没有 network_quality 诊断结果。")
+        }()
+
+        let bandwidthHint: BandwidthHint? = {
+            guard let bandwidthHog, let reason = bandwidthDetails["reason"]?.stringValue else { return nil }
+            let status = bandwidthHog.status
+            guard status == "warn" || status == "fail" else { return nil }
+            let icon: String = reason == "upload_saturated" ? "icloud.and.arrow.up" : "arrow.down.circle"
+            let color: Color = reason == "upload_saturated" ? Color.red : Color.orange
+            let topNames = bandwidthTopProcessNames(bandwidthDetails["top_processes"])
+            let headline = reason == "upload_saturated"
+                ? "后台上传疑似挤满网络"
+                : "后台下载疑似占满网络"
+            let detail = topNames.isEmpty
+                ? (reason == "upload_saturated"
+                    ? "Netfix 看到大流量上行；先暂停网盘、同步或下载器，再试 Codex。"
+                    : "Netfix 看到大流量下行；先暂停下载器或系统更新，再试 Codex。")
+                : "Netfix 看到 \(topNames.joined(separator: "、")) 在大量跑，先暂停它们。"
+            return BandwidthHint(icon: icon, color: color, headline: headline, detail: detail)
+        }()
+
+        return ResponsivenessSummary(
+            headline: headline,
+            detail: detail,
+            icon: icon,
+            color: color,
+            latencyLabel: latencyLabel,
+            latencyHint: latencyHint,
+            latencyColor: latencyColor,
+            stabilityLabel: stabilityLabel,
+            stabilityHint: stabilityHint,
+            stabilityColor: stabilityColor,
+            bandwidthHint: bandwidthHint,
+            responsivenessRPM: rpm,
+            baseRTTMs: baseRTT,
+            dlThroughputKbps: dlKbps,
+            ulThroughputKbps: ulKbps,
+            packetLossPercent: packetLoss
+        )
+    }
+
+    private func intValue(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? Double { return Int(value) }
+        if let value = value as? NSNumber { return value.intValue }
+        return nil
+    }
+
+    private func doubleValue(_ value: Any?) -> Double? {
+        if let value = value as? Double { return value }
+        if let value = value as? Int { return Double(value) }
+        if let value = value as? NSNumber { return value.doubleValue }
+        return nil
+    }
+
+    private func bandwidthTopProcessNames(_ raw: AnyCodable?) -> [String] {
+        guard let items = raw?.arrayValue else { return [] }
+        var names: [String] = []
+        for item in items.prefix(3) {
+            guard let dict = item.objectValue else { continue }
+            let label = dict["label"]?.stringValue ?? dict["process"]?.stringValue ?? ""
+            if !label.isEmpty { names.append(label) }
+        }
+        return names
     }
 }
 

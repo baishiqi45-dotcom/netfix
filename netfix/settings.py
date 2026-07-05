@@ -282,6 +282,76 @@ def delete_proxy_profile(profile_id: str) -> Dict[str, Any]:
     return {"ok": True, "profile_id": profile_id, "profile": removed}
 
 
+def rename_proxy_profile(profile_id: str, name: str) -> Dict[str, Any]:
+    """Rename one saved proxy profile without touching credentials."""
+    profile_id = str(profile_id or "")
+    new_name = str(name or "").strip()
+    if not profile_id:
+        return {"ok": False, "error": "profile_id is required"}
+    if not new_name:
+        return {"ok": False, "error": "name is required"}
+    settings = load_settings()
+    profiles = settings.get("proxy_profiles", [])
+    if not isinstance(profiles, list):
+        return {"ok": False, "error": "no proxy profiles saved", "profile_id": profile_id}
+    target = None
+    for idx, item in enumerate(profiles):
+        if isinstance(item, dict) and str(item.get("id") or "") == profile_id:
+            target = idx
+            break
+    if target is None:
+        return {"ok": False, "error": "profile not found", "profile_id": profile_id}
+    profiles[target] = dict(profiles[target])
+    profiles[target]["name"] = new_name
+    profiles[target]["updated_at"] = _utc_now_iso()
+    settings["proxy_profiles"] = profiles
+    save_settings(settings)
+    return {"ok": True, "profile_id": profile_id, "profile": copy.deepcopy(profiles[target])}
+
+
+def _utc_now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
+def delete_proxy_profiles_by_ids(profile_ids: List[str]) -> Dict[str, Any]:
+    """Bulk-delete saved proxy profiles by id (used by cleanup-dupes).
+
+    Returns the list of removed profile ids and the snapshot of each removed
+    profile so callers can update the Keychain if needed.
+    """
+    wanted = {str(item) for item in profile_ids or [] if str(item)}
+    if not wanted:
+        return {"ok": True, "removed": [], "kept": [], "missing": []}
+    settings = load_settings()
+    profiles = settings.get("proxy_profiles", [])
+    if not isinstance(profiles, list):
+        profiles = []
+    removed: List[Dict[str, Any]] = []
+    missing: List[str] = []
+    kept: List[Dict[str, Any]] = []
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        pid = str(profile.get("id") or "")
+        if pid in wanted:
+            removed.append(copy.deepcopy(profile))
+        else:
+            kept.append(profile)
+        if pid in wanted and pid not in [str(r.get("id") or "") for r in removed]:
+            missing.append(pid)
+    missing = [pid for pid in wanted if not any(str(r.get("id") or "") == pid for r in removed)]
+    settings["proxy_profiles"] = kept
+    save_settings(settings)
+    return {
+        "ok": True,
+        "removed": removed,
+        "removed_ids": [str(r.get("id") or "") for r in removed],
+        "kept": len(kept),
+        "missing": missing,
+    }
+
+
 def get_proxy_monitor_settings() -> Dict[str, Any]:
     """Return persisted residential/custom proxy monitor settings."""
     data = load_settings().get("proxy_monitor", {})

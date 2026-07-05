@@ -108,6 +108,7 @@ _DIAGNOSTIC_DISPLAY_NAMES = {
     "default_route": "默认上网路线",
     "packet_loss": "丢包情况",
     "traceroute": "访问路径",
+    "bandwidth_hog": "后台网络占用",
 }
 
 
@@ -325,6 +326,7 @@ _LAYER_DIAGNOSTICS = [
     "ipv6_leak",
     "path_trace",
     "network_quality",
+    "bandwidth_hog",
 ]
 
 
