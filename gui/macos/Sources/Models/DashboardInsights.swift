@@ -4,6 +4,7 @@ import Foundation
 /// Backed by GET /dashboard/insights.
 struct DashboardInsightsResponse: Codable {
     let ok: Bool?
+    let primaryInsight: DashboardPrimaryInsight?
     let networkActivity: NetworkActivitySummary?
     let lagEvents: [LagEventSummary]
     let proxyHealthTrend: ProxyHealthTrend?
@@ -11,11 +12,20 @@ struct DashboardInsightsResponse: Codable {
 
     enum CodingKeys: String, CodingKey {
         case ok
+        case primaryInsight = "primary_insight"
         case networkActivity = "network_activity"
         case lagEvents = "lag_events"
         case proxyHealthTrend = "proxy_health_trend"
         case monitor
     }
+}
+
+struct DashboardPrimaryInsight: Codable {
+    let state: String?
+    let severity: String?
+    let headline: String?
+    let detail: String?
+    let action: String?
 }
 
 struct NetworkActivityMonitorState: Codable {

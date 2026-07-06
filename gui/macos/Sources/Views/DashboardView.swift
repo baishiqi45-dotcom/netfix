@@ -192,7 +192,7 @@ struct DashboardView: View {
 
     // MARK: - 状态卡片
 
-    /// 三张人话卡片：网络 / 代理 / 目标。技术细节折叠在「查看技术详情」。
+    /// 三张状态卡片：网络 / 代理 / 目标。技术细节折叠在「查看技术详情」。
     private let statusGroups: [(ids: [String], title: String, icon: String, summaryKey: PlainSummaryKey)] = [
         (["network", "dns", "path"], "网络连接", "wifi", .network),
         (["proxy", "egress"], "代理状态", "network", .proxy),
@@ -218,7 +218,7 @@ struct DashboardView: View {
             HStack(alignment: .center, spacing: 8) {
                 Image(systemName: summary.icon)
                     .foregroundStyle(summary.color)
-                Text("实时响应")
+                Text("网络质量")
                     .font(.headline)
                 Spacer()
                 Label(summary.headline, systemImage: summary.icon)
@@ -232,13 +232,25 @@ struct DashboardView: View {
             Text(summary.detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            HStack(alignment: .top, spacing: 12) {
-                responsivenessMetric(label: "延迟", value: summary.latencyLabel, hint: summary.latencyHint, color: summary.latencyColor)
-                responsivenessMetric(label: "稳定性", value: summary.stabilityLabel, hint: summary.stabilityHint, color: summary.stabilityColor)
+            if let insight = viewModel.insights?.primaryInsight {
+                primaryInsightSection(insight)
             }
-            networkActivityTop3Section
-            recentLagEventsSection
-            proxyHealthTrendSection
+            if summary.showMetrics {
+                HStack(alignment: .top, spacing: 12) {
+                    responsivenessMetric(label: "速度", value: summary.speedLabel, hint: summary.speedHint, color: summary.speedColor)
+                    responsivenessMetric(label: "延迟", value: summary.latencyLabel, hint: summary.latencyHint, color: summary.latencyColor)
+                    responsivenessMetric(label: "稳定性", value: summary.stabilityLabel, hint: summary.stabilityHint, color: summary.stabilityColor)
+                }
+            }
+            if summary.showMetrics || viewModel.hasBusyNetworkActivity {
+                networkActivityTop3Section
+            }
+            if summary.showMetrics || !(viewModel.insights?.lagEvents ?? []).isEmpty {
+                recentLagEventsSection
+            }
+            if summary.showMetrics || !(viewModel.insights?.proxyHealthTrend?.samples ?? []).isEmpty {
+                proxyHealthTrendSection
+            }
             if let hog = summary.bandwidthHint {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: hog.icon)
@@ -306,6 +318,59 @@ struct DashboardView: View {
     }
 
     @ViewBuilder
+    private func primaryInsightSection(_ insight: DashboardPrimaryInsight) -> some View {
+        let color = primaryInsightColor(insight.severity)
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: primaryInsightIcon(insight.state, severity: insight.severity))
+                .foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(insight.headline ?? "当前状态")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                if let detail = insight.detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let action = insight.action, !action.isEmpty {
+                    Text("\(insight.severity == "ok" ? "当前" : "可以做")：\(action)")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(color)
+                }
+            }
+            Spacer()
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func primaryInsightColor(_ severity: String?) -> Color {
+        switch severity {
+        case "ok": return .green
+        case "warn": return .blue
+        case "fail": return .orange
+        default: return .secondary
+        }
+    }
+
+    private func primaryInsightIcon(_ state: String?, severity: String?) -> String {
+        switch state {
+        case "busyUpload": return "icloud.and.arrow.up"
+        case "busyDownload": return "arrow.down.circle"
+        case "recentLag": return "clock.arrow.circlepath"
+        case "authFailing": return "key.slash"
+        case "failing": return "network.slash"
+        case "slow": return "tortoise"
+        case "notSampled": return "play.circle"
+        case "activityUnavailable": return "info.circle"
+        default:
+            return severity == "ok" ? "checkmark.circle" : "info.circle"
+        }
+    }
+
+    @ViewBuilder
     private func responsivenessMetric(label: String, value: String, hint: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
@@ -329,7 +394,7 @@ struct DashboardView: View {
     private var networkActivityTop3Section: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("谁在占用网络", systemImage: "arrow.up.arrow.down.circle")
+                Label("后台网络活动", systemImage: "arrow.up.arrow.down.circle")
                     .font(.subheadline)
                     .fontWeight(.semibold)
                 Spacer()
@@ -342,8 +407,9 @@ struct DashboardView: View {
 
             if let activity = viewModel.insights?.networkActivity {
                 let processes = activity.topProcesses.filter { $0.ignored != true }
+                let busy = activity.state == "busyUpload" || activity.state == "busyDownload"
                 if activity.state == "notSampled" {
-                    Text("还没采样。点「一键诊断」后会显示哪个 App 在大量上传或下载。")
+                    Text("还没采样。运行一次检查后，会显示后台是否有较高流量。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else if activity.state == "unavailable" {
@@ -351,33 +417,28 @@ struct DashboardView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else if processes.isEmpty {
-                    Text(activity.headline ?? "没有看到明显后台占用。")
+                    Text(activity.headline ?? "后台网络活动平稳。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                } else {
+                } else if busy {
                     ForEach(processes.prefix(3)) { process in
-                        HStack(spacing: 8) {
-                            Image(systemName: process.direction == "upload" ? "arrow.up.circle" : "arrow.down.circle")
-                                .foregroundStyle(process.direction == "upload" ? Color.orange : Color.blue)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(process.displayName) · \(directionLabel(process.direction)) · \(rateLabel(process))")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                Text(process.direction == "upload" ? "如果 Codex 或视频会议很卡，先暂停它试试。" : "如果网页和 AI 都变慢，先暂停下载任务试试。")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                        networkActivityProcessRow(process, actionable: true)
+                    }
+                } else {
+                    Text(activity.headline ?? "后台网络活动平稳。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    DisclosureGroup("查看当前活动") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(processes.prefix(3)) { process in
+                                networkActivityProcessRow(process, actionable: false)
                             }
-                            Spacer()
-                            Button("别再提醒这个 App") {
-                                Task { await viewModel.ignoreNetworkProcess(process) }
-                            }
-                            .font(.caption2)
-                            .buttonStyle(.borderless)
                         }
                     }
+                    .font(.caption)
                 }
             } else {
-                Text("还没读取后台占用。点「一键诊断」后会显示。")
+                Text("还没读取后台活动。运行一次检查后会显示。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -388,14 +449,40 @@ struct DashboardView: View {
     }
 
     @ViewBuilder
+    private func networkActivityProcessRow(_ process: NetworkActivityProcess, actionable: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: process.direction == "upload" ? "arrow.up.circle" : "arrow.down.circle")
+                .foregroundStyle(process.direction == "upload" ? Color.blue : Color.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(process.displayName) · \(directionLabel(process.direction)) · \(rateLabel(process))")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Text(actionable
+                    ? (process.direction == "upload" ? "如需优先保证实时应用，可暂停后复查。" : "如需优先保证实时应用，可暂停下载后复查。")
+                    : "当前只是活动记录，不代表异常。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if actionable {
+                Button("这次不提醒") {
+                    Task { await viewModel.ignoreNetworkProcess(process) }
+                }
+                .font(.caption2)
+                .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    @ViewBuilder
     private var recentLagEventsSection: some View {
         let events = Array((viewModel.insights?.lagEvents ?? []).reversed())
         VStack(alignment: .leading, spacing: 6) {
-            Label("最近卡顿", systemImage: "clock.arrow.circlepath")
+            Label("近期网络事件", systemImage: "clock.arrow.circlepath")
                 .font(.subheadline)
                 .fontWeight(.semibold)
             if events.isEmpty {
-                Text("最近没有记录到明显卡顿。")
+                Text("近期没有记录到明显影响。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -443,13 +530,13 @@ struct DashboardView: View {
             ? event.suspectedCause!
             : (top?.displayName ?? "后台任务")
         return HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(.orange)
+            Image(systemName: "clock.arrow.circlepath")
+                .foregroundStyle(.blue)
             VStack(alignment: .leading, spacing: 2) {
-                Text(event.headline ?? "网络有点卡")
+                Text(event.headline ?? "近期网络事件")
                     .font(.caption)
                     .fontWeight(.semibold)
-                Text("\(eventTimeLabel(event.timestamp)) · 疑似：\(cause)")
+                Text("\(eventTimeLabel(event.timestamp)) · 上次相关：\(cause)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -543,8 +630,8 @@ struct DashboardView: View {
         }
         if hasWarn {
             switch key {
-            case .network: return ("需关注", "网络能通但有风险点")
-            case .proxy:   return ("需关注", "代理在用，但刚才一次检查没通过")
+            case .network: return ("待确认", "网络可用，有几项信息需要复查")
+            case .proxy:   return ("待确认", "代理可用性需要再确认")
             case .targets: return ("部分失败", "只有部分目标网站能打开")
             }
         }
@@ -742,7 +829,7 @@ struct DashboardView: View {
     }
 
     /// 把 reason_code / HTTP 400 / proxy_used / layer / traceback / raw JSON
-    /// 这类普通用户不该看到的词替换成人话。
+    /// 这类内部词替换成用户可读说明。
     private func scrubInternalPhrases(_ raw: String) -> String {
         var out = raw
         let replacements: [(String, String)] = [
@@ -867,7 +954,7 @@ struct DashboardView: View {
         )
     }
 
-    // MARK: - 首页状态条（一句人话）
+    // MARK: - 首页状态条
 
     @ViewBuilder
     private var landingStateBanner: some View {
@@ -1787,7 +1874,7 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
-    /// 「检查我的代理参数格式」专用：基于本地规则给出人话提示。
+    /// 「检查我的代理参数格式」专用：基于本地规则给出清楚提示。
     func checkProxyInputFormat() async {
         let headline = "代理参数格式参考"
         let body = "支持的格式：\n• host:port:user:pass（最常见）\n• http://user:pass@host:port\n• socks5h://user:pass@host:port\n• 多行带表头的列表\n不支持：ss://、vmess://、Clash 订阅链接。\n保存时密码只写入本机密码库。"
@@ -1894,8 +1981,10 @@ final class DashboardViewModel: ObservableObject {
             headline = result.explanation?.headline ?? result.summaryHeadline
             await refreshDashboardInsights()
         } catch {
-            errorMessage = error.localizedDescription
-            headline = "修复失败"
+            let message = error.localizedDescription
+            let card = UserFacingMessages.classify(message)
+            errorMessage = message
+            headline = card.code == UserFacingErrorCode.ipv6FallbackRisk.rawValue ? card.headline : "修复失败"
         }
         stopWork()
     }
@@ -2154,7 +2243,12 @@ final class DashboardViewModel: ObservableObject {
         report?.diagnostics.filter { $0.layer?.lowercased() == layer } ?? []
     }
 
-    // MARK: - 实时响应摘要
+    var hasBusyNetworkActivity: Bool {
+        let state = insights?.networkActivity?.state
+        return state == "busyUpload" || state == "busyDownload" || state == "unavailable"
+    }
+
+    // MARK: - 网络质量摘要
 
     struct ResponsivenessMetric {
         let label: String
@@ -2174,6 +2268,10 @@ final class DashboardViewModel: ObservableObject {
         let detail: String
         let icon: String
         let color: Color
+        let speedLabel: String
+        let speedHint: String
+        let speedColor: Color
+        let showMetrics: Bool
         let latencyLabel: String
         let latencyHint: String
         let latencyColor: Color
@@ -2192,9 +2290,13 @@ final class DashboardViewModel: ObservableObject {
         guard let report else {
             return ResponsivenessSummary(
                 headline: "还没诊断",
-                detail: "点「一键诊断」后这里会显示「实时响应 / 延迟 / 稳定性」三块人话结论。",
+                detail: "运行一次检查后，这里会显示速度、延迟和稳定性。",
                 icon: "questionmark.circle",
                 color: .secondary,
+                speedLabel: "未知",
+                speedHint: "还没采集速度数据",
+                speedColor: .secondary,
+                showMetrics: false,
                 latencyLabel: "未知",
                 latencyHint: "还没采集网络质量",
                 latencyColor: .secondary,
@@ -2220,6 +2322,9 @@ final class DashboardViewModel: ObservableObject {
         let baseRTT = nqDetails["base_rtt_ms"]?.doubleValue.map { Int($0) }
         let dlKbps = nqDetails["dl_throughput_kbps"]?.doubleValue.map { Int($0) }
         let ulKbps = nqDetails["ul_throughput_kbps"]?.doubleValue.map { Int($0) }
+        let qualityStatus = networkQuality?.status ?? ""
+        let qualityWarnWithoutNumbers = (qualityStatus == "warn" || qualityStatus == "fail")
+            && rpm == nil && baseRTT == nil && dlKbps == nil && ulKbps == nil
         let packetLoss: Double? = pathDetails["hops"]?.arrayValue?
             .compactMap { item -> Double? in
                 guard let dict = item.objectValue,
@@ -2228,12 +2333,45 @@ final class DashboardViewModel: ObservableObject {
             }
             .max()
 
+        let (speedLabel, speedHint, speedColor): (String, String, Color) = {
+            if dlKbps == nil && ulKbps == nil {
+                if qualityWarnWithoutNumbers {
+                    return ("待确认", "本次没有拿到速度数据", .blue)
+                }
+                return ("未知", "没有吞吐数据", .secondary)
+            }
+            let down = dlKbps.map { Double($0) / 1_000.0 }
+            let up = ulKbps.map { Double($0) / 1_000.0 }
+            let hint: String = {
+                switch (down, up) {
+                case let (.some(down), .some(up)):
+                    return String(format: "下载 %.1f Mbps / 上传 %.1f Mbps", down, up)
+                case let (.some(down), .none):
+                    return String(format: "下载 %.1f Mbps", down)
+                case let (.none, .some(up)):
+                    return String(format: "上传 %.1f Mbps", up)
+                default:
+                    return "没有吞吐数据"
+                }
+            }()
+            if let down, down < 5 {
+                return ("偏低", hint, .blue)
+            }
+            if let up, up < 1 {
+                return ("偏低", hint, .blue)
+            }
+            if let down, down >= 25, (up ?? 3) >= 3 {
+                return ("充足", hint, .green)
+            }
+            return ("够用", hint, .green)
+        }()
+
         let (latencyLabel, latencyHint, latencyColor): (String, String, Color) = {
             if baseRTT == nil { return ("未知", "没有 base_rtt 数据", .secondary) }
             if let rtt = baseRTT {
                 if rtt <= 60 { return ("低", "基础延迟 \(rtt)ms 附近", .green) }
-                if rtt <= 150 { return ("偏高", "基础延迟 \(rtt)ms，实时应用会感觉拖慢", .orange) }
-                return ("很高", "基础延迟 \(rtt)ms，Codex/ChatGPT 几乎不可用", .red)
+                if rtt <= 150 { return ("中等", "基础延迟 \(rtt)ms，实时应用会有等待感", .blue) }
+                return ("较高", "基础延迟 \(rtt)ms，会有明显等待感", .orange)
             }
             return ("未知", "", .secondary)
         }()
@@ -2241,8 +2379,8 @@ final class DashboardViewModel: ObservableObject {
         let (stabilityLabel, stabilityHint, stabilityColor): (String, String, Color) = {
             if let loss = packetLoss {
                 if loss == 0 { return ("稳定", "路径上几乎没有丢包", .green) }
-                if loss <= 5 { return ("抖动", "路径上出现轻微丢包（\(Int(loss))%）", .orange) }
-                return ("丢包", "路径丢包 \(Int(loss))%，建议切换网络或节点", .red)
+                if loss <= 5 { return ("轻微波动", "路径上有轻微丢包（\(Int(loss))%）", .blue) }
+                return ("丢包较明显", "路径丢包 \(Int(loss))%，换网络或节点后再试", .orange)
             }
             return ("未知", "没有路径丢包数据", .secondary)
         }()
@@ -2253,32 +2391,35 @@ final class DashboardViewModel: ObservableObject {
             if bandwidthStatus == "warn" && bandwidthReason == "upload_saturated" {
                 let topNames = bandwidthTopProcessNames(bandwidthDetails["top_processes"])
                 return (
-                    "很卡",
-                    "tortoise.fill",
-                    Color.red,
+                    "响应较慢",
+                    "speedometer",
+                    Color.blue,
                     topNames.isEmpty
-                        ? "网络被后台上传挤满；先暂停网盘 / 同步，再开实时应用。"
-                        : "网络被后台上传挤满（疑似：\(topNames.joined(separator: "、"))）。先暂停它们再试。"
+                        ? "检测到上行流量较高。如需优先保证实时应用，可暂停同步或上传后复查。"
+                        : "检测到 \(topNames.joined(separator: "、")) 上行流量较高。如需优先保证实时应用，可暂停后复查。"
                 )
             }
             if bandwidthStatus == "warn" && bandwidthReason == "download_saturated" {
                 return (
-                    "很卡",
-                    "tortoise.fill",
-                    Color.red,
-                    "网络被后台下载占满；先暂停下载器或系统更新。"
+                    "响应较慢",
+                    "speedometer",
+                    Color.blue,
+                    "检测到下行流量较高。如需优先保证实时应用，可暂停下载或系统更新后复查。"
                 )
             }
             if let rtt = baseRTT, rtt > 200 {
-                return ("很卡", "tortoise.fill", Color.red, "基础延迟偏高，实时应用会明显拖慢。")
+                return ("响应较慢", "speedometer", Color.blue, "基础延迟较高，实时应用会有明显等待。")
             }
             if let rtt = baseRTT, rtt > 120 {
-                return ("偶尔卡", "tortoise", Color.orange, "基础延迟在 \(rtt)ms 附近，AI 流式输出可能掉字。")
+                return ("响应一般", "speedometer", Color.blue, "基础延迟在 \(rtt)ms 附近，实时输出可能会慢一点。")
             }
             if let rpm = rpm {
-                if rpm < 50 { return ("很卡", "tortoise.fill", Color.red, "响应性 \(rpm)，实时应用几乎不可用。") }
-                if rpm < 200 { return ("偶尔卡", "tortoise", Color.orange, "响应性 \(rpm)，AI 流式输出会出现延迟。") }
+                if rpm < 50 { return ("响应较慢", "speedometer", Color.blue, "响应性 \(rpm)，实时应用会有明显等待。") }
+                if rpm < 200 { return ("响应一般", "speedometer", Color.blue, "响应性 \(rpm)，实时输出可能会慢一点。") }
                 return ("顺畅", "hare.fill", Color.green, "响应性 \(rpm)，日常使用没问题。")
+            }
+            if qualityWarnWithoutNumbers {
+                return ("可用", "checkmark.circle", Color.green, "网络可用；本次没有拿到速度/延迟数据，可重新检测确认。")
             }
             return ("未知", "questionmark.circle", Color.secondary, "还没有速度和延迟检测结果。")
         }()
@@ -2288,24 +2429,30 @@ final class DashboardViewModel: ObservableObject {
             let status = bandwidthHog.status
             guard status == "warn" || status == "fail" else { return nil }
             let icon: String = reason == "upload_saturated" ? "icloud.and.arrow.up" : "arrow.down.circle"
-            let color: Color = reason == "upload_saturated" ? Color.red : Color.orange
+            let color: Color = Color.blue
             let topNames = bandwidthTopProcessNames(bandwidthDetails["top_processes"])
             let headline = reason == "upload_saturated"
-                ? "后台上传疑似挤满网络"
-                : "后台下载疑似占满网络"
+                ? "检测到上行流量较高"
+                : "检测到下行流量较高"
             let detail = topNames.isEmpty
                 ? (reason == "upload_saturated"
-                    ? "Netfix 看到大流量上行；先暂停网盘、同步或下载器，再试 Codex。"
-                    : "Netfix 看到大流量下行；先暂停下载器或系统更新，再试 Codex。")
-                : "Netfix 看到 \(topNames.joined(separator: "、")) 在大量跑，先暂停它们。"
+                    ? "如需优先保证实时应用，可先暂停同步或上传后复查。"
+                    : "如需优先保证实时应用，可先暂停下载或系统更新后复查。")
+                : "\(topNames.joined(separator: "、")) 的流量较高；需要优先保证实时应用时，可暂停后复查。"
             return BandwidthHint(icon: icon, color: color, headline: headline, detail: detail)
         }()
+
+        let showMetrics = rpm != nil || baseRTT != nil || dlKbps != nil || ulKbps != nil || packetLoss != nil || qualityWarnWithoutNumbers
 
         return ResponsivenessSummary(
             headline: headline,
             detail: detail,
             icon: icon,
             color: color,
+            speedLabel: speedLabel,
+            speedHint: speedHint,
+            speedColor: speedColor,
+            showMetrics: showMetrics,
             latencyLabel: latencyLabel,
             latencyHint: latencyHint,
             latencyColor: latencyColor,

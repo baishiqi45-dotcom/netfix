@@ -867,14 +867,14 @@ struct SettingsView: View {
                         Button {
                             Task { await prepareProxyDeployment(profile) }
                         } label: {
-                            Label("下一步：开始使用代理", systemImage: "play.circle.fill")
+                            Label("开始使用代理", systemImage: "play.circle.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(!backend.isReady)
                     }
                 } else {
-                        Text("下一步：粘贴整行参数 → 检查并保存到这台 Mac → 开始使用代理。")
+                        Text("流程：粘贴整行参数 → 检查并保存到这台 Mac → 开始使用代理。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

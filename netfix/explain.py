@@ -85,21 +85,21 @@ _CAUSE_EXPLANATIONS: Dict[str, Dict[str, Any]] = {
         "manual_steps": [],
     },
     "dns-leak": {
-        "headline": "DNS 在泄漏你的真实位置",
-        "explanation": "代理已经开启，但 DNS 仍然走本地或运营商网络去解析。目标网站能通过 DNS 记录看到你的真实位置。",
+        "headline": "DNS 可能没有走代理",
+        "explanation": "代理已经开启，但 DNS 仍然走本地或运营商网络解析。需要更完整的代理路径时，可以开启远程解析。",
         "primary_action": "set-public-dns",
         "actions": ["flush-dns-cache"],
         "manual_steps": ["在代理软件里开启 DNS 远程解析", "使用 socks5h 让 SOCKS 代理解析域名"],
     },
     "ipv6-exposed": {
-        "headline": "IPv6 没有走代理，可能暴露真实网络",
+        "headline": "IPv6 可能没有走代理",
         "explanation": "代理通常只接管 IPv4 流量，但你的网络有公网 IPv6。访问支持 IPv6 的目标时，流量可能绕过代理。",
         "primary_action": "disable-ipv6",
         "actions": [],
         "manual_steps": ["如果你不想关闭系统 IPv6，可以在代理软件里开启 IPv6 转发或关闭 IPv6。"],
     },
     "ipv6-fallback-risk": {
-        "headline": "没有检测到 IPv6 泄漏",
+        "headline": "没有检测到公网 IPv6",
         "explanation": "代理开启时系统仍有 IPv6 路由，但没有检测到公网 IPv6。一般可以继续使用；如果某些应用启动时反复重连，再考虑在代理软件里开启 IPv6 转发或关闭 IPv6。",
         "primary_action": None,
         "actions": [],
@@ -162,8 +162,8 @@ _CAUSE_EXPLANATIONS: Dict[str, Dict[str, Any]] = {
         "manual_steps": ["切换到其他节点", "检查服务商状态页"],
     },
     "network-quality-poor": {
-        "headline": "网络响应性很差，可能会很卡",
-        "explanation": "测得的基础延迟高或网络响应很慢。视频会议、ChatGPT 流式输出等实时应用会感觉明显卡顿。",
+        "headline": "网络响应较慢",
+        "explanation": "测得的基础延迟高或网络响应较慢。视频会议、ChatGPT 流式输出等实时应用会有明显等待。",
         "primary_action": None,
         "actions": [],
         "manual_steps": ["暂停大流量上传/下载", "切换到更稳定的网络或节点", "检查路由器 QoS"],
@@ -204,8 +204,8 @@ _CAUSE_EXPLANATIONS: Dict[str, Dict[str, Any]] = {
         "manual_steps": ["如果你需要保留 IPv6，先处理自动代理或代理模式混用，再检查路由器 IPv6 设置。"],
     },
     "upload-congestion": {
-        "headline": "不是断网，是后台上传把网络挤满了",
-        "explanation": "网络本身能通，但被本机的网盘、同步或下载器占满了。Codex、ChatGPT 这类实时应用会先被排队等待，所以你会感觉「很卡」。",
+        "headline": "检测到上行流量较高",
+        "explanation": "网络本身能通，但本机网盘、同步或下载器的上行流量较高。Codex、ChatGPT 这类实时应用可能会有等待。",
         "primary_action": None,
         "actions": [],
         "manual_steps": [
@@ -214,8 +214,8 @@ _CAUSE_EXPLANATIONS: Dict[str, Dict[str, Any]] = {
         ],
     },
     "download-congestion": {
-        "headline": "后台下载占满了网络",
-        "explanation": "网络本身能通，但被本机的下载器或系统更新占满了带宽。实时应用也会被拖慢。",
+        "headline": "检测到下行流量较高",
+        "explanation": "网络本身能通，但本机下载器或系统更新的下行流量较高。实时应用也可能会等待。",
         "primary_action": None,
         "actions": [],
         "manual_steps": [

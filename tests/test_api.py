@@ -505,7 +505,7 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(kwargs["confirmed"], True)
         self.assertEqual(kwargs["auto_confirm"], False)
         self.assertEqual(kwargs["env"], {"ok": True})
-        run.assert_called_once_with(["codex", "--json", "--timeout", "9"], timeout=9)
+        run.assert_called_once_with(["doctor", "--json", "--timeout", "9"], timeout=9)
 
     def test_confirmed_fix_endpoint_accepts_ipv6_fallback_warning(self):
         report = {
@@ -526,7 +526,7 @@ class TestAPI(unittest.TestCase):
             "fixes": [],
             "manual_steps": [],
             "explanation": {
-                "headline": "没有检测到 IPv6 泄漏",
+                "headline": "没有检测到公网 IPv6",
                 "severity": "warn",
             },
         }
@@ -557,8 +557,69 @@ class TestAPI(unittest.TestCase):
             )
 
         self.assertEqual(data["fix_result"]["verification_warning"]["code"], "ipv6_fallback_risk")
-        self.assertEqual(data["explanation"]["headline"], "没有检测到 IPv6 泄漏")
-        run.assert_called_once_with(["codex", "--json", "--timeout", "9"], timeout=9)
+        self.assertEqual(data["explanation"]["headline"], "没有检测到公网 IPv6")
+        run.assert_called_once_with(["doctor", "--json", "--timeout", "9"], timeout=9)
+
+    def test_confirmed_fix_endpoint_accepts_ipv6_fallback_reason_without_flag(self):
+        report = {
+            "diagnostics": [
+                {
+                    "name": "ipv6_leak",
+                    "status": "warn",
+                    "details": {
+                        "public_ipv6": None,
+                        "ipv6_default_route": True,
+                        "proxy_active": True,
+                        "leak_confirmed": False,
+                        "reason": "proxy active and IPv6 default route present; no public IPv6 observed",
+                    },
+                }
+            ],
+            "root_causes": [{"id": "ipv6-fallback-risk"}],
+            "fixes": [],
+            "manual_steps": [],
+            "explanation": {
+                "headline": "没有检测到公网 IPv6",
+                "severity": "warn",
+            },
+        }
+        failed_result = {
+            "ok": False,
+            "status": "failed",
+            "fix_id": "disable-ipv6",
+            "verification_failed": True,
+            "verify_diagnostic": {
+                "name": "ipv6_leak",
+                "display_name": "IPv6 泄漏检查",
+                "status": "warn",
+                "details": {
+                    "public_ipv6": None,
+                    "ipv6_default_route": True,
+                    "proxy_active": True,
+                    "leak_confirmed": False,
+                    "reason": "proxy active and IPv6 default route present; no public IPv6 observed",
+                },
+            },
+        }
+        with patch("netfix.api.detect_environment", return_value={"ok": True}), \
+                patch("netfix.api.get_core", return_value=None), \
+                patch("netfix.api.FixEngine") as engine_cls, \
+                patch("netfix.api.run_cli", return_value={"ok": True, "result": report}) as run:
+            engine = engine_cls.return_value
+            engine.execute.return_value = failed_result
+            data = self._post_json(
+                "/fixes/execute",
+                {
+                    "fix_id": "disable-ipv6",
+                    "confirmed": True,
+                    "confirmation": api.SYSTEM_FIX_CONFIRMATION,
+                    "timeout": 9,
+                },
+            )
+
+        self.assertEqual(data["fix_result"]["verification_warning"]["code"], "ipv6_fallback_risk")
+        self.assertEqual(data["explanation"]["headline"], "没有检测到公网 IPv6")
+        run.assert_called_once_with(["doctor", "--json", "--timeout", "9"], timeout=9)
 
     def test_confirmed_fix_endpoint_explains_confirmed_verification_failure(self):
         failed_result = {
@@ -884,6 +945,7 @@ class TestAPI(unittest.TestCase):
     def test_dashboard_insights_endpoint_uses_network_monitor_service(self):
         payload = {
             "ok": True,
+            "primary_insight": {"state": "quiet", "headline": "状态平稳", "action": "无需处理"},
             "network_activity": {"state": "quiet", "top_processes": []},
             "lag_events": [],
             "proxy_health_trend": {"samples": []},
@@ -891,6 +953,7 @@ class TestAPI(unittest.TestCase):
         with patch("netfix.api.network_monitor_service.dashboard_insights", return_value=payload) as insights:
             data = self._get("/dashboard/insights")
         self.assertTrue(data["ok"])
+        self.assertEqual(data["primary_insight"]["action"], "无需处理")
         self.assertEqual(data["network_activity"]["state"], "quiet")
         insights.assert_called_once_with(sample=True)
 

@@ -246,15 +246,15 @@ def _summarize(hogs: List[Dict[str, Any]]) -> Dict[str, Any]:
     if any_upload:
         return {
             "reason": "upload_saturated",
-            "headline": "本机或局域网被后台上传挤满",
-            "next_step": "先暂停百度网盘、OneDrive、iCloud、网盘或下载器的上传/同步，再重新打开 Codex。",
+            "headline": "检测到上行流量较高",
+            "next_step": "如需优先保证实时应用，可先暂停百度网盘、OneDrive、iCloud、网盘或下载器的上传/同步。",
             "top_processes": top,
         }
     if any_download:
         return {
             "reason": "download_saturated",
-            "headline": "后台下载占满了网络",
-            "next_step": "先暂停下载器或系统更新，再重新打开 Codex。",
+            "headline": "检测到下行流量较高",
+            "next_step": "如需优先保证实时应用，可先暂停下载器或系统更新。",
             "top_processes": top,
         }
     return {
@@ -282,8 +282,8 @@ def bandwidth_hog(env: Dict[str, Any], core: Any, timeout: int = 8) -> Dict[str,
             "unknown",
             {
                 "reason": err or "sampler_unavailable",
-                "headline": "暂时没法看后台上传",
-                "next_step": "这条诊断只在 macOS 上能用，且需要先打开「网络被占满」权限；Netfix 不会自己采集你的流量内容。",
+                "headline": "暂时没法读取后台活动",
+                "next_step": "这条诊断只在 macOS 上能用，需要先打开后台网络活动权限；Netfix 不会自己采集你的流量内容。",
                 "top_processes": [],
                 "sampler": "nettop",
             },

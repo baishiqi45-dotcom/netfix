@@ -83,12 +83,12 @@ netdisk_service.222,0,250000,
 
 
 class TestSummarize(unittest.TestCase):
-    def test_upload_saturated_returns_red_headline(self):
+    def test_upload_saturated_returns_calm_headline(self):
         agg = {"BaiduNetdisk": {"rx_bytes": 0, "tx_bytes": 1_000_000}}
         candidates = bandwidth._candidate_hogs(agg)
         summary = bandwidth._summarize(candidates[: bandwidth._MAX_HOGS])
         self.assertEqual(summary["reason"], "upload_saturated")
-        self.assertIn("后台上传", summary["headline"])
+        self.assertEqual(summary["headline"], "检测到上行流量较高")
         # The friendly label should also be in the next_step text.
         self.assertIn("OneDrive", summary["next_step"])  # default fallback hint
 
@@ -152,7 +152,7 @@ class TestExplainUploadCongestion(unittest.TestCase):
             "root_causes": [
                 {
                     "id": "upload-congestion",
-                    "description": "网络被后台上传挤满",
+                    "description": "检测到上行流量较高",
                     "confidence": 0.95,
                     "manual_steps": ["暂停百度网盘上传"],
                 }
@@ -161,7 +161,7 @@ class TestExplainUploadCongestion(unittest.TestCase):
             "manual_steps": [],
         }
         result = explain.explain_report(report, rules={"fixes": {}})
-        # The friendly explanation should call out network is being squeezed by background sync/uploaders.
+        # The friendly explanation should call out background sync/uploaders without alarmist wording.
         self.assertIn("网盘", result["explanation"])
         self.assertIn("实时应用", result["explanation"])
         # The user-provided manual step should appear in manual_steps.
@@ -170,7 +170,7 @@ class TestExplainUploadCongestion(unittest.TestCase):
             for step in result["manual_steps"]
         )
         self.assertIn("百度网盘", all_manual_text)
-        self.assertEqual(result["headline"], "不是断网，是后台上传把网络挤满了")
+        self.assertEqual(result["headline"], "检测到上行流量较高")
 
 
 class TestBandwidthDiagnosticOnNonDarwin(unittest.TestCase):

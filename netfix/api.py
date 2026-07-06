@@ -810,9 +810,10 @@ def _validate_run_command(command: List[str]) -> Tuple[bool, str]:
     return False, f"command not allowed through /run: {root}"
 
 
-def _run_fresh_codex_report(timeout: int) -> Dict[str, Any]:
-    """Run a fresh user-facing report after a direct local fix."""
-    return run_cli(["codex", "--json", "--timeout", str(timeout)], timeout=timeout)
+def _run_fresh_report_after_fix(fix_id: str, timeout: int) -> Dict[str, Any]:
+    """Run a follow-up report that covers the diagnostic the fix is meant to change."""
+    command = "doctor" if fix_id == "disable-ipv6" else "codex"
+    return run_cli([command, "--json", "--timeout", str(timeout)], timeout=timeout)
 
 
 def _strip_internal_secrets(value: Any) -> Any:
@@ -845,7 +846,12 @@ def _ipv6_fallback_warning_from_diagnostic(diagnostic: Dict[str, Any]) -> Dict[s
     details = diagnostic.get("details") if isinstance(diagnostic.get("details"), dict) else {}
     if details.get("leak_confirmed") or details.get("public_ipv6"):
         return None
-    if not details.get("fallback_risk"):
+    reason = str(details.get("reason") or "").lower()
+    reason_describes_fallback = (
+        "proxy active and ipv6 default route present" in reason
+        and "no public ipv6 observed" in reason
+    )
+    if not (details.get("fallback_risk") or reason_describes_fallback):
         return None
     return {
         "code": "ipv6_fallback_risk",
@@ -989,7 +995,7 @@ def _execute_confirmed_fix(body: Dict[str, Any]) -> Tuple[int, Any]:
     if not result.get("ok", True):
         return 400, _with_user_facing_fix_error(result)
 
-    report = _run_fresh_codex_report(timeout)
+    report = _run_fresh_report_after_fix(fix_id, timeout)
     if not report.get("ok"):
         return 502, {
             "ok": False,

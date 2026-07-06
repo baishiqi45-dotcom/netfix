@@ -58,29 +58,29 @@ USER_FACING_CODES: Dict[str, Dict[str, str]] = {
         "technical": "macOS Network Service 的 Web/Secure Web/SOCKS 代理未启用。",
     },
     "system_proxy_recovery_required": {
-        "headline": "系统网络需要恢复",
+        "headline": "网络设置可恢复",
         "next_step": "到「设置 → 代理 → 恢复原来的网络设置」，点「恢复」。",
         "technical": "Detect stale proxy bridge; last apply journal exists but bridge is not alive.",
     },
     "auto_proxy_pac_conflict": {
-        "headline": "手动代理和自动代理同时开着，App 启动容易卡住",
+        "headline": "手动代理和自动代理同时开启",
         "next_step": "打开 Netfix 设置，在代理区域关闭自动代理（PAC / WPAD），只留 Netfix 帮你设的代理。",
         "technical": "Mixed PAC + manual proxy detected; recommend disable-auto-proxy.",
     },
     # ---- IPv6 ----
     "ipv6_leak_confirmed": {
-        "headline": "IPv6 可能正在绕过代理",
+        "headline": "IPv6 可能没有走代理",
         "next_step": "打开 Netfix 设置，在代理区域关闭 IPv6；之后能完整走代理。",
         "technical": "Confirmed IPv6 leakage: public IPv6 reachable while proxy active.",
     },
     "ipv6_fallback_risk": {
-        "headline": "没有检测到 IPv6 泄漏，只是留了一条默认路由",
+        "headline": "没有检测到公网 IPv6",
         "next_step": "一般可以继续用；如果某个 App 启动一直卡，再去处理 IPv6，不用反复点修复按钮。",
         "technical": "ipv6_leak warn with no public IPv6 and fallback_risk=true; not actionable.",
     },
     # ---- DNS leak / quality ----
     "dns_leak_detected": {
-        "headline": "DNS 在泄漏你的真实位置",
+        "headline": "DNS 可能没有走代理",
         "next_step": "在代理客户端里开启 DNS 劫持/远程解析，或用 socks5h:// 让 SOCKS 代理解析域名。",
         "technical": "DNS queries bypass the proxy; recommend set-public-dns or socks5h.",
     },
@@ -135,7 +135,7 @@ USER_FACING_CODES: Dict[str, Dict[str, str]] = {
     # ---- AI / cloud ----
     "llm_disabled": {
         "headline": "AI 还没启用，不影响诊断",
-        "next_step": "想让人话解释时，到「设置 → AI」启用并粘贴 Key。",
+        "next_step": "需要更易懂的解释时，到「设置 → AI」启用并粘贴 Key。",
         "technical": "settings.llm.enabled == false；本地规则解释照常可用。",
     },
     "missing_api_key": {
@@ -145,18 +145,18 @@ USER_FACING_CODES: Dict[str, Dict[str, str]] = {
     },
     # ---- bandwidth / upload congestion ----
     "bandwidth_hog_detected": {
-        "headline": "网络被后台 App 占满",
+        "headline": "后台 App 占用较高",
         "next_step": "先在「活动监视器」里暂停看到的上传/下载 App，再重新打开实时应用。",
         "technical": "diagnostic bandwidth_hog detected active upload/download at the process level.",
     },
     "upload_congestion": {
-        "headline": "网络被后台上传挤满",
-        "next_step": "先暂停百度网盘、OneDrive、iCloud、网盘或下载器的上传/同步，再试 Codex/ChatGPT 这类实时应用。",
+        "headline": "检测到上行流量较高",
+        "next_step": "如需优先保证实时应用，可先暂停百度网盘、OneDrive、iCloud、网盘或下载器的上传/同步。",
         "technical": "diagnostic bandwidth_hog reason=upload_saturated; top_processes carries process names and direction.",
     },
     "download_congestion": {
-        "headline": "网络被后台下载占满",
-        "next_step": "先暂停下载器或系统更新，再重新尝试。",
+        "headline": "检测到下行流量较高",
+        "next_step": "如需优先保证实时应用，可先暂停下载器或系统更新后再试。",
         "technical": "diagnostic bandwidth_hog reason=download_saturated.",
     },
 }

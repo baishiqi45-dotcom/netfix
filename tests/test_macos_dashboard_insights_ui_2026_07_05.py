@@ -14,19 +14,41 @@ def test_dashboard_exposes_plain_language_network_insights():
     model = MODEL.read_text(encoding="utf-8")
 
     assert "struct DashboardInsightsResponse" in model
+    assert "struct DashboardPrimaryInsight" in model
+    assert 'case primaryInsight = "primary_insight"' in model
     assert "struct NetworkActivitySummary" in model
     assert "struct ProxyHealthTrend" in model
     assert "func dashboardInsights() async throws -> DashboardInsightsResponse" in api_client
     assert 'path: "dashboard/insights"' in api_client
 
-    assert 'Label("谁在占用网络", systemImage: "arrow.up.arrow.down.circle")' in dashboard
-    assert 'Label("最近卡顿", systemImage: "clock.arrow.circlepath")' in dashboard
+    assert "primaryInsightSection" in dashboard
+    assert "当前状态" in dashboard
+    assert "可以做" in dashboard
+    assert 'responsivenessMetric(label: "速度"' in dashboard
+    assert "待确认" in dashboard
+    assert "本次没有拿到速度数据" in dashboard
+    assert 'Label("后台网络活动", systemImage: "arrow.up.arrow.down.circle")' in dashboard
+    assert 'Label("近期网络事件", systemImage: "clock.arrow.circlepath")' in dashboard
     assert 'Label("代理近 10 次", systemImage: "waveform.path.ecg")' in dashboard
-    assert 'Button("别再提醒这个 App")' in dashboard
-    assert "后台上传疑似挤满网络" in dashboard
+    assert 'Button("这次不提醒")' in dashboard
+    assert "检测到上行流量较高" in dashboard
+    assert "当前只是活动记录，不代表异常。" in dashboard
     assert "还没有速度、延迟和后台占用数据" in dashboard
     assert "network_quality / bandwidth_hog" not in dashboard
     assert "network_quality 诊断结果" not in dashboard
+    assert "现在最该看的问题" not in dashboard
+    assert "下一步：" not in dashboard
+    assert "谁在占用网络" not in dashboard
+    assert "最近卡顿" not in dashboard
+    assert "未测出" not in dashboard
+    assert "速度/延迟检测没有拿到有效数据" not in dashboard
+    assert "先别把它当正常" not in dashboard
+    assert "很卡" not in dashboard
+    assert "偶尔卡" not in dashboard
+    assert "挤满" not in dashboard
+    assert "占满" not in dashboard
+    assert "疑似" not in dashboard
+    assert "几乎不可用" not in dashboard
 
 
 def test_settings_exposes_privacy_safe_activity_monitor_controls():

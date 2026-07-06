@@ -649,6 +649,9 @@ extension APIError: LocalizedError {
         if lower.contains("rate_limited") || lower.contains("rate limit") || code == 429 {
             return "供应商暂时限流：稍后再试，或换一个已配置的 AI 供应商。"
         }
+        if lower.contains("no public ipv6") || lower.contains("fallback_risk") || lower.contains("proxy active and ipv6 default route present") {
+            return "没有检测到公网 IPv6。系统保留了一条 IPv6 默认路由，一般可以继续用；如果某个 App 启动一直卡，再处理 IPv6，不用反复点修复按钮。"
+        }
         if lower.contains("image_question_disabled") {
             return "截图问 AI 还没开启：到 AI 设置里打开“允许带截图问 AI”后保存。"
         }

@@ -132,16 +132,16 @@ def _summarize_activity(bandwidth_diag: Dict[str, Any], whitelist: Optional[List
         headline = "暂时没法读取后台占用"
     elif active_hogs and reason == "upload_saturated":
         state = "busyUpload"
-        headline = "后台上传疑似挤满网络"
+        headline = "检测到上行流量较高"
     elif active_hogs and reason == "download_saturated":
         state = "busyDownload"
-        headline = "后台下载疑似占满网络"
+        headline = "检测到下行流量较高"
     elif top_processes:
         state = "quiet"
-        headline = "没有看到明显后台占用"
+        headline = "后台网络活动平稳"
     else:
         state = "quiet"
-        headline = "没有看到明显后台占用"
+        headline = "后台网络活动平稳"
 
     return {
         "schema_version": "netfix_network_activity.v1",
@@ -176,13 +176,125 @@ def _lag_event(activity: Dict[str, Any], quality: Optional[Dict[str, Any]]) -> D
         "status": "warn",
         "severity": "warn",
         "reason_code": reason,
-        "headline": "后台上传疑似挤满网络" if reason == "upload_saturated" else "后台下载疑似占满网络",
+        "headline": "检测到上行流量较高" if reason == "upload_saturated" else "检测到下行流量较高",
         "suspected_cause": "、".join(str(item.get("label") or item.get("process") or "") for item in top if item),
         "evidence": {
             "responsiveness_rpm": details.get("responsiveness_rpm"),
             "base_rtt_ms": details.get("base_rtt_ms"),
             "top_processes": top,
         },
+    }
+
+
+def _rate_label(kbps: Any) -> str:
+    try:
+        value = float(kbps or 0)
+    except (TypeError, ValueError):
+        return "粗略速率未知"
+    if value >= 1000:
+        return f"{value / 1000:.1f} Mbps"
+    return f"{int(value)} Kbps"
+
+
+def _active_activity_process(activity: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    processes = activity.get("top_processes") if isinstance(activity.get("top_processes"), list) else []
+    for item in processes:
+        if not isinstance(item, dict):
+            continue
+        if item.get("ignored"):
+            continue
+        if item.get("is_hog"):
+            return item
+    for item in processes:
+        if isinstance(item, dict) and not item.get("ignored"):
+            return item
+    return None
+
+
+def _primary_insight(
+    activity: Dict[str, Any],
+    lag_events: List[Dict[str, Any]],
+    proxy_trend: Dict[str, Any],
+) -> Dict[str, Any]:
+    state = str(activity.get("state") or "")
+    process = _active_activity_process(activity)
+    if state in {"busyUpload", "busyDownload"}:
+        direction = "上传" if state == "busyUpload" else "下载"
+        label = str((process or {}).get("label") or (process or {}).get("process") or "后台任务")
+        rate = _rate_label((process or {}).get("rate_kbps"))
+        return {
+            "schema_version": "netfix_dashboard_primary_insight.v1",
+            "state": state,
+            "severity": "warn",
+            "headline": activity.get("headline") or f"检测到{direction}流量较高",
+            "detail": f"{label} 正在{direction}，约 {rate}。如需优先保证实时应用，可暂停后再试。",
+            "action": "暂停后复查",
+        }
+
+    recent_lag = lag_events[-1] if lag_events else None
+    if isinstance(recent_lag, dict):
+        cause = str(recent_lag.get("suspected_cause") or "").strip() or "后台任务"
+        return {
+            "schema_version": "netfix_dashboard_primary_insight.v1",
+            "state": "recentLag",
+            "severity": "warn",
+            "headline": str(recent_lag.get("headline") or "近期网络事件"),
+            "detail": f"上次相关：{cause}。如果现在已经恢复，可以不用处理。",
+            "action": "需要时复查",
+        }
+
+    proxy_state = str(proxy_trend.get("state") or "")
+    if proxy_state in {"authFailing", "failing", "slow"}:
+        if proxy_state == "authFailing":
+            headline = "代理账号需要确认"
+            detail = "最近几次代理验证不稳定。优先确认账号密码是否仍然有效。"
+            action = "检查代理账号"
+        elif proxy_state == "slow":
+            latency = proxy_trend.get("median_latency_ms")
+            suffix = f"中位延迟约 {latency}ms。" if isinstance(latency, int) else "延迟偏高。"
+            headline = "代理响应偏慢"
+            detail = f"{suffix}换到更近或更稳的节点通常更直接。"
+            action = "换节点后复查"
+        else:
+            headline = "代理连接不稳"
+            detail = "最近几次代理检测失败较多。可以换一个节点后再试。"
+            action = "换节点后复查"
+        return {
+            "schema_version": "netfix_dashboard_primary_insight.v1",
+            "state": proxy_state,
+            "severity": "warn",
+            "headline": headline,
+            "detail": detail,
+            "action": action,
+        }
+
+    if state == "unavailable":
+        return {
+            "schema_version": "netfix_dashboard_primary_insight.v1",
+            "state": "activityUnavailable",
+            "severity": "unknown",
+            "headline": "暂时没法读取后台活动",
+            "detail": "主检查仍可继续；Netfix 不抓包、不读取内容。",
+            "action": "继续检查",
+        }
+
+    if state == "notSampled":
+        return {
+            "schema_version": "netfix_dashboard_primary_insight.v1",
+            "state": "notSampled",
+            "severity": "unknown",
+            "headline": "准备就绪",
+            "detail": "运行一次检查后，会给出速度、延迟、后台占用和代理趋势。",
+            "action": "开始检查",
+        }
+
+    return {
+        "schema_version": "netfix_dashboard_primary_insight.v1",
+        "state": "quiet",
+        "severity": "ok",
+        "headline": "状态平稳",
+        "detail": "没有发现明显后台高流量或代理异常。需要时再运行一次检查。",
+        "action": "无需处理",
     }
 
 
@@ -309,11 +421,14 @@ def dashboard_insights(*, sample: bool = True) -> Dict[str, Any]:
             "privacy_note": "只看 App 名称、上传/下载方向和粗略速度；不看网址、远端 IP 或内容。",
             "sampled_at": "",
         }
+    lag_events = logs.load_lag_timeline(limit=5).get("events", [])
+    proxy_trend = logs.load_proxy_health_trend(limit=10)
     return {
         "ok": True,
         "schema_version": "netfix_dashboard_insights.v1",
+        "primary_insight": _primary_insight(activity, lag_events, proxy_trend),
         "network_activity": activity,
-        "lag_events": logs.load_lag_timeline(limit=5).get("events", []),
-        "proxy_health_trend": logs.load_proxy_health_trend(limit=10),
+        "lag_events": lag_events,
+        "proxy_health_trend": proxy_trend,
         "monitor": status().get("monitor"),
     }

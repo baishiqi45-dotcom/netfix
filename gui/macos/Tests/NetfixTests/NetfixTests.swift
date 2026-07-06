@@ -66,6 +66,22 @@ final class NetfixTests: XCTestCase {
         XCTAssertEqual(response.groups.first?.services.first?.name, "OpenAI API")
     }
 
+    func testIPv6FallbackTextIsNotClassifiedAsConfirmedLeak() {
+        let card = UserFacingMessages.classify("proxy active and IPv6 default route present; no public IPv6 observed")
+        XCTAssertEqual(card.code, UserFacingErrorCode.ipv6FallbackRisk.rawValue)
+        XCTAssertNotEqual(card.code, UserFacingErrorCode.ipv6LeakConfirmed.rawValue)
+    }
+
+    func testIPv6FallbackHTTPErrorUsesWarningCopy() {
+        let detail = "修复命令已执行，但复查还没通过：ipv6_leak 仍有风险。看到的情况：proxy active and IPv6 default route present; no public IPv6 observed"
+        let message = APIError.httpStatus(400, detail).localizedDescription
+
+        XCTAssertTrue(message.contains("没有检测到公网 IPv6"))
+        XCTAssertTrue(message.contains("不用反复点修复按钮"))
+        XCTAssertFalse(message.contains("HTTP 错误 400"))
+        XCTAssertFalse(message.contains("ipv6_leak"))
+    }
+
     func testLLMProviderAndSettingsDecoding() throws {
         let providersJSON = """
         {

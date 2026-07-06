@@ -41,7 +41,8 @@ def test_macos_proxy_import_preview_is_visible_and_secret_safe():
     assert "预检不会保存代理密码" in settings
     assert 'Label("检查并保存到这台 Mac", systemImage: "tray.and.arrow.down")' in settings
     assert "检查并保存只是把参数放到本机，暂不影响浏览器" in settings
-    assert "下一步：开始使用代理" in settings
+    assert 'Label("开始使用代理", systemImage: "play.circle.fill")' in settings
+    assert "流程：粘贴整行参数" in settings
     assert "await saveProxyProfile(input: selected)" in settings
     assert "proxyStatus = \"正在保存并启动监控...\"" in settings
     assert "saveProxyProfile(input: String, startMonitor: Bool = true, targetProfile: String = \"baseline\", protocolHint: String = \"auto\")" in api_client

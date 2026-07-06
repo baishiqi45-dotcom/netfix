@@ -30,7 +30,12 @@ def _acceptable_diagnostic_warning(fix_id: str, diagnostic: Dict[str, Any]) -> D
     details = diagnostic.get("details") if isinstance(diagnostic.get("details"), dict) else {}
     if details.get("leak_confirmed") or details.get("public_ipv6"):
         return None
-    if not details.get("fallback_risk"):
+    reason = str(details.get("reason") or "").lower()
+    reason_describes_fallback = (
+        "proxy active and ipv6 default route present" in reason
+        and "no public ipv6 observed" in reason
+    )
+    if not (details.get("fallback_risk") or reason_describes_fallback):
         return None
 
     return {

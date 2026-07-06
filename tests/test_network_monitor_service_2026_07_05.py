@@ -106,3 +106,50 @@ def test_dashboard_insights_returns_compact_shape():
     assert result["network_activity"]["state"] == "notSampled"
     assert result["lag_events"] == []
     assert result["proxy_health_trend"]["state"] == "unknown"
+    assert result["primary_insight"]["state"] == "notSampled"
+    assert result["primary_insight"]["action"] == "开始检查"
+
+
+def test_dashboard_primary_insight_prioritizes_active_upload_hog():
+    _reset_state()
+    activity = network_monitor_service._summarize_activity(_upload_hog(), [])
+    with network_monitor_service._LOCK:
+        network_monitor_service._STATE["last_sample"] = activity
+
+    with patch("netfix.network_monitor_service.run_once", return_value={"ok": True}), \
+         patch("netfix.network_monitor_service.logs.load_lag_timeline", return_value={"ok": True, "events": []}), \
+         patch("netfix.network_monitor_service.logs.load_proxy_health_trend", return_value={"ok": True, "samples": [], "state": "stable"}):
+        result = network_monitor_service.dashboard_insights(sample=True)
+
+    insight = result["primary_insight"]
+    assert insight["state"] == "busyUpload"
+    assert insight["severity"] == "warn"
+    assert "百度网盘" in insight["detail"]
+    assert insight["headline"] == "检测到上行流量较高"
+    assert insight["action"] == "暂停后复查"
+
+
+def test_dashboard_primary_insight_uses_proxy_trend_when_activity_is_quiet():
+    _reset_state()
+    with network_monitor_service._LOCK:
+        network_monitor_service._STATE["last_sample"] = {
+            "schema_version": "netfix_network_activity.v1",
+            "state": "quiet",
+            "status": "ok",
+            "reason": "no_significant_hog",
+            "headline": "后台网络活动平稳",
+            "top_processes": [],
+            "privacy_note": "只看 App 名称、上传/下载方向和粗略速度；不看网址、远端 IP 或内容。",
+            "sampled_at": "2026-07-06T00:00:00Z",
+        }
+
+    trend = {"ok": True, "samples": [{"status": "fail", "error": "auth failed"}], "state": "authFailing"}
+    with patch("netfix.network_monitor_service.run_once", return_value={"ok": True}), \
+         patch("netfix.network_monitor_service.logs.load_lag_timeline", return_value={"ok": True, "events": []}), \
+         patch("netfix.network_monitor_service.logs.load_proxy_health_trend", return_value=trend):
+        result = network_monitor_service.dashboard_insights(sample=True)
+
+    insight = result["primary_insight"]
+    assert insight["state"] == "authFailing"
+    assert insight["headline"] == "代理账号需要确认"
+    assert insight["action"] == "检查代理账号"

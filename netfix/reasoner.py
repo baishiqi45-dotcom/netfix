@@ -237,7 +237,7 @@ def reason(env: Dict[str, Any], diagnostics: List[Dict[str, Any]]) -> List[Dict[
         rpm = nq.get("details", {}).get("responsiveness_rpm")
         base_rtt = nq.get("details", {}).get("base_rtt_ms")
         if bandwidth_status in {"warn", "fail"} and bandwidth_reason in {"upload_saturated", "download_saturated"}:
-            headline = "网络被后台上传/同步占满" if bandwidth_reason == "upload_saturated" else "网络被后台下载占满"
+            headline = "检测到上行流量较高" if bandwidth_reason == "upload_saturated" else "检测到下行流量较高"
             steps = [
                 item.get("label", item.get("process", ""))
                 for item in bandwidth_hog.get("details", {}).get("top_processes", [])
@@ -250,12 +250,12 @@ def reason(env: Dict[str, Any], diagnostics: List[Dict[str, Any]]) -> List[Dict[
                 headline,
                 0.95,
                 manual_steps=steps + [
-                    "先暂停上面看到的 App 或下载器，等网络空闲后再用 Codex/ChatGPT 这类实时应用",
-                    "如果暂停后还是卡，再去检查代理节点或切换网络",
+                    "如需优先保证实时应用，可先暂停上面看到的 App 或下载器",
+                    "暂停后仍有明显等待时，再检查代理节点或切换网络",
                 ],
             )
         elif rpm is not None and rpm < 50:
-            add("network-quality-poor", "网络响应很慢，可能会很卡", 0.8,
+            add("network-quality-poor", "网络响应较慢", 0.8,
                 manual_steps=["暂停大流量上传/下载", "切换网络或节点", "检查路由器有没有限速或 QoS 设置"])
         elif base_rtt is not None and base_rtt > 200:
             add("network-latency-high", "基础延迟偏高，实时应用会变慢", 0.6,
