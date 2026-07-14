@@ -126,12 +126,6 @@ struct DashboardView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if let route = viewModel.dashboardState?.routeLabel {
-                Text(route)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Netfix，\(viewModel.dashboardState?.headline ?? subtitle)")
@@ -145,6 +139,9 @@ struct DashboardView: View {
             return "正在更新当前状态…"
         }
         if let date = dashboardStore.lastUpdated {
+            if Date().timeIntervalSince(date) < 60 {
+                return "刚刚更新"
+            }
             let formatter = RelativeDateTimeFormatter()
             formatter.unitsStyle = .short
             return "更新于 \(formatter.localizedString(for: date, relativeTo: Date()))"
@@ -964,7 +961,7 @@ struct DashboardView: View {
 
                 Divider()
 
-                ScrollView(.horizontal, showsIndicators: false) {
+                ViewThatFits(in: .horizontal) {
                     HStack(spacing: 12) {
                         compactIdentityItem(
                             "\(state.interfaceLabel) · \(state.localIPLabel)",
@@ -973,6 +970,18 @@ struct DashboardView: View {
                         Divider().frame(height: 16)
                         compactIdentityItem(state.systemProxyLabel, icon: "switch.2")
                         Divider().frame(height: 16)
+                        compactIdentityItem(state.egressLabel, icon: "globe")
+                    }
+
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 12) {
+                            compactIdentityItem(
+                                "\(state.interfaceLabel) · \(state.localIPLabel)",
+                                icon: "wifi"
+                            )
+                            Divider().frame(height: 16)
+                            compactIdentityItem(state.systemProxyLabel, icon: "switch.2")
+                        }
                         compactIdentityItem(state.egressLabel, icon: "globe")
                     }
                 }
@@ -1022,13 +1031,15 @@ struct DashboardView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .truncationMode(.middle)
+                .minimumScaleFactor(0.85)
         }
-        .fixedSize()
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
     private var connectionQualitySection: some View {
-        if isSectionRendered("connection_quality") {
+        if isSectionVisible("connection_quality") {
             let quality = viewModel.dashboardState?.connectionQuality
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top, spacing: 8) {
@@ -1155,8 +1166,9 @@ struct DashboardView: View {
     }
 
     private func isSectionVisible(_ id: String) -> Bool {
-        let visible = viewModel.dashboardState?.visibleSections ?? ["current_status"]
-        if visible.isEmpty { return true }
+        guard let visible = viewModel.dashboardState?.visibleSections else {
+            return id == "current_status"
+        }
         return visible.contains(id)
     }
 
@@ -1976,18 +1988,30 @@ final class DashboardViewModel: ObservableObject {
 
         private static func egressLabel(_ egress: DashboardStateResponse.Egress?) -> String {
             guard let egress else { return "未检测" }
-            if let ip = egress.publicIPv4, !ip.isEmpty {
-                if let ipType = egress.ipType, !ipType.isEmpty {
-                    return "\(ip) · \(ipType)"
+            let publicIP = egress.publicIPv4?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isOpaqueIP = publicIP?.lowercased().hasPrefix("public_ipv4_hash:") == true
+            let typeLabel: String? = {
+                switch egress.ipType?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+                case "residential": return "住宅网络"
+                case "mobile", "cellular": return "移动网络"
+                case "datacenter", "hosting": return "机房网络"
+                default: return nil
                 }
-                return ip
+            }()
+            if let publicIP, !publicIP.isEmpty, !isOpaqueIP {
+                return typeLabel.map { "\(publicIP) · \($0)" } ?? publicIP
+            }
+            if let isp = egress.isp?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !isp.isEmpty,
+               isp.lowercased() != "unknown" {
+                return "出口 · \(isp)"
             }
             switch egress.status {
-            case "ok": return "已检测"
-            case "warn": return "需复查"
-            case "fail": return "检测失败"
-            case "stale": return "结果已过期"
-            default: return "未检测"
+            case "ok": return typeLabel ?? "出口已检测"
+            case "warn": return "出口需复查"
+            case "fail": return "出口检测失败"
+            case "stale": return "出口结果已过期"
+            default: return "出口未检测"
             }
         }
     }
@@ -2283,9 +2307,7 @@ final class DashboardViewModel: ObservableObject {
                 "正在检查目标网站…",
             ]
         )
-        await refreshProxyUsage()
         await refreshDashboardState()
-        await refreshDashboardInsights()
     }
 
     func fix() async {
@@ -2320,7 +2342,6 @@ final class DashboardViewModel: ObservableObject {
             self.report = result
             headline = result.explanation?.headline ?? result.summaryHeadline
             await refreshDashboardState()
-            await refreshDashboardInsights()
         } catch {
             let message = error.localizedDescription
             let card = UserFacingMessages.classify(message)
@@ -2382,7 +2403,6 @@ final class DashboardViewModel: ObservableObject {
                 "正在汇总结果…",
             ]
         )
-        await refreshDashboardInsights()
     }
 
     func loadLogs() async {

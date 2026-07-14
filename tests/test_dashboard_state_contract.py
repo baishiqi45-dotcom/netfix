@@ -15,6 +15,7 @@ def test_external_system_proxy_is_not_no_proxy():
     assert payload["decision"]["effective_route"] == "external_system_proxy"
     assert payload["decision"]["primary_action"] == "verify_current_proxy"
     assert payload["decision"]["requires_confirmation"] is False
+    assert payload["bridge_in_use"] is False
 
 
 def test_route_signature_survives_report_redaction_format():
@@ -158,6 +159,8 @@ def test_dashboard_payload_contract_from_facts():
     assert payload["proxy"]["verified"]["status"] == "unknown"
     assert payload["egress"]["status"] == "unchecked"
     assert payload["state"]["state"] == "ready"
+    assert payload["state"]["bridge_in_use"] is False
+    assert "secondary_action" not in payload["verdict"]
 
 
 def test_route_ok_with_high_latency_has_one_connected_attention_verdict():

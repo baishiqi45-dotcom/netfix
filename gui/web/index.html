@@ -166,15 +166,20 @@
       padding: 11px 18px;
       min-width: min(240px, 100%);
     }
+    .verdict-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    .secondary-action { color: var(--muted); }
     .identity-grid {
       display: flex;
       flex-wrap: wrap;
       gap: 6px 16px;
       margin: 0 0 12px;
-      padding: 8px 10px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: #fbfcfd;
+      padding: 0 0 12px;
+      border-bottom: 1px solid var(--line);
       min-width: 0;
     }
     .identity-item {
@@ -198,11 +203,8 @@
     }
     .next-action-copy { min-width: 0; }
     .quality-strip {
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: #fff;
-      padding: 12px;
-      margin-bottom: 12px;
+      padding: 0;
+      margin: 0;
       min-width: 0;
     }
     .quality-head {
@@ -212,14 +214,18 @@
       gap: 10px;
       margin-bottom: 10px;
     }
-    .quality-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .quality-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border-top: 1px solid var(--line);
+    }
     .quality-item {
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      padding: 9px 10px;
-      background: #fbfcfd;
+      border-right: 1px solid var(--line);
+      padding: 9px 12px 7px 0;
       min-width: 0;
     }
+    .quality-item + .quality-item { padding-left: 12px; }
+    .quality-item:last-child { border-right: 0; }
     .quality-label { font-size: 12px; color: var(--muted); margin-bottom: 3px; }
     .quality-value { font-weight: 700; overflow-wrap: anywhere; }
     .quality-hint { color: var(--muted); font-size: 12px; margin-top: 3px; }
@@ -373,6 +379,13 @@
       .status-strip { margin-top: 12px; width: 100%; max-width: none; }
       .grid, .cards, .form-grid, .goal-options, .quality-grid { grid-template-columns: 1fr; }
       .service-row, .event-row, .profile-row { display: block; }
+      .quality-item,
+      .quality-item + .quality-item {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        padding: 9px 0;
+      }
+      .quality-item:last-child { border-bottom: 0; }
     }
     @media (max-width: 480px) {
       .container { padding: 14px; }
@@ -417,17 +430,29 @@
               <div id="dashboard-state-label" class="verdict-state">状态读取中</div>
               <h2 id="dashboard-headline" class="verdict-headline">正在读取当前网络状态</h2>
               <p id="dashboard-impact" class="verdict-impact">完成读取前不会判断网络正常或异常。</p>
-              <button
-                id="dashboard-primary-button"
-                class="btn-primary prominent-action"
-                type="button"
-                aria-describedby="dashboard-impact"
-                aria-busy="false"
-                data-dashboard-primary-action="none"
-                data-dashboard-primary-target="none"
-                onclick="runDashboardPrimaryAction()"
-                disabled
-              >正在读取状态</button>
+              <div class="verdict-actions">
+                <button
+                  id="dashboard-primary-button"
+                  class="btn-primary prominent-action"
+                  type="button"
+                  aria-describedby="dashboard-impact"
+                  aria-busy="false"
+                  data-dashboard-primary-action="none"
+                  data-dashboard-primary-target="none"
+                  onclick="runDashboardPrimaryAction()"
+                  disabled
+                >正在读取状态</button>
+                <button
+                  id="dashboard-secondary-button"
+                  class="secondary-action hidden"
+                  type="button"
+                  aria-busy="false"
+                  data-dashboard-secondary-action="none"
+                  data-dashboard-secondary-target="none"
+                  onclick="runDashboardSecondaryAction()"
+                  hidden
+                >停止使用并恢复原设置</button>
+              </div>
             </div>
           </div>
           <div id="current-mac-state" class="identity-grid" data-contract="current_network_identity" role="list" aria-label="当前网络身份">

@@ -869,4 +869,58 @@ final class NetfixTests: XCTestCase {
         XCTAssertEqual(response.narrativeDetail, "当前没有 Netfix 保存或启用的代理。")
         XCTAssertEqual(response.nextStep, "点「粘贴代理参数」。")
     }
+
+    @MainActor
+    func testExternalProxyHidesLegacyRestoreActionAndOpaqueEgressHash() throws {
+        let json = """
+        {
+            "ok": true,
+            "schema_version": "netfix_current_mac_state.v2",
+            "decision": {
+                "ui_state": "ready",
+                "effective_route": "external_system_proxy",
+                "primary_action": "verify_current_proxy"
+            },
+            "verdict": {
+                "status": "attention",
+                "severity": "warn",
+                "headline": "延迟偏高，操作会有等待",
+                "detail": "当前线路可用。",
+                "next_step": "点「检查当前网络」。",
+                "primary_action": {
+                    "id": "verify_current_proxy",
+                    "label": "检查当前网络",
+                    "enabled": true,
+                    "target": "run:doctor"
+                }
+            },
+            "proxy": {
+                "applied": { "active": true, "owner": "external" },
+                "bridge": { "in_use": false }
+            },
+            "egress": {
+                "status": "ok",
+                "public_ipv4": "public_ipv4_hash:secret",
+                "isp": "Example Network",
+                "ip_type": "unknown"
+            },
+            "state": {
+                "state": "ready",
+                "headline": "网络看起来正常",
+                "next_step": "点「检查当前网络」。",
+                "bridge_in_use": true
+            }
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(DashboardStateResponse.self, from: json)
+        let presentation = DashboardViewModel.DashboardHomePresentation(response: response)
+
+        XCTAssertEqual(response.resolvedSecondaryActionTarget, .none)
+        XCTAssertFalse(response.canOfferNetfixRestore)
+        XCTAssertNil(response.secondaryActionLabel)
+        XCTAssertEqual(presentation.egressLabel, "出口 · Example Network")
+        XCTAssertFalse(presentation.egressLabel.contains("public_ipv4_hash"))
+        XCTAssertFalse(presentation.egressLabel.contains("unknown"))
+    }
 }

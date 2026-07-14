@@ -173,7 +173,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 primaryAction: .recover
             )
         }
-        if bridge?.inUse == true || state.proxy?.applied?.active == true {
+        if state.canOfferNetfixRestore
+            && (bridge?.inUse == true || state.proxy?.applied?.active == true) {
             return presentBridgeQuitAlert(
                 title: "这台 Mac 正在使用 Netfix 部署的代理",
                 message: "退出会停止当前代理。建议先恢复原来的网络设置。",

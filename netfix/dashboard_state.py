@@ -258,15 +258,64 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
 def _freshness(checked_at: Any, stale: Any = None) -> Dict[str, Any]:
     parsed = _parse_datetime(checked_at)
     age_seconds: Optional[int] = None
+    future_timestamp = False
     if parsed:
-        age_seconds = max(0, int((datetime.now(timezone.utc) - parsed).total_seconds()))
+        signed_age = int((datetime.now(timezone.utc) - parsed).total_seconds())
+        future_timestamp = signed_age < -300
+        age_seconds = max(0, signed_age)
     if stale is None:
-        stale = bool(age_seconds is not None and age_seconds > 3600)
+        stale = bool(
+            parsed is None
+            or future_timestamp
+            or (age_seconds is not None and age_seconds > 3600)
+        )
+    elif future_timestamp:
+        stale = True
     return {
         "checked_at": checked_at,
         "age_seconds": age_seconds,
         "stale": bool(stale),
     }
+
+
+def is_current_dashboard_evidence(summary: Optional[Dict[str, Any]]) -> bool:
+    """Return whether a report summary may describe the current home state."""
+    if not isinstance(summary, dict):
+        return False
+    freshness = _freshness(summary.get("checked_at"), summary.get("stale"))
+    origin = summary.get("origin")
+    if origin is not None and origin not in {"doctor", "post_fix_doctor"}:
+        return False
+    valid_sample_count = _safe_int(summary.get("valid_sample_count"))
+    if "valid_sample_count" not in summary:
+        counts = _diagnostic_counts(summary)
+        valid_sample_count = sum(counts.get(key, 0) for key in ("ok", "warn", "fail"))
+    return bool(
+        freshness["checked_at"]
+        and not freshness["stale"]
+        and summary.get("usable_for_dashboard") is not False
+        and summary.get("route_matches_current") is True
+        and summary.get("coverage") == "current_mac_full"
+        and valid_sample_count > 0
+    )
+
+
+def _allows_current_quality_summary(summary: Dict[str, Any]) -> bool:
+    if not isinstance(summary, dict):
+        return False
+    freshness = _freshness(summary.get("checked_at"), summary.get("stale"))
+    if not freshness["checked_at"] or freshness["stale"]:
+        return False
+    if summary.get("usable_for_dashboard") is False:
+        return False
+    if "route_matches_current" in summary and summary.get("route_matches_current") is not True:
+        return False
+    if "coverage" in summary and summary.get("coverage") != "current_mac_full":
+        return False
+    origin = summary.get("origin")
+    if origin is not None and origin not in {"doctor", "post_fix_doctor"}:
+        return False
+    return True
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -316,7 +365,7 @@ def build_connection_quality(last_report_summary: Optional[Dict[str, Any]] = Non
     parsing diagnostics or silently hiding speed / latency when no sample exists.
     """
     summary = last_report_summary if isinstance(last_report_summary, dict) else {}
-    if summary.get("has_report") and summary.get("usable_for_dashboard") is False:
+    if not _allows_current_quality_summary(summary):
         # Keep historical or route-mismatched metrics in last_report_summary;
         # the current-route strip must not render them as current evidence.
         summary = {}
@@ -388,14 +437,7 @@ def build_dashboard_verdict(
         else {}
     )
     quality_status = str(connection_quality.get("status") or "unknown")
-    fresh_report = bool(
-        freshness["checked_at"]
-        and not freshness["stale"]
-        and summary.get("usable_for_dashboard") is True
-        and summary.get("route_matches_current") is True
-        and summary.get("coverage") == "current_mac_full"
-        and valid_sample_count > 0
-    )
+    fresh_report = is_current_dashboard_evidence(summary)
     if not fresh_report:
         report_status = None
         report_severity = None
@@ -502,6 +544,13 @@ def build_dashboard_verdict(
                 if effective_route == "external_system_proxy"
                 else "还没有本轮检查证据；当前只显示系统代理和本机网络身份。"
             )
+
+    if effective_route == "external_system_proxy" and fresh_report:
+        if severity == "ok":
+            severity = "info"
+        if status == "ok":
+            headline = "当前网络已完成检查"
+            detail = "当前线路可用；代理由其他工具管理，Netfix 只检查，不会替它恢复设置。"
 
     verdict = {
         "status": status,
@@ -709,7 +758,10 @@ def resolve(
     payload = dict(_STATES.get(state, _STATES["ready"]))
     payload["state"] = state
     payload["saved_profile_count"] = int(saved_profile_count)
-    payload["bridge_in_use"] = bool(netfix_in_use or system_proxy_active_for_user)
+    # This legacy field describes Netfix ownership, not the existence of any
+    # system proxy. Treating an external proxy as a running Netfix bridge makes
+    # older App clients invent a destructive "stop and restore" action.
+    payload["bridge_in_use"] = bool(netfix_in_use)
     payload["bridge_needs_recovery"] = bool(needs_recovery)
     route_health = "fail" if needs_recovery else (
         str(last_diagnostic_status)
@@ -772,6 +824,7 @@ def build_current_mac_state(
         },
         "verified": _verified_status(
             current_state=state["state"],
+            effective_route=str(state["decision"]["effective_route"]),
             live_signals=live_signals,
             last_report_summary=last_report_summary,
         ),
@@ -808,6 +861,7 @@ def build_current_mac_state(
 def _verified_status(
     *,
     current_state: str,
+    effective_route: str,
     live_signals: Optional[Dict[str, Any]],
     last_report_summary: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
@@ -822,14 +876,7 @@ def _verified_status(
     live_status = live_status_raw if live_status_raw in {"ok", "warn", "fail"} else None
     summary = last_report_summary if isinstance(last_report_summary, dict) else {}
     checked_at = summary.get("checked_at")
-    evidence_is_current = bool(
-        checked_at
-        and not summary.get("stale")
-        and summary.get("usable_for_dashboard") is True
-        and summary.get("route_matches_current") is True
-        and summary.get("coverage") == "current_mac_full"
-        and _safe_int(summary.get("valid_sample_count")) > 0
-    )
+    evidence_is_current = is_current_dashboard_evidence(summary)
     report_status = summary.get("status") if summary.get("status") in {"ok", "warn", "fail"} else None
     if current_state == "network_recovery":
         status = "fail"
@@ -837,6 +884,9 @@ def _verified_status(
     elif live_status in {"warn", "fail"}:
         status = str(live_status)
         source = "live_monitor"
+    elif effective_route != "netfix_applied":
+        status = "unknown"
+        source = "none"
     elif evidence_is_current and report_status:
         status = str(report_status)
         source = "last_report"

@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SETTINGS = ROOT / "gui" / "macos" / "Sources" / "Views" / "SettingsView.swift"
 MODELS = ROOT / "gui" / "macos" / "Sources" / "Models" / "Report.swift"
 APP_DELEGATE = ROOT / "gui" / "macos" / "Sources" / "AppDelegate.swift"
+DASHBOARD_STATE = ROOT / "gui" / "macos" / "Sources" / "Models" / "DashboardState.swift"
 HEALTH_MONITOR = ROOT / "gui" / "macos" / "Sources" / "Monitoring" / "HealthMonitor.swift"
 
 
@@ -74,3 +75,13 @@ def test_macos_notifications_respect_user_toggle_for_health_and_bridge():
     assert "guard notificationsEnabled else { return }" in health_monitor
     assert "if notificationsEnabled" in health_monitor
     assert "requestNotificationAuthorization()" in health_monitor
+
+
+def test_external_proxy_never_gets_netfix_restore_or_quit_prompt():
+    app_delegate = APP_DELEGATE.read_text(encoding="utf-8")
+    dashboard_state = DASHBOARD_STATE.read_text(encoding="utf-8")
+
+    assert "state.canOfferNetfixRestore" in app_delegate
+    assert "var canOfferNetfixRestore: Bool" in dashboard_state
+    assert 'decision?.effectiveRoute == "external_system_proxy"' in dashboard_state
+    assert 'proxy?.applied?.owner == "external"' in dashboard_state

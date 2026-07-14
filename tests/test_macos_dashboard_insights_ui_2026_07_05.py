@@ -68,12 +68,23 @@ def test_dashboard_exposes_plain_language_network_insights():
 def test_dashboard_and_menu_do_not_guess_green_or_expose_route_jargon():
     dashboard = DASHBOARD.read_text(encoding="utf-8")
     app_delegate = APP_DELEGATE.read_text(encoding="utf-8")
+    current_status = dashboard[
+        dashboard.index("private var currentStatusSection") : dashboard.index("private func compactIdentityItem")
+    ]
 
     assert 'case "external_system_proxy": return "其他代理正在使用"' in dashboard
     assert 'case .unknown:\n            color = .systemGray' in app_delegate
     assert "backend.isReady ? .systemGreen : .systemYellow" not in app_delegate
     assert 'label == "低"' in dashboard
     assert 'label.contains("低")' not in dashboard
+    assert 'hasPrefix("public_ipv4_hash:")' in dashboard
+    assert 'return typeLabel ?? "出口已检测"' in dashboard
+    assert 'ScrollView(.horizontal, showsIndicators: false)' not in current_status
+    assert 'return "刚刚更新"' in dashboard
+    diagnose = dashboard[dashboard.index("func diagnose() async"):dashboard.index("func fix() async")]
+    assert "refreshProxyUsage" not in diagnose
+    assert "refreshDashboardInsights" not in diagnose
+    assert 'if isSectionVisible("connection_quality")' in dashboard
 
 
 def test_settings_exposes_privacy_safe_activity_monitor_controls():

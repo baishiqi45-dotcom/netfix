@@ -573,6 +573,9 @@ struct DashboardStateResponse: Decodable {
     }
 
     var resolvedSecondaryActionTarget: DashboardActionTarget {
+        if !canOfferNetfixRestore {
+            return .none
+        }
         let resolved = DashboardActionTarget.resolve(
             target: verdict?.secondaryAction?.target,
             actionID: verdict?.secondaryAction?.id
@@ -586,6 +589,23 @@ struct DashboardStateResponse: Decodable {
             return .staleBridgeRecovery
         }
         return .none
+    }
+
+    var canOfferNetfixRestore: Bool {
+        // Legacy payloads sometimes marked any active system proxy as
+        // bridge_in_use. Another proxy tool must never gain a Netfix restore
+        // action from that compatibility field.
+        if decision?.effectiveRoute == "external_system_proxy"
+            || proxy?.applied?.owner == "external" {
+            return false
+        }
+        return proxy?.bridge?.needsRecovery == true
+            || proxy?.bridge?.recoveryAvailable == true
+            || proxy?.bridge?.inUse == true
+            || proxy?.applied?.owner == "netfix"
+            || decision?.effectiveRoute == "netfix_applied"
+            || state.bridgeNeedsRecovery == true
+            || state.bridgeInUse == true
     }
 
     var secondaryActionLabel: String? {
