@@ -244,6 +244,28 @@ class TestPathDiagnostics(unittest.TestCase):
         hops[0]["loss_percent"] = 12.0
         self.assertEqual(path._path_status(hops), "fail")
 
+    def test_network_quality_converts_apple_bits_per_second_to_kbps(self):
+        apple_output = json.dumps({
+            "base_rtt": 435.5528564453125,
+            "dl_throughput": 2_962_593,
+            "ul_throughput": 28_281_940,
+            "responsiveness": 16.3564,
+        })
+        command = {
+            "ok": True,
+            "returncode": 0,
+            "stdout": apple_output,
+            "stderr": "",
+        }
+        with patch("netfix.layers.path.shutil.which", return_value="/usr/bin/networkQuality"), \
+                patch("netfix.layers.path.run_command", return_value=command):
+            result = diagnose.run_diagnostic("network_quality", {}, None, 30)
+
+        details = result["details"]
+        self.assertAlmostEqual(details["dl_throughput_kbps"], 2962.593, places=3)
+        self.assertAlmostEqual(details["ul_throughput_kbps"], 28281.94, places=2)
+        self.assertAlmostEqual(details["base_rtt_ms"], 435.5528564453125)
+
 
 class TestIpIntel(unittest.TestCase):
     def test_cache_roundtrip(self):

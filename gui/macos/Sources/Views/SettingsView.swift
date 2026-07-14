@@ -6,6 +6,7 @@ import AppKit
 /// 设置 / 偏好设置窗口内容。
 struct SettingsView: View {
     @ObservedObject var backend: Backend
+    @ObservedObject var dashboardStore: DashboardStateStore
     @AppStorage("netfix.launchAtLogin") private var launchAtLogin = false
     @AppStorage("netfix.notificationsEnabled") private var notificationsEnabled = false
     @AppStorage("netfix.iconStyle") private var iconStyle = 0
@@ -63,7 +64,6 @@ struct SettingsView: View {
     @State private var lastSavedProxyProfile: ProxyProfile?
     @State private var showSystemProxyConfirmation = false
     @State private var showDeleteProxyProfileConfirmation = false
-    @State private var showProxyRollbackConfirmation = false
     @State private var showBridgeRecoveryConfirmation = false
     @State private var logRetentionEnabled = true
     @State private var logRetentionDays = 7
@@ -84,10 +84,14 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             settingsLayerPicker
 
+            settingsStatusStrip
+
             Divider()
 
             Group {
                 switch selectedSettingsTab {
+                case "proxy":
+                    proxyLayerView
                 case "diagnostics":
                     diagnosticsLayerView
                 case "advanced":
@@ -98,8 +102,16 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(width: 720, height: 640)
+        .frame(
+            minWidth: 520,
+            idealWidth: 720,
+            maxWidth: .infinity,
+            minHeight: 400,
+            idealHeight: 640,
+            maxHeight: .infinity
+        )
         .task {
+            await dashboardStore.refresh()
             await refreshNotificationStatus()
             await loadServiceGroups()
             await loadCloudAndProxySettings()
@@ -147,21 +159,13 @@ struct SettingsView: View {
         } message: {
             Text("这会删除本地代理配置和对应密码；不会修改当前网络代理设置。")
         }
-        .confirmationDialog("恢复原来的网络设置？", isPresented: $showProxyRollbackConfirmation, titleVisibility: .visible) {
-            Button("恢复原来的网络设置", role: .destructive) {
-                Task { await rollbackProxyProfile() }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("这会恢复上次部署代理前备份的 macOS 网络代理设置。")
-        }
-        .confirmationDialog("修复失效的代理部署？", isPresented: $showBridgeRecoveryConfirmation, titleVisibility: .visible) {
+        .confirmationDialog("停止使用代理并恢复原设置？", isPresented: $showBridgeRecoveryConfirmation, titleVisibility: .visible) {
             Button("恢复原来的网络设置", role: .destructive) {
                 Task { await recoverProxyBridge() }
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("系统还在使用上次 Netfix 部署的代理，但转发服务可能已经不在运行。恢复后会回到部署前的网络代理设置。")
+            Text("系统还保留着上次 Netfix 使用的代理设置。恢复后会回到使用代理前的网络设置。")
         }
         .confirmationDialog("测试国内模型链路？", isPresented: $showLLMChainTestConfirmation, titleVisibility: .visible) {
             Button("确认测试链路", role: .destructive) {
@@ -169,7 +173,7 @@ struct SettingsView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("这会真实调用已配置的供应商，可能计入 DeepSeek、Kimi、MiniMax、Qwen 等供应商用量或账单。不会读取或显示 API Key。")
+            Text("这会真实调用已配置的供应商，可能计入 DeepSeek、Kimi、MiniMax、Qwen 等供应商用量或账单。不会读取或显示 AI 密钥。")
         }
         .confirmationDialog("测试当前模型连接？", isPresented: $showLLMProviderTestConfirmation, titleVisibility: .visible) {
             Button("确认测试连接", role: .destructive) {
@@ -177,7 +181,7 @@ struct SettingsView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("这会真实调用当前已配置的供应商，并可能计入供应商用量或账单。不会读取或显示 API Key。")
+            Text("这会真实调用当前已配置的供应商，并可能计入供应商用量或账单。不会读取或显示 AI 密钥。")
         }
         .alert("给代理起个名字", isPresented: Binding(
             get: { pendingRenameProfile != nil },
@@ -206,12 +210,63 @@ struct SettingsView: View {
     private var settingsLayerPicker: some View {
         Picker("设置分组", selection: $selectedSettingsTab) {
             Text("普通设置").tag("general")
+            Text("代理线路").tag("proxy")
             Text("诊断与日志").tag("diagnostics")
             Text("高级与开发者").tag("advanced")
         }
         .pickerStyle(.segmented)
         .padding(12)
-        .help("普通设置 = 开机启动、通知、代理部署、权限、本地数据；诊断与日志 = 服务分组、本地报告和日志清理；高级与开发者 = 让 AI 解释报告、接进 AI 编程助手、底层系统设置。")
+        .help("普通设置 = 开机启动、通知、权限、本地数据；代理线路 = 粘贴、预检、保存和开始使用；诊断与日志 = 服务分组、本地报告和日志清理；高级与开发者 = AI、MCP、底层系统设置。")
+    }
+
+    private var settingsStatusStrip: some View {
+        HStack(spacing: 8) {
+            Image(systemName: settingsStatusIcon)
+                .foregroundStyle(settingsStatusColor)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(dashboardStore.state?.headline ?? "正在读取当前网络状态…")
+                    .font(.caption)
+                    .lineLimit(1)
+                if let detail = dashboardStore.state?.narrativeDetail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            Button {
+                Task { await dashboardStore.refresh() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .disabled(dashboardStore.isRefreshing)
+            .help("重新读取当前网络状态")
+            .accessibilityLabel("重新读取当前网络状态")
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var settingsStatusIcon: String {
+        switch dashboardStore.state?.verdict?.severity ?? dashboardStore.state?.decision?.severity {
+        case "ok": return "checkmark.circle.fill"
+        case "warn": return "exclamationmark.circle.fill"
+        case "fail": return "xmark.circle.fill"
+        default: return "info.circle.fill"
+        }
+    }
+
+    private var settingsStatusColor: Color {
+        switch dashboardStore.state?.verdict?.severity ?? dashboardStore.state?.decision?.severity {
+        case "ok": return .green
+        case "warn": return .orange
+        case "fail": return .red
+        default: return .secondary
+        }
     }
 
     // MARK: - 普通设置（默认）
@@ -219,9 +274,15 @@ struct SettingsView: View {
     private var generalLayerView: some View {
         Form {
             generalSection
-            proxyTab
             permissionsTab
             aboutSection
+        }
+        .padding(.top, 4)
+    }
+
+    private var proxyLayerView: some View {
+        Form {
+            proxyTab
         }
         .padding(.top, 4)
     }
@@ -268,11 +329,9 @@ struct SettingsView: View {
     private var advancedProxyControlsSection: some View {
         Section("高级代理与系统设置") {
             VStack(alignment: .leading, spacing: 10) {
-                Toggle("重启时自动恢复上次代理连接", isOn: $proxyBridgeAutoRestartEnabled)
-                    .onChange(of: proxyBridgeAutoRestartEnabled) { newValue in
-                        Task { await saveProxyBridgeSettings(autoRestartEnabled: newValue) }
-                    }
-                Text("只在上次部署没有正常退出时尝试恢复；不会静默修改网络代理设置。")
+                Text("启动时检查上次代理连接")
+                    .font(.subheadline)
+                Text("发现需要恢复时只会提醒；必须由你点击恢复并确认，Netfix 不会静默修改网络设置。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
@@ -281,20 +340,19 @@ struct SettingsView: View {
                     .foregroundStyle(proxyBridgeState?.lifecycle?.needsAttention == true || proxyBridgeState?.staleCheck?.recoveryAvailable == true ? Color.orange : Color.secondary)
 
                 HStack {
-                    Button("刷新部署状态") {
+                    Button("刷新代理状态") {
                         Task { await loadProxyBridge() }
                     }
                     .disabled(!backend.isReady)
 
-                    Button("修复失效部署", role: .destructive) {
+                    Button("停止使用并恢复原设置", role: .destructive) {
                         showBridgeRecoveryConfirmation = true
                     }
-                    .disabled(!backend.isReady || !(proxyBridgeState?.staleCheck?.recoveryAvailable ?? false))
-
-                    Button("恢复原来的网络设置", role: .destructive) {
-                        showProxyRollbackConfirmation = true
-                    }
-                    .disabled(!backend.isReady)
+                    .disabled(
+                        !backend.isReady
+                        || (dashboardStore.state?.resolvedSecondaryActionTarget != .staleBridgeRecovery
+                            && !(proxyBridgeState?.staleCheck?.recoveryAvailable ?? false))
+                    )
                 }
             }
             .padding(.top, 4)
@@ -498,7 +556,7 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(mcpStatus.hasPrefix("失败") ? Color.red : Color.secondary)
                 } else {
-                    Text("MCP 不保存 API Key 或代理密码；部署系统代理和保存密钥仍回到 Netfix App 里确认。")
+                    Text("MCP 不保存 AI 密钥或代理密码；部署系统代理和保存密钥仍回到 Netfix App 里确认。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -534,7 +592,7 @@ struct SettingsView: View {
                             .labelsHidden()
                     }
 
-                    Text("这是可选的 AI 看报告功能。没有 API Key 也能诊断、部署代理和处理 IPv6；需要 AI 帮你解释报告时再填写。密钥只保存在本机密码库。")
+                    Text("这是可选的 AI 看报告功能。没有 AI 密钥也能检查网络、使用代理和处理 IPv6；需要 AI 帮你解释报告时再填写。密钥只保存在本机密码库。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -734,7 +792,7 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
 
-            Label("不要只复制出口 IP。单独一个 IP 没有端口和账号密码，Netfix 没法部署。", systemImage: "exclamationmark.triangle")
+            Label("不要只复制出口 IP。单独一个 IP 没有端口和账号密码，Netfix 没法使用。", systemImage: "exclamationmark.triangle")
                 .font(.caption)
                 .foregroundStyle(.orange)
         }
@@ -826,7 +884,7 @@ struct SettingsView: View {
                         .disabled(!backend.isReady || proxyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                         Button("我没有代理服务商参数") {
-                            proxyStatus = "这块只给已经有代理服务商参数的人用。没有参数也可以直接回主界面点“一键诊断”，Netfix 仍能检查 Wi-Fi、DNS、IPv6 和现有代理问题。"
+                            proxyStatus = "这块只给已经有代理服务商参数的人用。没有参数也可以直接回主界面点“检查当前网络”，Netfix 仍能检查 Wi-Fi、DNS、IPv6 和现有代理问题。"
                         }
                     }
 
@@ -863,7 +921,7 @@ struct SettingsView: View {
                     Text(proxyStatus)
                         .font(.caption)
                         .foregroundStyle(proxyStatus.hasPrefix("失败") ? Color.red : Color.secondary)
-                    if proxyStatus.hasPrefix("已保存"), let profile = lastSavedProxyProfile {
+                    if let profile = lastSavedProxyProfile {
                         Button {
                             Task { await prepareProxyDeployment(profile) }
                         } label: {
@@ -1048,6 +1106,7 @@ private func proxyActiveCard(profile: ProxyProfile, isDeployed: Bool) -> some Vi
 
 @ViewBuilder
 private func proxyCandidateRow(profile: ProxyProfile) -> some View {
+    let canStart = proxyProfileCanStart(profile)
     HStack(alignment: .top, spacing: 8) {
         VStack(alignment: .leading, spacing: 2) {
             Text(profile.name ?? profile.host ?? profile.id)
@@ -1059,20 +1118,30 @@ private func proxyCandidateRow(profile: ProxyProfile) -> some View {
         }
         Spacer()
         proxyFriendlyStatusBadge(profile: profile, isDeployed: false)
-        Button {
-            Task { await prepareProxyDeployment(profile) }
-        } label: {
-            Text("使用这条")
+        if canStart {
+            Button {
+                Task { await prepareProxyDeployment(profile) }
+            } label: {
+                Text("使用这条")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .disabled(!backend.isReady)
+        } else {
+            Button("更新参数") {
+                Task { await replaceProxyProfile(profile) }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .disabled(!backend.isReady)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.mini)
-        .disabled(!backend.isReady)
     }
     .padding(.vertical, 2)
 }
 
 @ViewBuilder
 private func proxyFullHistoryRow(profile: ProxyProfile) -> some View {
+    let canStart = proxyProfileCanStart(profile)
     HStack(alignment: .top, spacing: 8) {
         VStack(alignment: .leading, spacing: 2) {
             Text(profile.name ?? profile.host ?? profile.id)
@@ -1084,8 +1153,10 @@ private func proxyFullHistoryRow(profile: ProxyProfile) -> some View {
         Spacer()
         proxyFriendlyStatusBadge(profile: profile, isDeployed: false)
         Menu {
-            Button("使用这条") {
-                Task { await prepareProxyDeployment(profile) }
+            if canStart {
+                Button("使用这条") {
+                    Task { await prepareProxyDeployment(profile) }
+                }
             }
             Button("更新参数") {
                 Task { await replaceProxyProfile(profile) }
@@ -1106,6 +1177,17 @@ private func proxyFullHistoryRow(profile: ProxyProfile) -> some View {
         .controlSize(.small)
         .disabled(!backend.isReady)
     }
+}
+
+private func proxyProfileCanStart(_ profile: ProxyProfile) -> Bool {
+    let needsPassword = !(profile.username ?? "").isEmpty
+    if needsPassword && profile.passwordSet != true {
+        return false
+    }
+    if profile.lastCheck?.status == "fail" {
+        return false
+    }
+    return true
 }
 
 @ViewBuilder
@@ -1584,19 +1666,19 @@ private func cleanupDuplicateProxyProfiles() async {
 
     private func proxyMonitorLabel(_ monitor: ProxyMonitorState) -> String {
         if monitor.running == true {
-            let restored = monitor.restored == true ? "，本次启动已自动恢复" : ""
-            let persisted = monitor.persisted?.enabled == true ? "，重启后会自动恢复" : ""
+            let restored = monitor.restored == true ? "，本次启动已继续看护" : ""
+            let persisted = monitor.persisted?.enabled == true ? "，重启后会自动继续看护" : ""
             let matrix = monitor.targetProfile ?? monitor.persisted?.targetProfile ?? "baseline"
             return "运行中：\(monitor.profileName ?? monitor.profileId ?? "未知配置")，检测目标 \(matrix)，间隔 \(monitor.interval ?? 0) 秒，已检查 \(monitor.runCount ?? 0) 次\(restored)\(persisted)。"
         }
         if let error = monitor.lastError, !error.isEmpty {
             if monitor.persisted?.enabled == true {
-                return "未运行：\(error)。已保存自动恢复配置，修复后重启 Netfix 会再次尝试。"
+                return "未运行：\(error)。已保存继续看护配置，修复后重启 Netfix 会再次尝试。"
             }
             return "未运行：\(error)"
         }
         if monitor.persisted?.enabled == true {
-            return "未运行：已保存自动恢复配置，等待 Netfix 恢复监控。"
+            return "未运行：已保存继续看护配置，等待 Netfix 恢复监控。"
         }
         return "未运行：保存配置后可启动持续健康检查。"
     }
@@ -1713,7 +1795,7 @@ private func cleanupDuplicateProxyProfiles() async {
                     }
                     .disabled(!backend.isReady)
                 }
-                Text("部署会改网络设置，macOS 可能要求管理员密码；需要账号密码的代理会由 Netfix 代管密码。")
+                Text("开始使用会改网络设置，macOS 可能要求管理员密码；需要账号密码的代理会由 Netfix 代管密码。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -1726,7 +1808,7 @@ private func cleanupDuplicateProxyProfiles() async {
         let lifecycle = proxyBridgeState?.lifecycle
         let deployed = lifecycle?.profileId == profile.id && lifecycle?.status == "running_system"
         let needsAttention = deployed && lifecycle?.needsAttention == true
-        return Text(needsAttention ? "异常" : (deployed ? "已部署" : "未部署"))
+        return Text(needsAttention ? "异常" : (deployed ? "使用中" : "未使用"))
             .font(.caption2)
             .fontWeight(.semibold)
             .padding(.horizontal, 7)
@@ -1822,9 +1904,9 @@ private func cleanupDuplicateProxyProfiles() async {
             startupNotice = "启动时代理检查：\(startupLifecycle.headline ?? startupLifecycle.status ?? "需要处理")。"
         } else if let restart = state.startupCheck?.autoRestart, restart.status == "restarted" {
             let port = restart.bridge?.listenPort.map(String.init) ?? "?"
-            startupNotice = "启动时已自动恢复代理连接，本机转发端口 \(port)。"
+            startupNotice = "启动时检测到本机转发正在运行，端口 \(port)。"
         } else if state.startupCheck?.settings?.autoRestartEnabled == true {
-            startupNotice = "已启用启动时自动恢复；当前没有需要恢复的代理连接。"
+            startupNotice = "旧版自动恢复设置已停用；现在只检查并提醒。"
         } else {
             startupNotice = ""
         }
@@ -2208,9 +2290,9 @@ private func cleanupDuplicateProxyProfiles() async {
         }
         let account = provider.apiKeyAccount ?? provider.id
         if provider.apiKeySet == true {
-            parts.append("API Key 已保存（本机密码库：\(account)）")
+            parts.append("AI 密钥已保存（本机密码库：\(account)）")
         } else {
-            parts.append("还没保存这个供应商的 API Key")
+            parts.append("还没保存这个供应商的 AI 密钥")
         }
         return parts.joined(separator: "；")
     }
@@ -2240,7 +2322,7 @@ private func cleanupDuplicateProxyProfiles() async {
             llmImageQuestionEnabled = true
         }
         let label = llmProviders.first(where: { $0.id == providerID })?.label ?? providerID
-        aiStatus = "已选择 \(label)。粘贴 API Key 后点“保存并测试”；密钥只保存在本机密码库。"
+        aiStatus = "已选择 \(label)。粘贴 AI 密钥后点“保存并测试”；密钥只保存在本机密码库。"
     }
 
     private func selectLLMProviderForKey(_ providerID: String) {
@@ -2248,7 +2330,7 @@ private func cleanupDuplicateProxyProfiles() async {
         applyProviderPreset(providerID)
         llmAPIKey = ""
         let label = llmProviders.first(where: { $0.id == providerID })?.label ?? providerID
-        aiStatus = "正在配置 \(label) 的 API Key，保存后链路就绪度会刷新。"
+        aiStatus = "正在配置 \(label) 的 AI 密钥，保存后连接状态会刷新。"
     }
 
     private func proxyIdentitySummary(_ report: ProxyIdentityReport) -> String {
@@ -2328,7 +2410,7 @@ private func cleanupDuplicateProxyProfiles() async {
 
     private func saveAndTestLLMSettings() async {
         guard llmAPIKeySet || !llmAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            aiStatus = "先粘贴 API Key，再点“保存并测试”。"
+            aiStatus = "先粘贴 AI 密钥，再点“保存并测试”。"
             return
         }
         aiStatus = "正在保存并测试当前 AI 供应商。"
@@ -2494,39 +2576,39 @@ private func cleanupDuplicateProxyProfiles() async {
             proxyStatus = "失败：Netfix 还没准备好。"
             return
         }
+        lastSavedProxyProfile = nil
+        proxyStatus = "正在识别并检查这组代理…"
         do {
             let profileInput = overrideInput ?? proxyInput
-            let result = try await client.saveProxyProfile(input: profileInput, startMonitor: proxyStartMonitorOnSave, targetProfile: proxyTargetProfile, protocolHint: proxyProtocolHint)
-            if let profile = result.profile {
-                proxyProfiles.removeAll { $0.id == profile.id }
-                proxyProfiles.append(profile)
-                lastSavedProxyProfile = profile
-            }
-            if let monitor = result.monitor {
+            let result = try await ProxySetupWorkflow(client: client).validateAndSave(
+                input: profileInput,
+                protocolHint: proxyProtocolHint,
+                targetProfile: proxyTargetProfile,
+                startMonitor: proxyStartMonitorOnSave
+            )
+            proxyParseResult = result.parsed
+            proxyValidateResult = result.validation
+            proxyProfiles.removeAll { $0.id == result.savedProfile.id }
+            proxyProfiles.append(result.savedProfile)
+            lastSavedProxyProfile = result.savedProfile
+            if let monitor = result.saveResponse.monitor {
                 proxyMonitorState = monitor
             }
             proxyImportPreviewResult = nil
-            proxyParseResult = nil
-            proxyValidateResult = nil
             proxyExportResult = nil
-            if result.ok {
-                if result.monitor?.running == true {
-                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库，后台监控已启动。还没有影响浏览器，下一步点“开始使用代理”。"
-                } else if result.monitor != nil {
-                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库，但后台监控未启动。还没有影响浏览器，下一步点“开始使用代理”。"
-                } else {
-                    proxyStatus = "已保存到这台 Mac，密码已写入本机密码库。还没有影响浏览器，下一步点“开始使用代理”。"
-                }
+            if result.saveResponse.monitor?.running == true {
+                proxyStatus = "检查通过并已保存，后台监控已启动。还没有改变浏览器网络，下一步点「开始使用代理」。"
             } else {
-                lastSavedProxyProfile = nil
-                proxyStatus = "失败：\(result.error ?? "无法保存")"
+                proxyStatus = "检查通过并已保存到这台 Mac。还没有改变浏览器网络，下一步点「开始使用代理」。"
             }
-            if result.monitor == nil {
+            if result.saveResponse.monitor == nil {
                 await loadProxyMonitor()
             }
+            await dashboardStore.refresh()
         } catch {
+            lastSavedProxyProfile = nil
             let card = UserFacingMessages.classify(error.localizedDescription)
-            proxyStatus = "\(card.headline)\n\(card.nextStep)"
+            proxyStatus = "失败：\(card.headline)\n\(card.nextStep)"
         }
     }
 
@@ -2651,8 +2733,8 @@ private func cleanupDuplicateProxyProfiles() async {
             let response = try await client.saveProxyBridgeSettings(autoRestartEnabled: autoRestartEnabled)
             proxyBridgeAutoRestartEnabled = response.settings.autoRestartEnabled
             proxyStatus = response.settings.autoRestartEnabled
-                ? "已启用启动时自动恢复代理连接。不会静默修改网络代理设置。"
-                : "已关闭启动时自动恢复代理连接。"
+                ? "已保存旧版兼容设置；当前版本只检查并提醒，不会自动恢复。"
+                : "已关闭旧版自动恢复设置。"
             await loadProxyBridge()
         } catch {
             let card = UserFacingMessages.classify(error.localizedDescription)
@@ -2680,9 +2762,13 @@ private func cleanupDuplicateProxyProfiles() async {
             proxyStatus = "失败：Netfix 还没准备好。"
             return
         }
+        guard profile.verificationStatus == "verified", profile.canApply == true else {
+            proxyStatus = "这条代理还没通过检查。请重新粘贴完整参数，再点「检查并保存」。"
+            return
+        }
         pendingSystemProxyProfile = profile
         pendingSystemProxyPlan = nil
-        proxyStatus = "正在生成部署预览，不会修改网络设置…"
+        proxyStatus = "正在准备启用预览，不会修改网络设置…"
         do {
             pendingSystemProxyPlan = try await client.applyProxyDryRun(profileID: profile.id, mode: "system")
             showSystemProxyConfirmation = true
@@ -2690,7 +2776,7 @@ private func cleanupDuplicateProxyProfiles() async {
         } catch {
             pendingSystemProxyProfile = nil
             pendingSystemProxyPlan = nil
-            proxyStatus = "失败：无法生成部署预览。\(error.localizedDescription)"
+            proxyStatus = "失败：无法准备启用预览。\(error.localizedDescription)"
         }
     }
 
@@ -2727,7 +2813,7 @@ private func cleanupDuplicateProxyProfiles() async {
                     detail.append("停止对应后台监控")
                 }
                 if response.monitorPersistedCleared == true {
-                    detail.append("清理重启自动恢复配置")
+                    detail.append("清理重启后继续看护配置")
                 }
                 proxyStatus = detail.isEmpty
                     ? "已删除配置。"
@@ -2769,18 +2855,23 @@ private func cleanupDuplicateProxyProfiles() async {
             pendingSystemProxyPlan = nil
             lastSavedProxyProfile = nil
             if response.ok && response.status == "applied" {
+                if response.verify?.ok == false {
+                    proxyStatus = "失败：启用后的网络检查未通过，Netfix 已停止继续使用这条线路。"
+                    await dashboardStore.refresh()
+                    return
+                }
                 if mode == "app-env" {
                     let keys = response.applied?.envKeys?.joined(separator: ", ") ?? "HTTP_PROXY/HTTPS_PROXY"
                     proxyStatus = "已生成给终端工具使用的代理环境：\(keys)。"
                 } else if response.applied?.scope == "loopback_bridge" {
-                    let port = response.bridge?.listenPort.map(String.init) ?? "?"
-                    proxyStatus = "已部署到这台 Mac，本机转发端口 \(port)。请保持 Netfix 打开；不用时点“恢复原来的网络设置”。"
+                    proxyStatus = "已在这台 Mac 开始使用代理。请保持 Netfix 打开；不用时点「停止使用并恢复原设置」。"
                 } else {
                     let service = response.networkService ?? "当前网络服务"
-                    proxyStatus = "已部署到 \(service)。不用时点“恢复原来的网络设置”。"
+                    proxyStatus = "已在 \(service) 开始使用代理。不用时点「停止使用并恢复原设置」。"
                 }
                 await loadProxyBridge()
                 await startProxyMonitor(profile)
+                await dashboardStore.refresh()
                 return
             }
             if response.reasonCode == "bridge_unsupported_upstream_protocol" {
@@ -2792,33 +2883,13 @@ private func cleanupDuplicateProxyProfiles() async {
                 return
             }
             proxyStatus = "失败：\(response.friendlyFailureMessage)"
+            await dashboardStore.refresh()
         } catch {
             pendingSystemProxyProfile = nil
             pendingSystemProxyPlan = nil
             let card = UserFacingMessages.classify(error.localizedDescription)
             proxyStatus = "\(card.headline)\n\(card.nextStep)"
-        }
-    }
-
-    private func rollbackProxyProfile() async {
-        guard let client = client() else {
-            proxyStatus = "失败：Netfix 还没准备好。"
-            return
-        }
-        do {
-            let response = try await client.rollbackProxyProfile(confirmed: true)
-            if response.ok {
-                let stop = bridgeStopLabel(response.bridgeStop)
-                proxyStatus = response.status == "rolled_back"
-                    ? "已恢复原来的网络设置。\(stop)"
-                    : "恢复状态：\(response.status ?? "unknown")。\(stop)"
-                await loadProxyBridge()
-            } else {
-                proxyStatus = "失败：\(response.error ?? response.status ?? "无法恢复网络设置")"
-            }
-        } catch {
-            let card = UserFacingMessages.classify(error.localizedDescription)
-            proxyStatus = "\(card.headline)\n\(card.nextStep)"
+            await dashboardStore.refresh()
         }
     }
 
@@ -2829,18 +2900,21 @@ private func cleanupDuplicateProxyProfiles() async {
         }
         do {
             let response = try await client.recoverProxyBridge(confirmed: true)
-            if response.ok {
+            if response.ok && response.status == "recovered" {
                 let stop = bridgeStopLabel(response.bridgeStop)
-                proxyStatus = response.status == "recovered"
-                    ? "已恢复原来的网络设置，失效代理已处理。\(stop)"
-                    : "恢复状态：\(response.status ?? "unknown")。\(stop)"
+                proxyStatus = "已恢复原来的网络设置。\(stop)"
                 await loadProxyBridge()
+                await dashboardStore.refresh()
+            } else if response.ok && response.status == "no_recovery_needed" {
+                proxyStatus = "失败：当前没有执行恢复。代理可能仍在使用中，请保持 Netfix 运行并重新读取状态。"
+                await dashboardStore.refresh()
             } else {
                 proxyStatus = "失败：\(response.error ?? response.status ?? "无法恢复原来的网络设置")"
             }
         } catch {
             let card = UserFacingMessages.classify(error.localizedDescription)
             proxyStatus = "\(card.headline)\n\(card.nextStep)"
+            await dashboardStore.refresh()
         }
     }
 

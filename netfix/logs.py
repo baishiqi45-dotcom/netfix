@@ -202,20 +202,26 @@ def load_proxy_health_trend(limit: int = 10, profile_id: str = "", hours: Option
     """Return a privacy-safe proxy-monitor trend from events.jsonl."""
     limit = max(1, min(int(limit or 10), 50))
     profile_id = str(profile_id or "")
+
+    def _samples_from_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for event in events:
+            if not isinstance(event, dict) or str(event.get("type") or "") != "proxy_monitor":
+                continue
+            raw_check = event.get("proxy_check") if isinstance(event.get("proxy_check"), dict) else {}
+            check = proxy_check_summary(raw_check)
+            if profile_id and check.get("profile_id") != profile_id:
+                continue
+            out.append({
+                "timestamp": str(event.get("timestamp") or raw_check.get("checked_at") or ""),
+                **check,
+            })
+        return out
+
     events = load_events(limit=1000, hours=hours).get("events", [])
-    samples: List[Dict[str, Any]] = []
-    for event in events:
-        if not isinstance(event, dict) or str(event.get("type") or "") != "proxy_monitor":
-            continue
-        raw_check = event.get("proxy_check") if isinstance(event.get("proxy_check"), dict) else {}
-        check = proxy_check_summary(raw_check)
-        if profile_id and check.get("profile_id") != profile_id:
-            continue
-        sample = {
-            "timestamp": str(event.get("timestamp") or raw_check.get("checked_at") or ""),
-            **check,
-        }
-        samples.append(sample)
+    samples = _samples_from_events(events)
+    if not samples and hours is not None:
+        samples = _samples_from_events(load_events(limit=1000, hours=None).get("events", []))
     samples = samples[-limit:]
     latencies = [int(item["latency_ms"]) for item in samples if isinstance(item.get("latency_ms"), int) and item["latency_ms"] > 0]
     median_latency = int(statistics.median(latencies)) if latencies else None

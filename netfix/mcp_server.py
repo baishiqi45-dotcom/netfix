@@ -101,6 +101,7 @@ _TOOLS: List[Dict[str, Any]] = [
                 "dry_run": {"type": "boolean", "default": False},
                 "confirmed": {"type": "boolean", "default": False},
                 "confirmation": {"type": "string", "description": "Required for Tier 2 execution: APPLY_SYSTEM_FIX"},
+                "magic_word": {"type": "string", "description": "Compatibility alias for confirmation."},
                 "yes": {"type": "boolean", "default": False, "description": "Deprecated; does not bypass Tier 2 confirmation."},
             },
             "required": ["issue"],
@@ -137,17 +138,18 @@ _TOOLS: List[Dict[str, Any]] = [
     ),
     _tool(
         "netfix_apply_fix",
-        "Execute one repair action. Tier 2 requires confirmed=true and magic_word=APPLY_SYSTEM_FIX.",
+        "Execute one repair action. Tier 2 requires confirmed=true and confirmation='APPLY_SYSTEM_FIX'. Compatibility alias: magic_word='APPLY_SYSTEM_FIX'.",
         {
             "type": "object",
             "properties": {
                 "fix_id": {"type": "string"},
                 "issue_id": {"type": "string"},
                 "confirmed": {"type": "boolean", "default": False},
-                "magic_word": {"type": "string", "description": "Required for Tier 2: APPLY_SYSTEM_FIX"},
-                "confirmation": {"type": "string", "description": "Alias for magic_word."},
+                "confirmation": {"type": "string", "description": "Required for Tier 2: APPLY_SYSTEM_FIX"},
+                "magic_word": {"type": "string", "description": "Compatibility alias for confirmation."},
                 "timeout": {"type": "integer", "default": 90},
             },
+            "required": [],
         },
         read_only=False,
         output_schema=_STANDARD_OUTPUT_SCHEMA,
@@ -436,11 +438,12 @@ def _fix_issue_for_mcp(args: Dict[str, Any]) -> Dict[str, Any]:
     """Execute fixes through the same confirmation gate as the local HTTP API."""
     from netfix import api  # Lazy import keeps MCP startup small and avoids cycles.
 
+    confirmation = str(args.get("confirmation") or args.get("magic_word") or "")
     body = {
         "fix_id": str(args.get("issue") or "").strip(),
         "dry_run": bool(args.get("dry_run")),
         "confirmed": bool(args.get("confirmed") or args.get("confirm")),
-        "confirmation": str(args.get("confirmation") or ""),
+        "confirmation": confirmation,
         "timeout": int(args.get("timeout") or 90),
     }
     status, payload = api._execute_confirmed_fix(body)
@@ -523,7 +526,7 @@ def _apply_fix_for_mcp(args: Dict[str, Any]) -> Dict[str, Any]:
         "issue": fix_id,
         "dry_run": False,
         "confirmed": bool(args.get("confirmed") or args.get("confirm")),
-        "confirmation": str(args.get("magic_word") or args.get("confirmation") or ""),
+        "confirmation": str(args.get("confirmation") or args.get("magic_word") or ""),
         "timeout": int(args.get("timeout") or 90),
     })
     result.setdefault("schema_version", MCP_SCHEMA_VERSION)

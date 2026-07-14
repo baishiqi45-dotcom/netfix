@@ -8,13 +8,14 @@ import signal
 import stat
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from netfix import deepseek_sidecar, dashboard_state, keychain, llm_budget, llm_explain, llm_provider, logs, network_monitor_service, proxy_bridge, proxy_monitor_service, residential_proxy, services, settings, user_facing_errors
+from netfix import agent_tools, deepseek_sidecar, dashboard_state, keychain, llm_budget, llm_explain, llm_provider, logs, network_monitor_service, proxy_bridge, proxy_monitor_service, residential_proxy, services, settings, user_facing_errors
 from netfix.constants import JOURNAL_DIR, REPO_ROOT, RULES_DIR, VERSION
 from netfix.detect import detect_environment, get_core
 from netfix.fix_engine import FixEngine
@@ -106,6 +107,525 @@ def _bridge_status_payload() -> Dict[str, Any]:
     return status
 
 
+def _dashboard_machine_state() -> Dict[str, Any]:
+    """Return local network identity without making public-IP requests."""
+    try:
+        return agent_tools.get_global_state(include_public_ipv4=False)
+    except TypeError:
+        return agent_tools.get_global_state()
+    except Exception as exc:
+        return {"platform": sys.platform, "error": str(exc)}
+
+
+def _number(value: Any) -> Optional[float]:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_mbps(kbps: Optional[float]) -> Optional[str]:
+    if kbps is None:
+        return None
+    return f"{kbps / 1000.0:.1f} Mbps"
+
+
+def _metric(label: str, value: str, hint: str) -> Dict[str, str]:
+    return {"label": label, "value": value, "hint": hint}
+
+
+def _connection_quality_from_report(
+    diagnostics: Any,
+    *,
+    checked_at: Any,
+    stale: bool,
+) -> Dict[str, Any]:
+    by_name: Dict[str, Dict[str, Any]] = {}
+    if isinstance(diagnostics, list):
+        for item in diagnostics:
+            if isinstance(item, dict) and isinstance(item.get("name"), str):
+                by_name[item["name"]] = item
+
+    network = by_name.get("network_quality") or {}
+    path = by_name.get("path_trace") or {}
+    hog = by_name.get("bandwidth_hog") or {}
+    gateway = by_name.get("gateway") or {}
+    network_details = network.get("details") if isinstance(network.get("details"), dict) else {}
+    path_details = path.get("details") if isinstance(path.get("details"), dict) else {}
+    hog_details = hog.get("details") if isinstance(hog.get("details"), dict) else {}
+    gateway_details = gateway.get("details") if isinstance(gateway.get("details"), dict) else {}
+
+    dl_kbps = _number(network_details.get("dl_throughput_kbps"))
+    ul_kbps = _number(network_details.get("ul_throughput_kbps"))
+    rtt_ms = _number(network_details.get("base_rtt_ms"))
+    speed_sampled = dl_kbps is not None or ul_kbps is not None
+    latency_sampled = rtt_ms is not None
+
+    down = _format_mbps(dl_kbps)
+    up = _format_mbps(ul_kbps)
+    if down and up:
+        speed_value = f"下载 {down} / 上传 {up}"
+    elif down:
+        speed_value = f"下载 {down}"
+    elif up:
+        speed_value = f"上传 {up}"
+    else:
+        speed_value = "未采到"
+    if dl_kbps is None and ul_kbps is None:
+        speed = _metric("未测", speed_value, "本机没有返回速度数据。")
+    elif (dl_kbps is not None and dl_kbps < 5_000) or (ul_kbps is not None and ul_kbps < 1_000):
+        speed = _metric("偏低", speed_value, "当前速度可能影响视频、下载或实时工具。")
+    elif (dl_kbps or 0) >= 25_000 and (ul_kbps or 3_000) >= 3_000:
+        speed = _metric("充足", speed_value, "日常浏览、开发工具和实时输出都够用。")
+    else:
+        speed = _metric("够用", speed_value, "日常使用够用；大文件下载可能需要等待。")
+
+    if rtt_ms is None:
+        latency = _metric("未测", "未采到", "本机没有返回延迟数据。")
+    else:
+        rtt_int = int(round(rtt_ms))
+        if rtt_int <= 60:
+            latency = _metric("低", f"延迟 {rtt_int}ms", "实时输出比较顺。")
+        elif rtt_int <= 150:
+            latency = _metric("中等", f"延迟 {rtt_int}ms", "实时输出会有轻微等待。")
+        else:
+            latency = _metric("较高", f"延迟 {rtt_int}ms", "实时输出会有明显等待。")
+    destination_loss: Optional[float] = None
+    hops = path_details.get("hops")
+    if isinstance(hops, list):
+        for hop in reversed(hops):
+            if isinstance(hop, dict):
+                loss = _number(hop.get("loss_percent"))
+                if loss is not None:
+                    destination_loss = loss
+                    break
+    local_gateway_loss = _number(gateway_details.get("packet_loss"))
+    stability_loss = destination_loss if destination_loss is not None else local_gateway_loss
+    local_fallback = destination_loss is None and local_gateway_loss is not None
+    stability_sampled = stability_loss is not None
+    if stability_loss is None:
+        stability = _metric("未测", "未采到", "本机没有返回到达目标端的稳定性数据。")
+    elif local_fallback and stability_loss <= 0:
+        stability = _metric("本地稳定", "本地丢包 0%", "本机到路由器的连接稳定；不代表代理全链路。")
+    elif local_fallback:
+        stability = _metric("本地有波动", f"本地丢包 {stability_loss:.0f}%", "本机到路由器有波动，先检查 Wi-Fi 或网线。")
+    elif stability_loss <= 0:
+        stability = _metric("稳定", "丢包 0%", "路径稳定。")
+    elif stability_loss <= 5:
+        stability = _metric("轻微波动", f"丢包 {stability_loss:.0f}%", "有轻微波动，通常还能使用。")
+    else:
+        stability = _metric("不稳", f"丢包 {stability_loss:.0f}%", "换网络或代理节点后再检查。")
+
+    hog_status = str(hog.get("status") or "")
+    hog_reason = str(hog_details.get("reason") or "")
+    top_names: List[str] = []
+    for item in hog_details.get("top_processes") or []:
+        if isinstance(item, dict):
+            label = str(item.get("label") or item.get("process") or "").strip()
+            if label:
+                top_names.append(label)
+    if hog_status in {"warn", "fail"} and hog_reason == "upload_saturated":
+        value = f"{'、'.join(top_names[:3])} 上传较高" if top_names else "后台上传较高"
+        background = _metric("上传较高", value, "需要实时使用时，可以暂停同步或上传后再检查。")
+    elif hog_status in {"warn", "fail"} and hog_reason == "download_saturated":
+        value = f"{'、'.join(top_names[:3])} 下载较高" if top_names else "后台下载较高"
+        background = _metric("下载较高", value, "需要实时使用时，可以暂停下载或系统更新后再检查。")
+    elif by_name.get("bandwidth_hog"):
+        background = _metric("平稳", "后台占用不高", "没有看到明显上传或下载占用。")
+    else:
+        background = _metric("未测", "未采到", "本机没有返回后台占用数据；只看占用，不看内容。")
+
+    background_sampled = bool(by_name.get("bandwidth_hog"))
+    sampled_count = sum((speed_sampled, latency_sampled, stability_sampled, background_sampled))
+    if stale:
+        collection_state = "stale"
+    elif sampled_count == 0:
+        collection_state = "unavailable"
+    elif sampled_count == 4:
+        collection_state = "complete"
+    else:
+        collection_state = "partial"
+    severe_quality = bool(
+        (dl_kbps is not None and dl_kbps < 1_000)
+        or (ul_kbps is not None and ul_kbps < 250)
+        or (rtt_ms is not None and rtt_ms > 1_000)
+        or (stability_loss is not None and stability_loss > 20)
+    )
+    degraded_quality = bool(
+        severe_quality
+        or (dl_kbps is not None and dl_kbps < 5_000)
+        or (ul_kbps is not None and ul_kbps < 1_000)
+        or (rtt_ms is not None and rtt_ms > 150)
+        or (stability_loss is not None and stability_loss > 0)
+        or hog_status in {"warn", "fail"}
+        or str(network.get("status") or "") in {"warn", "fail"}
+    )
+    if stale:
+        status = "stale"
+    elif collection_state == "unavailable":
+        status = "unchecked"
+    elif severe_quality:
+        status = "fail"
+    elif degraded_quality:
+        status = "warn"
+    else:
+        status = "ok"
+    headline = {
+        "stale": "上次体感数据已过期",
+        "unchecked": "还没测网络体感",
+        "warn": "体感需要留意",
+        "fail": "当前体感较差",
+        "ok": "体感顺畅",
+    }.get(status, "网络体感")
+    if collection_state == "unavailable":
+        headline = "本机未能采样"
+        detail = "检查已完成，但这台 Mac 没有返回速度、延迟或稳定性数据。"
+    elif status in {"warn", "fail"}:
+        if rtt_ms is not None and rtt_ms > 150:
+            headline = "延迟偏高，操作会有等待"
+            detail = latency["hint"]
+        elif speed["label"] == "偏低":
+            headline = "当前速度偏低"
+            detail = speed["hint"]
+        elif stability_loss is not None and stability_loss > 0:
+            headline = "当前连接有波动"
+            detail = stability["hint"]
+        elif hog_status in {"warn", "fail"}:
+            headline = "后台占用较高"
+            detail = background["hint"]
+        else:
+            detail = "已显示本机实际返回的数据。"
+    elif collection_state == "partial":
+        headline = "已采到部分网络体感"
+        detail = "已显示本机实际返回的数据；缺少的项目不会用猜测补齐。"
+    elif collection_state == "stale":
+        detail = "线路或时间已经变化，请重新检查后再参考。"
+    else:
+        detail = "来自最近一次检查，不会额外测速。"
+    return {
+        "status": status,
+        "collection_state": collection_state,
+        "headline": headline,
+        "detail": detail,
+        "speed": speed,
+        "latency": latency,
+        "stability": stability,
+        "background_activity": background,
+        "checked_at": checked_at,
+        "stale": stale,
+        "source": "last_report" if checked_at else "none",
+    }
+
+
+_ROUTE_DIAGNOSTICS = {
+    "interface_state",
+    "dhcp_state",
+    "gateway",
+    "ipv4_route",
+    "dns_resolvers",
+    "dns_local",
+    "dns_public",
+    "system_proxy_state",
+    "proxy_core_status",
+    "proxy_http_test",
+    "proxy_socks_test",
+    "proxy_auth_check",
+    "pac_state",
+    "node_reachability",
+}
+_CONNECTION_DIAGNOSTICS = {"wifi_signal", "path_trace", "network_quality", "bandwidth_hog", "mtu_probe"}
+_ADVISORY_DIAGNOSTICS = {"ip_reputation", "dns_leak", "ipv6_leak", "ipv6_route", "egress_identity", "public_ip"}
+_SIGNAL_STATUSES = {"ok", "warn", "fail"}
+
+
+def _dashboard_channel(item: Dict[str, Any]) -> str:
+    name = str(item.get("name") or "")
+    layer = str(item.get("layer") or "")
+    if name in _ROUTE_DIAGNOSTICS:
+        return "route_health"
+    if name in _CONNECTION_DIAGNOSTICS or layer in {"path", "bandwidth"}:
+        return "connection_quality"
+    if name in _ADVISORY_DIAGNOSTICS or layer == "egress":
+        return "advisory"
+    if (
+        layer == "service"
+        or name.endswith("_direct")
+        or name.endswith("_via_proxy")
+        or bool(item.get("target"))
+        or "proxy_used" in item
+    ):
+        return "target_service"
+    if layer in {"proxy", "dns", "network"}:
+        return "route_health"
+    return "advisory"
+
+
+def _current_route_has_proxy(environment: Optional[Dict[str, Any]]) -> bool:
+    env = environment if isinstance(environment, dict) else {}
+    proxy = env.get("system_proxy") if isinstance(env.get("system_proxy"), dict) else {}
+    for key in ("http", "https", "socks", "pac"):
+        entry = proxy.get(key)
+        if isinstance(entry, dict):
+            if entry.get("enabled") or entry.get("server") or entry.get("host") or entry.get("endpoint") or entry.get("url"):
+                return True
+        elif entry:
+            return True
+    return False
+
+
+def _dashboard_status(item: Dict[str, Any], environment: Optional[Dict[str, Any]]) -> Any:
+    status = item.get("status")
+    if _current_route_has_proxy(environment):
+        return status
+    if item.get("name") not in {"proxy_http_test", "proxy_socks_test", "proxy_auth_check"}:
+        return status
+    details = item.get("details") if isinstance(item.get("details"), dict) else {}
+    error = str(details.get("error") or item.get("error") or "").lower()
+    if "no proxy" in error or "no http proxy" in error or "no socks proxy" in error:
+        return "unchecked"
+    return status
+
+
+def _empty_channel_summary() -> Dict[str, Any]:
+    return {
+        "status": "unknown",
+        "ok": 0,
+        "warn": 0,
+        "fail": 0,
+        "unknown": 0,
+        "unchecked": 0,
+        "notSampled": 0,
+        "sample_count": 0,
+    }
+
+
+def _latest_dashboard_report_summary(
+    *,
+    current_environment: Optional[Dict[str, Any]] = None,
+) -> Tuple[Optional[str], Dict[str, Any], Dict[str, Any]]:
+    latest_path = JOURNAL_DIR / "last_report.json"
+    last_status: Optional[str] = None
+    summary: Dict[str, Any] = {}
+    egress: Dict[str, Any] = {"status": "unchecked"}
+    if not latest_path.exists():
+        return last_status, summary, egress
+    try:
+        last_report = json.loads(latest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return last_status, summary, egress
+    if not isinstance(last_report, dict):
+        return last_status, summary, egress
+    meta = last_report.get("meta") if isinstance(last_report.get("meta"), dict) else {}
+    origin = str(meta.get("origin") or meta.get("scope") or "unknown")
+    coverage = str(meta.get("coverage") or "unknown")
+    report_route_signature = meta.get("route_signature")
+    current_route_signature = dashboard_state.build_route_signature(current_environment)
+    checked_at = meta.get("timestamp") or last_report.get("timestamp") or last_report.get("generated_at")
+    diagnostics = last_report.get("diagnostics")
+    diagnostic_counts: Dict[str, int] = {}
+    status_rank = {"ok": 1, "warn": 2, "fail": 3}
+    channels = {
+        "route_health": _empty_channel_summary(),
+        "connection_quality": _empty_channel_summary(),
+        "target_service": _empty_channel_summary(),
+        "advisory": _empty_channel_summary(),
+    }
+    if isinstance(diagnostics, list):
+        for item in diagnostics:
+            if not isinstance(item, dict):
+                continue
+            status = item.get("status")
+            if isinstance(status, str) and status:
+                diagnostic_counts[status] = diagnostic_counts.get(status, 0) + 1
+            effective_status = _dashboard_status(item, current_environment)
+            channel = channels[_dashboard_channel(item)]
+            if isinstance(effective_status, str) and effective_status in channel:
+                channel[effective_status] += 1
+            if effective_status in _SIGNAL_STATUSES:
+                channel["sample_count"] += 1
+                current_channel_status = str(channel.get("status") or "unknown")
+                if status_rank[effective_status] > status_rank.get(current_channel_status, 0):
+                    channel["status"] = effective_status
+            if item.get("name") in {"egress_identity", "ip_reputation", "public_ip"}:
+                details = item.get("details") if isinstance(item.get("details"), dict) else {}
+                egress = {
+                    "status": status if status in {"ok", "warn", "fail"} else "unchecked",
+                    "public_ipv4": details.get("public_ipv4") or details.get("ip"),
+                    "isp": details.get("isp") or details.get("org"),
+                    "asn": details.get("asn"),
+                    "ip_type": details.get("ip_type"),
+                    "risk_score": details.get("risk_score"),
+                    "same_as_local": details.get("same_as_local"),
+                    "cached": bool(details.get("cached")),
+                    "source": item.get("name"),
+                    "checked_at": checked_at,
+                }
+    route_channel = channels["route_health"]
+    route_status = str(route_channel.get("status") or "unknown")
+    if route_status not in _SIGNAL_STATUSES:
+        route_status = None
+    valid_sample_count = int(route_channel.get("sample_count") or 0)
+    issue_count = int(route_channel.get("warn") or 0) + int(route_channel.get("fail") or 0)
+    blocking_issue_count = int(route_channel.get("fail") or 0)
+    advisory_count = sum(
+        int(channels[channel_id].get("warn") or 0) + int(channels[channel_id].get("fail") or 0)
+        for channel_id in ("connection_quality", "target_service", "advisory")
+    )
+    age = _age_seconds(checked_at)
+    stale = bool(age is None or age > 3600)
+    route_matches_current = bool(
+        isinstance(report_route_signature, str)
+        and report_route_signature
+        and isinstance(current_route_signature, str)
+        and report_route_signature == current_route_signature
+    )
+    invalid_reason: Optional[str] = None
+    if stale:
+        invalid_reason = "stale"
+    elif origin not in {"doctor", "post_fix_doctor"}:
+        invalid_reason = "unsupported_origin"
+    elif coverage != "current_mac_full":
+        invalid_reason = "incomplete_coverage"
+    elif not report_route_signature:
+        invalid_reason = "missing_route_signature"
+    elif not current_route_signature:
+        invalid_reason = "current_route_unknown"
+    elif not route_matches_current:
+        invalid_reason = "route_changed"
+    elif valid_sample_count == 0:
+        invalid_reason = "no_route_samples"
+    usable_for_dashboard = invalid_reason is None
+    last_status = route_status if usable_for_dashboard else None
+    summary = {
+        "has_report": True,
+        "scope": origin,
+        "origin": origin,
+        "coverage": coverage,
+        "checked_at": checked_at,
+        "age_seconds": int(age) if age is not None else None,
+        "status": route_status,
+        "diagnostic_count": len(diagnostics) if isinstance(diagnostics, list) else 0,
+        "diagnostic_counts": diagnostic_counts,
+        "diagnostic_channels": channels,
+        "valid_sample_count": valid_sample_count,
+        "issue_count": issue_count,
+        "blocking_issue_count": blocking_issue_count,
+        "advisory_count": advisory_count,
+        "stale": stale,
+        "route_matches_current": route_matches_current,
+        "invalid_reason": invalid_reason,
+        "usable_for_dashboard": usable_for_dashboard,
+        "connection_quality": _connection_quality_from_report(
+            diagnostics,
+            checked_at=checked_at,
+            stale=bool(stale or not usable_for_dashboard),
+        ),
+    }
+    explanation = last_report.get("explanation") if isinstance(last_report.get("explanation"), dict) else {}
+    if explanation:
+        summary["headline"] = explanation.get("headline")
+        summary["historical_severity"] = explanation.get("severity")
+    summary["severity"] = route_status or "info"
+    return last_status, summary, egress
+
+
+def _live_dashboard_signals(ttl_seconds: int = 10) -> Dict[str, Any]:
+    """Fold the live proxy/network monitor signals into a single dict.
+
+    The result is cached for ``ttl_seconds`` to avoid hammering the in-process
+    monitor threads on every /dashboard/state poll. The shape is intentionally
+    narrow: only what the dashboard verdict cares about.
+
+    Returns an empty dict when no signal is available (e.g. monitors are off
+    or not yet sampled). The dashboard verdict treats that as "no live signal"
+    and falls back to the journal report + state.
+    """
+    now = time.monotonic()
+    cache = _LIVE_SIGNALS_CACHE
+    if cache["value"] is not None and (now - cache["ts"]) < ttl_seconds:
+        return cache["value"]
+
+    summary: Dict[str, Any] = {"fresh_seconds": 0}
+
+    proxy_status: Optional[str] = None
+    proxy_fresh_age: Optional[float] = None
+    try:
+        snap = proxy_monitor_service.status()
+        monitor = snap.get("monitor") if isinstance(snap, dict) else None
+        if isinstance(monitor, dict):
+            last_check = monitor.get("last_check")
+            if isinstance(last_check, dict):
+                proxy_status = str(last_check.get("status") or "") or None
+                checked_at = last_check.get("checked_at")
+                if checked_at:
+                    proxy_fresh_age = _age_seconds(checked_at)
+            if not proxy_status:
+                running = monitor.get("running")
+                last_error = monitor.get("last_error")
+                if running and last_error:
+                    proxy_status = "fail"
+                elif running:
+                    proxy_status = "ok"
+    except Exception:
+        proxy_status = None
+
+    network_status: Optional[str] = None
+    try:
+        snap = network_monitor_service.status()
+        monitor = snap.get("monitor") if isinstance(snap, dict) else None
+        if isinstance(monitor, dict):
+            running = monitor.get("running")
+            last_sample = monitor.get("last_sample")
+            if isinstance(last_sample, dict):
+                state = str(last_sample.get("state") or "")
+                if state in {"busyUpload", "busyDownload", "slow", "recentLag"}:
+                    network_status = "warn"
+                elif state in {"authFailing", "failing"}:
+                    network_status = "fail"
+                elif state == "ok":
+                    network_status = "ok"
+            if network_status is None and running:
+                network_status = "ok"
+    except Exception:
+        network_status = None
+
+    if proxy_status:
+        summary["monitor_status"] = proxy_status
+        summary["proxy_monitor_status"] = proxy_status
+    if network_status:
+        summary["network_monitor_status"] = network_status
+        summary["connection_monitor_status"] = network_status
+    if proxy_status or network_status:
+        ages = [a for a in (proxy_fresh_age,) if a is not None]
+        if ages:
+            summary["fresh_seconds"] = int(min(ages))
+
+    _LIVE_SIGNALS_CACHE["value"] = summary
+    _LIVE_SIGNALS_CACHE["ts"] = now
+    return summary
+
+
+_LIVE_SIGNALS_CACHE: Dict[str, Any] = {"value": None, "ts": 0.0}
+
+
+def _age_seconds(value: Any) -> Optional[float]:
+    """Best-effort: how many seconds ago was this iso-8601 timestamp?"""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        normalized = value.replace("Z", "+00:00")
+        from datetime import datetime, timezone
+        parsed = datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)
+    return max(0.0, delta.total_seconds())
+
+
 def _record_startup_bridge_check() -> Dict[str, Any]:
     """Run a non-mutating stale-bridge check at backend startup."""
     global _STARTUP_BRIDGE_CHECK
@@ -114,11 +634,13 @@ def _record_startup_bridge_check() -> Dict[str, Any]:
         bridge_settings = settings.get_proxy_bridge_settings()
         auto_restart: Optional[Dict[str, Any]] = None
         if bridge_settings.get("auto_restart_enabled"):
-            auto_restart = residential_proxy.restart_stale_bridge(
-                confirmed=True,
-                confirmation=residential_proxy.BRIDGE_RESTART_CONFIRMATION,
-                idle_timeout_s=float(bridge_settings.get("idle_timeout") or 0),
-            )
+            auto_restart = {
+                "ok": False,
+                "status": "suppressed",
+                "reason_code": "action_time_confirmation_required",
+                "requires_confirmation": True,
+                "confirmation": residential_proxy.BRIDGE_RESTART_CONFIRMATION,
+            }
         status = proxy_bridge.status()
         stale_check = residential_proxy.detect_stale_bridge()
         lifecycle = residential_proxy.bridge_lifecycle(status.get("bridges", []), stale_check)
@@ -133,17 +655,6 @@ def _record_startup_bridge_check() -> Dict[str, Any]:
         }
         if auto_restart is not None:
             startup_check["auto_restart"] = auto_restart
-            if auto_restart.get("status") == "restarted":
-                event = logs.append_event({
-                    "type": "proxy_bridge_startup",
-                    "status": "ok",
-                    "headline": "本地桥接已按设置自动恢复",
-                    "root_cause": "系统代理仍指向上次 Netfix 桥接端口，当前 Netfix 已重新启动本地桥接；没有改写系统代理。",
-                    "bridge_lifecycle": "running_system",
-                    "profile_id": auto_restart.get("profile_id"),
-                    "network_service": auto_restart.get("network_service"),
-                })
-                startup_check["auto_restart_event_appended"] = bool(event.get("ok"))
         if lifecycle.get("needs_attention") or lifecycle.get("status") in {"recovery_required", "check_failed"}:
             event = logs.append_event({
                 "type": "proxy_bridge_startup",
@@ -590,7 +1101,7 @@ def _support_bundle() -> Dict[str, Any]:
 
     next_steps: List[str] = []
     if not latest_report.get("exists"):
-        next_steps.append("先在 Netfix App 里点一键诊断，再复制支持包。")
+        next_steps.append("先在 Netfix App 里点检查当前网络，再复制支持包。")
     else:
         next_steps.append("把 support_text 或整份 JSON 发给技术人员；不要再附原始代理密码、API Key 或未脱敏截图。")
     next_steps.append("如果问题和代理有关，优先在代理设置里重新粘贴供应商给的完整 host/port/user/password。")
@@ -706,10 +1217,12 @@ _CAPABILITIES_COMMANDS = [
     "proxy-switch",
     "report",
     "kb",
-    "watch",
-    "proxy-monitor",
 ]
 
+# /capabilities advertises the broader surface. /run is strictly the read-only
+# subset; fix/rollback/proxy-switch go through their dedicated endpoints with
+# confirmation tokens. watch and proxy-monitor live behind /watch/* and
+# /proxy/monitor/* — they are NOT commands; remove them from capabilities.
 _READ_ONLY_RUN_COMMANDS = {
     "codex",
     "services",
@@ -1126,7 +1639,7 @@ class APIRequestHandler(BaseHTTPRequestHandler):
             return 200, logs.load_lag_timeline(limit=5)
 
         if path == "/dashboard/insights":
-            return 200, network_monitor_service.dashboard_insights(sample=True)
+            return 200, network_monitor_service.dashboard_insights(sample=False)
 
         if path == "/support/bundle":
             return 200, _support_bundle()
@@ -1144,32 +1657,30 @@ class APIRequestHandler(BaseHTTPRequestHandler):
         if path == "/dashboard/state":
             bridge = _bridge_status_payload()
             profiles = settings.get_proxy_profiles()
-            last_status: Optional[str] = None
-            latest_path = JOURNAL_DIR / "last_report.json"
-            if latest_path.exists():
-                try:
-                    import json as _json
-                    last_report = _json.loads(latest_path.read_text(encoding="utf-8"))
-                    diagnostics = last_report.get("diagnostics") if isinstance(last_report, dict) else None
-                    if isinstance(diagnostics, list):
-                        for item in diagnostics:
-                            status = (item or {}).get("status") if isinstance(item, dict) else None
-                            if status in {"fail", "warn", "ok"}:
-                                last_status = status
-                                break
-                except Exception:
-                    last_status = None
-            return 200, {
+            environment = _environment_summary()
+            last_status, report_summary, egress_summary = _latest_dashboard_report_summary(
+                current_environment=environment,
+            )
+            live_signals = _live_dashboard_signals()
+            contract = dashboard_state.build_current_mac_state(
+                saved_profile_count=len(profiles),
+                bridge_status=bridge,
+                environment=environment,
+                machine_state=_dashboard_machine_state(),
+                egress_summary=egress_summary,
+                last_report_summary=report_summary,
+                last_diagnostic_status=last_status,
+                profiles=profiles,
+                live_signals=live_signals,
+            )
+            payload = {
                 "ok": True,
-                "schema_version": "netfix_dashboard_state.v1",
-                "state": dashboard_state.resolve(
-                    saved_profile_count=len(profiles),
-                    bridge_status=bridge,
-                    last_diagnostic_status=last_status,
-                ),
                 "bridge": bridge,
                 "saved_profile_count": len(profiles),
+                "live_signals": live_signals,
             }
+            payload.update(contract)
+            return 200, payload
 
         if path == "/llm/providers":
             return 200, {"ok": True, "providers": _llm_providers_with_status()}
@@ -1433,6 +1944,13 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                 identity_target_urls=[str(item) for item in identity_target_urls] if identity_target_urls else None,
             )
             result["profile"] = parsed["profile"]
+            if result.get("ok"):
+                result.update(
+                    residential_proxy.issue_validation_receipt(
+                        parsed["profile"],
+                        password=str(secret.get("password") or ""),
+                    )
+                )
             return (200 if result.get("ok") else 400), result
 
         if path == "/proxy/profiles":
@@ -1467,7 +1985,11 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                         result["warnings"] = []
                     result["warnings"].append("profile_saved_but_monitor_start_failed")
             result = _strip_internal_secrets(result)
-            return (200 if result.get("ok") else 400), result
+            if result.get("ok"):
+                return 200, result
+            if str(result.get("reason_code") or "").startswith("validation_receipt_"):
+                return 409, result
+            return 400, result
 
         if path == "/proxy/monitor/start":
             profile_id = str(body.get("profile_id") or body.get("profile") or "")
@@ -1493,6 +2015,13 @@ class APIRequestHandler(BaseHTTPRequestHandler):
             return 200, network_monitor_service.stop()
 
         if path == "/proxy/bridge/recover":
+            if not bool(body.get("confirmed") or body.get("confirm")) or str(body.get("confirmation") or "") != residential_proxy.BRIDGE_RECOVERY_CONFIRMATION:
+                return 409, {
+                    "ok": False,
+                    "status": "confirmation_required",
+                    "requires_confirmation": True,
+                    "confirmation": residential_proxy.BRIDGE_RECOVERY_CONFIRMATION,
+                }
             result = residential_proxy.recover_stale_bridge(
                 confirmed=bool(body.get("confirmed") or body.get("confirm")),
                 confirmation=str(body.get("confirmation") or ""),
@@ -1577,6 +2106,15 @@ class APIRequestHandler(BaseHTTPRequestHandler):
             )
             updated = dict(selected)
             updated["last_check"] = result.get("proxy_check")
+            if result.get("ok"):
+                updated["verification_status"] = "verified"
+                updated["can_apply"] = True
+                updated["validated_at"] = _utc_now()
+                updated["validation_source"] = "saved_profile_check"
+            else:
+                updated["verification_status"] = "unverified"
+                updated["can_apply"] = False
+                updated.pop("validated_at", None)
             identity_report = result.get("identity_report")
             if isinstance(identity_report, dict):
                 privacy = settings.get_privacy_settings()
@@ -1609,16 +2147,40 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                     break
             if selected is None:
                 return 404, {"ok": False, "error": "profile not found"}
+            mode = str(body.get("mode") or "system")
+            if mode == "system" and (
+                selected.get("verification_status") != "verified"
+                or selected.get("can_apply") is not True
+            ):
+                return 409, {
+                    "ok": False,
+                    "status": "blocked",
+                    "error": "proxy profile must pass preflight validation before system apply",
+                    "reason_code": "profile_not_verified",
+                    "requires_validation": True,
+                    "profile_id": profile_id,
+                }
+            if mode == "system" and (
+                not bool(body.get("confirmed") or body.get("confirm"))
+                or str(body.get("confirmation") or "") != residential_proxy.SYSTEM_APPLY_CONFIRMATION
+            ):
+                return 409, {
+                    "ok": False,
+                    "status": "confirmation_required",
+                    "requires_confirmation": True,
+                    "confirmation": residential_proxy.SYSTEM_APPLY_CONFIRMATION,
+                    "profile_id": profile_id,
+                }
             result = residential_proxy.apply_proxy_profile(
                 selected,
-                mode=str(body.get("mode") or "system"),
+                mode=mode,
                 confirmed=bool(body.get("confirmed") or body.get("confirm")),
                 confirmation=str(body.get("confirmation") or ""),
                 network_service=str(body.get("network_service") or ""),
                 target_url=str(body.get("target_url") or "https://www.gstatic.com/generate_204"),
                 timeout=max(1, min(int(body.get("timeout", 10)), 60)),
-                verify=bool(body.get("verify", True)),
-                rollback_on_verify_failure=bool(body.get("rollback_on_verify_failure", True)),
+                verify=True,
+                rollback_on_verify_failure=True,
                 target_profile=str(body.get("target_profile") or "baseline"),
             )
             if result.get("ok"):
@@ -1639,6 +2201,13 @@ class APIRequestHandler(BaseHTTPRequestHandler):
             return (200 if result.get("ok") else 400), result
 
         if path == "/proxy/profiles/rollback":
+            if not bool(body.get("confirmed") or body.get("confirm")) or str(body.get("confirmation") or "") != residential_proxy.PROXY_ROLLBACK_CONFIRMATION:
+                return 409, {
+                    "ok": False,
+                    "status": "confirmation_required",
+                    "requires_confirmation": True,
+                    "confirmation": residential_proxy.PROXY_ROLLBACK_CONFIRMATION,
+                }
             result = residential_proxy.rollback_last_proxy_apply(
                 confirmed=bool(body.get("confirmed") or body.get("confirm")),
                 confirmation=str(body.get("confirmation") or ""),

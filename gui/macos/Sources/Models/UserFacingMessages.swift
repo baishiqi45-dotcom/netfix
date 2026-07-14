@@ -252,7 +252,7 @@ enum UserFacingMessages {
         .missingAPIKey: UserFacingMessage(
             code: "missing_api_key",
             headline: "还没填 AI 密钥",
-            nextStep: "到「设置 → AI」选供应商并粘贴 API Key。不填也能照常用诊断和代理部署。",
+            nextStep: "到「设置 → AI」选供应商并填写 AI 密钥。不填也能照常检查网络和使用代理。",
             technical: "keychain has no API key."
         ),
         .bandwidthHogDetected: UserFacingMessage(

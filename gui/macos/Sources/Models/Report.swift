@@ -5,6 +5,7 @@ import Foundation
 /// netfix 后端返回的完整 JSON 报告。
 /// 与 netfix/report.py 中的 Report.data 结构对应。
 struct NetfixReport: Codable {
+    let schemaVersion: String?
     let meta: ReportMeta?
     let environment: ReportEnvironment?
     let diagnostics: [DiagnosticItem]
@@ -14,6 +15,7 @@ struct NetfixReport: Codable {
     let explanation: Explanation?
 
     enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
         case meta
         case environment
         case diagnostics
@@ -33,11 +35,16 @@ struct NetfixReport: Codable {
 
     /// 一句话结论（用于 headline）。
     var summaryHeadline: String {
+        if let headline = explanation?.headline, !headline.isEmpty {
+            return headline
+        }
         if overallStatus == .ok {
             return "网络看起来正常"
         }
-        let issueCount = diagnostics.filter { $0.status == "fail" || $0.status == "warn" }.count
-        return "检测到 \(issueCount) 个问题"
+        if overallStatus == .fail {
+            return "当前网络连接失败"
+        }
+        return "当前网络需要复查"
     }
 
     /// 首个根因描述，便于用户理解问题。
@@ -49,6 +56,21 @@ struct NetfixReport: Codable {
 struct ReportMeta: Codable {
     let version: String?
     let timestamp: String?
+    let platform: String?
+    let hostname: String?
+    let origin: String?
+    let coverage: String?
+    let routeSignature: String?
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case timestamp
+        case platform
+        case hostname
+        case origin
+        case coverage
+        case routeSignature = "route_signature"
+    }
 }
 
 struct ReportEnvironment: Codable {
@@ -942,6 +964,9 @@ struct ProxyProfile: Codable, Identifiable {
     let lastSavedAt: String?
     let createdAt: String?
     let deduplicated: Bool?
+    let verificationStatus: String?
+    let canApply: Bool?
+    let validatedAt: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -959,6 +984,9 @@ struct ProxyProfile: Codable, Identifiable {
         case lastSavedAt = "last_saved_at"
         case createdAt = "created_at"
         case deduplicated
+        case verificationStatus = "verification_status"
+        case canApply = "can_apply"
+        case validatedAt = "validated_at"
     }
 }
 
@@ -1203,6 +1231,8 @@ struct ProxyValidateResponse: Codable {
     let proxyCheck: ProxyCheck?
     let identityReport: ProxyIdentityReport?
     let profile: ProxyProfile?
+    let validationReceipt: String?
+    let validationReceiptExpiresInSeconds: Int?
     let errors: [String]?
 
     enum CodingKeys: String, CodingKey {
@@ -1210,6 +1240,8 @@ struct ProxyValidateResponse: Codable {
         case proxyCheck = "proxy_check"
         case identityReport = "identity_report"
         case profile
+        case validationReceipt = "validation_receipt"
+        case validationReceiptExpiresInSeconds = "validation_receipt_expires_in_seconds"
         case errors
     }
 }

@@ -256,7 +256,16 @@ def get_proxy_profiles() -> list:
     """Return saved residential/custom proxy profiles without credentials."""
     settings = load_settings()
     profiles = settings.get("proxy_profiles", [])
-    return copy.deepcopy(profiles) if isinstance(profiles, list) else []
+    out = copy.deepcopy(profiles) if isinstance(profiles, list) else []
+    for profile in out:
+        if not isinstance(profile, dict):
+            continue
+        if profile.get("verification_status") != "verified":
+            profile["verification_status"] = "unverified"
+            profile["can_apply"] = False
+        else:
+            profile["can_apply"] = bool(profile.get("can_apply", True))
+    return out
 
 
 def upsert_proxy_profile(profile: Dict[str, Any]) -> Dict[str, Any]:

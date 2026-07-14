@@ -5,13 +5,18 @@ import Combine
 struct RootView: View {
     @ObservedObject var backend: Backend
     @ObservedObject var healthMonitor: HealthMonitor
+    @ObservedObject var dashboardStore: DashboardStateStore
     @AppStorage("netfix.onboardingCompleted") private var onboardingCompleted = false
     @State private var onboardingStep = OnboardingStep.welcome
 
     var body: some View {
         Group {
             if onboardingCompleted {
-                DashboardView(backend: backend, healthMonitor: healthMonitor)
+                DashboardView(
+                    backend: backend,
+                    healthMonitor: healthMonitor,
+                    dashboardStore: dashboardStore
+                )
             } else {
                 switch onboardingStep {
                 case .welcome:
@@ -32,6 +37,7 @@ struct RootView: View {
                 case .proxySetup:
                     ProxySetupView(
                         backend: backend,
+                        dashboardStore: dashboardStore,
                         onContinue: { completeOnboarding() },
                         onSkip: { completeOnboarding() }
                     )
@@ -61,7 +67,10 @@ struct NetfixApp: App {
 
     var body: some Scene {
         Settings {
-            SettingsView(backend: appDelegate.backend)
+            SettingsView(
+                backend: appDelegate.backend,
+                dashboardStore: appDelegate.dashboardStateStore
+            )
         }
     }
 }

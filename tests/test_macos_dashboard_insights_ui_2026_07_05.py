@@ -6,6 +6,7 @@ DASHBOARD = ROOT / "gui" / "macos" / "Sources" / "Views" / "DashboardView.swift"
 SETTINGS = ROOT / "gui" / "macos" / "Sources" / "Views" / "SettingsView.swift"
 API_CLIENT = ROOT / "gui" / "macos" / "Sources" / "APIClient.swift"
 MODEL = ROOT / "gui" / "macos" / "Sources" / "Models" / "DashboardInsights.swift"
+APP_DELEGATE = ROOT / "gui" / "macos" / "Sources" / "AppDelegate.swift"
 
 
 def test_dashboard_exposes_plain_language_network_insights():
@@ -21,19 +22,32 @@ def test_dashboard_exposes_plain_language_network_insights():
     assert "func dashboardInsights() async throws -> DashboardInsightsResponse" in api_client
     assert 'path: "dashboard/insights"' in api_client
 
-    assert "primaryInsightSection" in dashboard
-    assert "当前状态" in dashboard
-    assert "可以做" in dashboard
+    assert "DashboardHomePresentation" in dashboard
+    assert "currentStatusSection" in dashboard
+    assert "connectionQualitySection" in dashboard
+    assert "diagnosticEvidenceSection" in dashboard
+    assert dashboard.index("connectionQualitySection") < dashboard.index("diagnosticEvidenceSection")
+    assert 'Text("网络体感")' in dashboard
+    assert 'connectionQualityMetric(title: "速度"' in dashboard
+    assert 'connectionQualityMetric(title: "延迟"' in dashboard
+    assert 'connectionQualityMetric(title: "稳定性"' in dashboard
+    assert 'connectionQualityMetric(title: "后台占用"' in dashboard
+    assert 'DisclosureGroup("诊断证据")' in dashboard
     assert 'responsivenessMetric(label: "速度"' in dashboard
-    assert "待确认" in dashboard
-    assert "本次没有拿到速度数据" in dashboard
-    assert 'Label("后台网络活动", systemImage: "arrow.up.arrow.down.circle")' in dashboard
-    assert 'Label("近期网络事件", systemImage: "clock.arrow.circlepath")' in dashboard
-    assert 'Label("代理近 10 次", systemImage: "waveform.path.ecg")' in dashboard
+    assert 'Label("后台网络活动", systemImage: "arrow.up.arrow.down.circle")' not in dashboard
+    assert 'Label("近期网络事件", systemImage: "clock.arrow.circlepath")' not in dashboard
+    assert 'Label("代理近 10 次", systemImage: "waveform.path.ecg")' not in dashboard
+    assert 'Text("后台网络活动")' in dashboard
+    assert 'Text("近期网络事件")' in dashboard
+    assert 'Text("代理近 10 次")' in dashboard
     assert 'Button("这次不提醒")' in dashboard
     assert "检测到上行流量较高" in dashboard
     assert "当前只是活动记录，不代表异常。" in dashboard
-    assert "还没有速度、延迟和后台占用数据" in dashboard
+    assert "还没有速度、延迟和后台占用数据" not in dashboard
+    assert "本次未采集速度和延迟数据" in dashboard
+    assert "没有 base_rtt 数据" not in dashboard
+    assert "响应性 \\(rpm)" not in dashboard
+    assert "基础延迟 \\(rtt)ms" not in dashboard
     assert "network_quality / bandwidth_hog" not in dashboard
     assert "network_quality 诊断结果" not in dashboard
     assert "现在最该看的问题" not in dashboard
@@ -49,6 +63,17 @@ def test_dashboard_exposes_plain_language_network_insights():
     assert "占满" not in dashboard
     assert "疑似" not in dashboard
     assert "几乎不可用" not in dashboard
+
+
+def test_dashboard_and_menu_do_not_guess_green_or_expose_route_jargon():
+    dashboard = DASHBOARD.read_text(encoding="utf-8")
+    app_delegate = APP_DELEGATE.read_text(encoding="utf-8")
+
+    assert 'case "external_system_proxy": return "其他代理正在使用"' in dashboard
+    assert 'case .unknown:\n            color = .systemGray' in app_delegate
+    assert "backend.isReady ? .systemGreen : .systemYellow" not in app_delegate
+    assert 'label == "低"' in dashboard
+    assert 'label.contains("低")' not in dashboard
 
 
 def test_settings_exposes_privacy_safe_activity_monitor_controls():

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Netfix AI 工具连接检查</title>
+    <title>Netfix — 粘贴代理，让 Mac 正确使用已有的代理</title>
     <link rel="icon" href="data:,">
   <style>
     :root {
@@ -18,6 +18,7 @@
       --fail: #d64545;
       --primary: #1f6feb;
       --primary-strong: #174ea6;
+      --neutral: #7a8494;
       --radius: 8px;
     }
     * { box-sizing: border-box; }
@@ -29,7 +30,7 @@
       line-height: 1.45;
       letter-spacing: 0;
     }
-    .container { max-width: 1120px; margin: 0 auto; padding: 22px; }
+    .container { width: 100%; max-width: 1040px; margin: 0 auto; padding: 22px; }
     header {
       display: flex;
       align-items: flex-start;
@@ -48,7 +49,8 @@
       border-radius: var(--radius);
       padding: 10px 12px;
       background: var(--panel);
-      min-width: 260px;
+      min-width: 0;
+      max-width: 320px;
     }
     .status-dot { width: 11px; height: 11px; border-radius: 999px; flex: 0 0 auto; }
     .ok { color: var(--ok); }
@@ -57,8 +59,9 @@
     .status-dot.ok { background: var(--ok); }
     .status-dot.warn { background: var(--warn); }
     .status-dot.fail { background: var(--fail); }
+    .status-dot.neutral { background: var(--neutral); }
     .status-text { font-size: 14px; font-weight: 650; }
-    .grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(320px, .85fr); gap: 14px; }
+    .grid { display: block; min-width: 0; }
     .panel {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -83,6 +86,14 @@
     .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
     .btn-primary:hover:not(:disabled) { background: var(--primary-strong); }
     .btn-danger { color: var(--fail); }
+    button:focus-visible,
+    summary:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible {
+      outline: 3px solid #91b7f2;
+      outline-offset: 2px;
+    }
     .summary {
       border: 1px solid var(--line);
       border-radius: var(--radius);
@@ -113,6 +124,136 @@
     }
     .headline { font-weight: 720; margin-bottom: 8px; }
     .muted { color: var(--muted); }
+    .verdict {
+      border-bottom: 1px solid var(--line);
+      padding: 2px 0 16px;
+      margin-bottom: 12px;
+      min-width: 0;
+    }
+    .verdict-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .verdict-state::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border: 2px solid currentColor;
+      border-radius: 50%;
+    }
+    .verdict-state.ok { color: #096745; }
+    .verdict-state.warn { color: #745017; }
+    .verdict-state.fail { color: #8a2424; }
+    .verdict-headline {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+    .verdict-impact {
+      margin: 7px 0 14px;
+      color: var(--muted);
+      max-width: 760px;
+      overflow-wrap: anywhere;
+    }
+    .prominent-action {
+      min-height: 44px;
+      padding: 11px 18px;
+      min-width: min(240px, 100%);
+    }
+    .identity-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 16px;
+      margin: 0 0 12px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfcfd;
+      min-width: 0;
+    }
+    .identity-item {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 5px;
+      padding: 0;
+      min-width: 0;
+    }
+    .identity-label {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 0;
+    }
+    .identity-value {
+      font-weight: 650;
+      overflow-wrap: anywhere;
+    }
+    .next-action {
+      min-width: 0;
+    }
+    .next-action-copy { min-width: 0; }
+    .quality-strip {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 12px;
+      margin-bottom: 12px;
+      min-width: 0;
+    }
+    .quality-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .quality-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .quality-item {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 9px 10px;
+      background: #fbfcfd;
+      min-width: 0;
+    }
+    .quality-label { font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+    .quality-value { font-weight: 700; overflow-wrap: anywhere; }
+    .quality-hint { color: var(--muted); font-size: 12px; margin-top: 3px; }
+    .secondary-tools {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin: 4px 0 14px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .secondary-tools button { padding: 7px 10px; font-size: 13px; }
+    .presentation-details {
+      margin: 0 0 14px;
+    }
+    .presentation-details > summary {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      cursor: pointer;
+      font-weight: 650;
+    }
+    .presentation-details[open] > summary {
+      border-bottom-left-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+    .presentation-details > .panel {
+      border-top: 0;
+      border-top-left-radius: 0;
+      border-top-right-radius: 0;
+      margin: 0;
+    }
     .goal-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 10px 0 12px; }
     .goal-option {
       border: 1px solid var(--line);
@@ -222,17 +363,35 @@
     }
     textarea { resize: vertical; min-height: 72px; }
     .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
-    aside .form-grid, aside .metric-grid { grid-template-columns: 1fr; }
     .image-preview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
     .image-preview { border: 1px solid var(--line); border-radius: var(--radius); padding: 6px; background: #fbfcfd; min-width: 0; }
     .image-preview img { width: 100%; height: 64px; object-fit: cover; border-radius: 6px; display: block; margin-bottom: 4px; }
     .image-preview-name { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .hidden { display: none; }
+    [hidden], .hidden { display: none !important; }
     @media (max-width: 860px) {
       header { display: block; }
-      .status-strip { margin-top: 12px; width: 100%; }
-      .grid, .cards, .form-grid, .goal-options { grid-template-columns: 1fr; }
+      .status-strip { margin-top: 12px; width: 100%; max-width: none; }
+      .grid, .cards, .form-grid, .goal-options, .quality-grid { grid-template-columns: 1fr; }
       .service-row, .event-row, .profile-row { display: block; }
+    }
+    @media (max-width: 480px) {
+      .container { padding: 14px; }
+      header { margin-bottom: 12px; }
+      h1 { font-size: 21px; }
+      .panel { padding: 12px; }
+      .verdict-headline { font-size: 20px; }
+      .prominent-action { width: 100%; }
+      .identity-grid { gap: 5px 12px; }
+      .quality-head { display: block; }
+      .quality-head .badge { margin-top: 6px; }
+      details.details-block summary { font-size: 13px; }
+    }
+    @media (max-width: 375px) {
+      .container { padding: 10px; }
+      .status-strip { padding: 8px 10px; }
+      .identity-item { flex: 1 1 135px; }
+      .secondary-tools { align-items: stretch; }
+      .secondary-tools button { flex: 1 1 auto; }
     }
   </style>
 </head>
@@ -240,55 +399,86 @@
   <div class="container">
     <header>
       <div>
-        <h1>Netfix：AI 工具连不上，一键查原因并给修法</h1>
-        <p class="subhead">10 秒判断是 Wi-Fi、DNS、线路、节点、账号密钥还是目标服务问题，再告诉你下一步。</p>
+        <h1>粘贴代理，让这台 Mac 正确使用已有的代理</h1>
+        <p class="subhead">先看现在的网络能不能走代理；不能，再告诉我下一步点什么。</p>
         <div class="trust">本地检查；不上传线路配置；只自动处理低风险问题；改系统设置前一定先给你确认。</div>
       </div>
-      <div class="status-strip">
-        <div id="status-dot" class="status-dot warn"></div>
-        <div id="status-text" class="status-text">正在准备 Netfix...</div>
+      <div class="status-strip" role="status" aria-live="polite" aria-atomic="true">
+        <div id="status-dot" class="status-dot neutral" aria-hidden="true"></div>
+        <div id="status-text" class="status-text">正在连接本地服务</div>
       </div>
     </header>
 
     <div class="grid">
       <main>
-        <section id="home-panel" class="panel">
-          <h2>一键检查</h2>
-          <div class="goal-options" role="radiogroup" aria-label="选择要检查的目标">
-            <label class="goal-option">
-              <input type="radio" name="diagnose-goal" value="chatgpt">
-              ChatGPT 网页打不开
-            </label>
-            <label class="goal-option">
-              <input type="radio" name="diagnose-goal" value="codex">
-              Codex / OpenAI 报错
-            </label>
-            <label class="goal-option">
-              <input type="radio" name="diagnose-goal" value="github">
-              GitHub / Copilot 连不上
-            </label>
-            <label class="goal-option">
-              <input type="radio" name="diagnose-goal" value="unsure" checked>
-              都连不上 / 不确定
-            </label>
+        <section id="home-panel" class="panel" data-section="current_status" aria-busy="true">
+          <div id="dashboard-next-action" class="next-action">
+            <div class="verdict" aria-live="polite" aria-atomic="true">
+              <div id="dashboard-state-label" class="verdict-state">状态读取中</div>
+              <h2 id="dashboard-headline" class="verdict-headline">正在读取当前网络状态</h2>
+              <p id="dashboard-impact" class="verdict-impact">完成读取前不会判断网络正常或异常。</p>
+              <button
+                id="dashboard-primary-button"
+                class="btn-primary prominent-action"
+                type="button"
+                aria-describedby="dashboard-impact"
+                aria-busy="false"
+                data-dashboard-primary-action="none"
+                data-dashboard-primary-target="none"
+                onclick="runDashboardPrimaryAction()"
+                disabled
+              >正在读取状态</button>
+            </div>
           </div>
-          <div id="summary" class="summary">
-            <div class="headline">先检查为什么连不上</div>
-            <div class="muted">点击后会直接告诉你问题在哪、能不能自动处理、哪些操作需要你确认。</div>
+          <div id="current-mac-state" class="identity-grid" data-contract="current_network_identity" role="list" aria-label="当前网络身份">
+            <div class="identity-item" role="listitem"><div class="identity-label">网络</div><div class="identity-value">读取中</div></div>
+            <div class="identity-item" role="listitem"><div class="identity-label">本机</div><div class="identity-value">读取中</div></div>
+            <div class="identity-item" role="listitem"><div class="identity-label">路径</div><div class="identity-value">读取中</div></div>
           </div>
+          <div id="connection-quality" class="quality-strip" data-section="connection_quality">
+            <div class="quality-head">
+              <div>
+                <div class="headline">网络体感</div>
+                <div class="muted">正在读取最近一次可用数据。</div>
+              </div>
+              <span class="badge">读取中</span>
+            </div>
+            <div class="quality-grid">
+              <div class="quality-item"><div class="quality-label">速度</div><div class="quality-value">读取中</div><div class="quality-hint">等待状态数据</div></div>
+              <div class="quality-item"><div class="quality-label">延迟</div><div class="quality-value">读取中</div><div class="quality-hint">等待状态数据</div></div>
+              <div class="quality-item"><div class="quality-label">稳定性</div><div class="quality-value">读取中</div><div class="quality-hint">等待状态数据</div></div>
+              <div class="quality-item"><div class="quality-label">后台占用</div><div class="quality-value">读取中</div><div class="quality-hint">等待状态数据</div></div>
+            </div>
+          </div>
+        </section>
+
+        <nav class="secondary-tools" aria-label="工具">
+          <button id="btn-open-proxy" type="button" aria-controls="proxy-panel" aria-expanded="false" onclick="openProxyPanel()">代理设置</button>
+          <button id="btn-open-ai" class="hidden" type="button" aria-controls="ai-disclosure" aria-expanded="false" onclick="openAIPanel()">AI 解释</button>
+          <button id="btn-open-logs" class="hidden" type="button" aria-controls="log-panel" aria-expanded="false" onclick="openLogs()">运行记录</button>
+        </nav>
+
+        <section id="latest-result" class="panel hidden" data-section="latest_result" hidden>
+          <h3>最近检查结果</h3>
+          <div id="summary" class="summary" aria-live="polite"></div>
           <div class="toolbar">
-            <button id="btn-diagnose" class="btn-primary" onclick="runDiagnose()">一键检查</button>
-            <button id="btn-fix" class="hidden" onclick="runFix()" disabled data-legacy-label="处理低风险问题">一键处理可自动修的问题</button>
-            <button id="btn-latest-report" class="hidden" onclick="loadReport()" data-legacy-label="上次检查结果">查看上次结果</button>
-            <button id="btn-open-logs" class="hidden" onclick="openLogs()" data-legacy-label="操作记录">运行记录</button>
+            <button id="btn-diagnose" class="btn-primary hidden" onclick="runDiagnose()">检查当前网络</button>
+            <button id="btn-fix" class="hidden" onclick="runFix()" disabled>一键处理可自动修的问题</button>
+            <button id="btn-latest-report" class="hidden" onclick="loadReport()">查看上次结果</button>
           </div>
-          <div class="cards">
+        </section>
+
+        <details id="diagnostic-evidence" class="presentation-details" data-section="diagnostic_evidence">
+          <summary>查看检查证据</summary>
+          <div class="panel">
+            <div class="cards" id="dashboard-cards" data-default-hidden="true">
             <div id="card-network" class="card"><div class="card-title">基础网络</div><div class="card-value">待检测</div></div>
             <div id="card-dns" class="card"><div class="card-title">ChatGPT 网页</div><div class="card-value">待检测</div></div>
             <div id="card-proxy" class="card"><div class="card-title">Codex / OpenAI</div><div class="card-value">待检测</div></div>
             <div id="card-services" class="card"><div class="card-title">GitHub / Copilot</div><div class="card-value">待检测</div></div>
+            </div>
           </div>
-        </section>
+        </details>
 
         <section id="recovery-panel" class="panel recovery-panel hidden" role="alert" aria-live="assertive">
           <h3 id="recovery-title">操作没有完成</h3>
@@ -296,7 +486,7 @@
           <ol id="recovery-steps" class="manual-list"></ol>
           <div id="recovery-detail" class="recovery-detail"></div>
           <div class="toolbar">
-            <button id="btn-retry-job" class="btn-primary" onclick="retryFailedJob()">重试</button>
+            <button id="btn-retry-job" class="btn-danger" onclick="retryFailedJob()">重试</button>
             <button onclick="copyRecoveryDetail()">复制给客服/技术人员</button>
             <button onclick="openLogs()">查看运行记录</button>
           </div>
@@ -313,21 +503,10 @@
           <h3>目标服务</h3>
           <div id="services-list"></div>
         </section>
-      </main>
 
-      <aside>
-        <section id="assist-panel" class="panel">
-          <h3>需要时再用</h3>
-          <div class="muted">先完成一键检查；如果你已经有自己的网络线路，或想让 AI 解释结果，再打开对应工具。</div>
-          <div class="toolbar">
-            <button onclick="openProxyPanel()">我有自己的网络线路</button>
-            <button onclick="openAIPanel()">用 AI 解释结果</button>
-          </div>
-        </section>
-
-        <section id="log-panel" class="panel hidden">
-          <h3>运行记录</h3>
-          <details id="technical-log-details" class="details-block">
+        <section id="log-panel" class="panel hidden" data-section="logs" hidden>
+          <h3 id="log-panel-heading" tabindex="-1">运行记录</h3>
+          <details id="technical-log-details" class="details-block" ontoggle="replayLogBuffer()">
             <summary>查看技术记录</summary>
             <div id="log" class="log"></div>
           </details>
@@ -346,15 +525,17 @@
             <summary>隐私设置</summary>
             <label style="display:flex;align-items:flex-start;gap:8px;margin-top:0;">
               <input id="persist-proxy-identity-report" type="checkbox" style="width:auto;margin-top:3px;">
-              <span data-legacy-label="保存完整线路身份记录">保存完整线路身份记录</span>
+              <span>保存完整线路身份记录</span>
             </label>
             <div class="muted" style="font-size:12px;">关闭时只保存出口身份摘要，不长期保存完整出口 IP、ISP/ASN 和目标矩阵。</div>
             <button style="margin-top:8px" onclick="savePrivacySettings()">保存隐私设置</button>
           </details>
         </section>
 
-        <section id="ai-panel" class="panel hidden">
-          <h3>需要时让 AI 帮你解释</h3>
+        <details id="ai-disclosure" class="presentation-details" data-section="ai" ontoggle="handleAIDisclosureToggle()" hidden>
+          <summary>需要时让 AI 解释检查结果</summary>
+          <section id="ai-panel" class="panel hidden">
+          <h3 id="ai-panel-heading" tabindex="-1">需要时让 AI 帮你解释</h3>
           <div id="llm-status-card" class="status-card">
             <div class="headline">正在读取 AI 状态</div>
             <div class="muted">有检查结果后，可以让 AI 用人话解释当前问题和下一步。</div>
@@ -434,30 +615,31 @@
             <button onclick="clearAIImages()">清空图片</button>
             </div>
           </details>
-        </section>
+          </section>
+        </details>
 
         <section id="proxy-panel" class="panel hidden">
-          <h3>检查你的网络线路</h3>
+          <h3 id="proxy-panel-heading" tabindex="-1">检查你的网络线路</h3>
           <label for="proxy-input">粘贴供应商给你的线路/节点信息</label>
-          <textarea id="proxy-input" data-legacy-label="粘贴新的线路凭据" placeholder="http://user:pass@host:port 或 host:port:user:pass"></textarea>
-          <label for="proxy-target-profile" data-legacy-label="检查场景">要检查的场景</label>
+          <textarea id="proxy-input" placeholder="http://user:pass@host:port 或 host:port:user:pass"></textarea>
+          <label for="proxy-target-profile">要检查的场景</label>
           <select id="proxy-target-profile">
             <option value="ai_dev">AI / 开发工具</option>
             <option value="baseline">通用连通性</option>
           </select>
           <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;">
             <input id="proxy-start-monitor-on-save" type="checkbox" checked style="width:auto;margin-top:3px;">
-            <span data-legacy-label="保存后自动看护">保存后自动看护<br><span class="muted" style="font-size:12px;">只会做本地后台健康检查并保存恢复意图；不会修改系统网络设置。</span></span>
+            <span>保存后自动看护<br><span class="muted" style="font-size:12px;">只会做本地后台健康检查并保存恢复意图；不会修改系统网络设置。</span></span>
           </label>
           <div class="toolbar">
             <button onclick="validateProxy()">先检查能不能用</button>
-            <button class="btn-primary" aria-label="开始看护" onclick="saveProxyProfile()">保存并验证 AI 工具</button>
+            <button class="btn-primary" aria-label="检查并保存线路" onclick="saveProxyProfile()">检查并保存</button>
           </div>
           <details class="details-block">
             <summary>批量导入和格式检查</summary>
             <div class="toolbar">
               <button onclick="parseProxy()">解析</button>
-              <button onclick="importProxyPreview()" data-legacy-label="批量预检">批量预检</button>
+              <button onclick="importProxyPreview()">批量预检</button>
             </div>
           </details>
           <div id="proxy-result" class="muted" style="margin-top:8px;font-size:13px;">Netfix 不卖线路、不保证平台放行，只帮你检查、保存、看护自己合法获得的线路/节点。</div>
@@ -466,13 +648,13 @@
           <details class="details-block">
             <summary>已保存线路和高级操作</summary>
             <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;">
-              <input id="proxy-bridge-auto-restart" type="checkbox" data-legacy-label="重启时自动恢复上次本机转发" style="width:auto;margin-top:3px;" onchange="saveProxyBridgeSettings()">
+              <input id="proxy-bridge-auto-restart" type="checkbox" style="width:auto;margin-top:3px;" onchange="saveProxyBridgeSettings()">
               <span>重启时自动恢复上次本机转发<br><span class="muted" style="font-size:12px;">只在系统仍指向上次 Netfix 本机转发、端口已空且已保存密码可用时启动；不会静默改写系统网络设置。</span></span>
             </label>
             <div id="proxy-profiles"></div>
           </details>
         </section>
-      </aside>
+      </main>
     </div>
   </div>
 
@@ -481,6 +663,7 @@
     let apiReady = false;
     let lastReport = null;
     let lastParsedProxy = null;
+    let pendingProxyValidation = null;
     let llmProviders = [];
     let llmSettings = {};
     let llmChainReadiness = {};
@@ -490,6 +673,10 @@
     let lastFailedJob = null;
     let lastRecoveryDetail = '';
     let operationInProgress = false;
+    let activeOperationPromise = null;
+    let currentPrimaryAction = { id: 'none', label: '正在读取状态', enabled: false, target: 'none', requires_confirmation: false };
+    const panelLoadPromises = { ai: null, proxy: null, logs: null };
+    const runtimeLogBuffer = [];
     const allowedImageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
     function escapeHtml(value) {
@@ -502,16 +689,46 @@
     }
 
     function log(msg) {
-      const el = document.getElementById('log');
-      el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-      el.scrollTop = el.scrollHeight;
+      runtimeLogBuffer.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
+      if (runtimeLogBuffer.length > 200) runtimeLogBuffer.splice(0, runtimeLogBuffer.length - 200);
+      if (document.getElementById('technical-log-details')?.open) replayLogBuffer();
+    }
+
+    function replayLogBuffer() {
+      const details = document.getElementById('technical-log-details');
+      const target = document.getElementById('log');
+      if (!details?.open || !target) return;
+      target.textContent = runtimeLogBuffer.length ? runtimeLogBuffer.join('\n') + '\n' : '本次页面会话还没有技术记录。';
+      target.scrollTop = target.scrollHeight;
+    }
+
+    function loadPanelOnce(panel, loader) {
+      if (panelLoadPromises[panel]) return panelLoadPromises[panel];
+      panelLoadPromises[panel] = Promise.resolve()
+        .then(loader)
+        .catch(error => {
+          panelLoadPromises[panel] = null;
+          throw error;
+        });
+      return panelLoadPromises[panel];
+    }
+
+    function revealPanel(panelId, triggerId) {
+      const panel = document.getElementById(panelId);
+      if (!panel) return null;
+      panel.hidden = false;
+      panel.classList.remove('hidden');
+      const trigger = document.getElementById(triggerId);
+      if (trigger) trigger.setAttribute('aria-expanded', 'true');
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const heading = document.getElementById(`${panelId}-heading`);
+      if (heading) heading.focus({ preventScroll: true });
+      return panel;
     }
 
     function openLogs() {
-      const panel = document.getElementById('log-panel');
-      panel.classList.remove('hidden');
-      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      loadLogs();
+      revealPanel('log-panel', 'btn-open-logs');
+      return loadPanelOnce('logs', () => Promise.all([loadLogs(), loadPrivacySettings()]));
     }
 
     function friendlyJobFailure(label, detail) {
@@ -548,7 +765,7 @@
         return [
           '确认 Netfix App 仍在运行；如果刚启动，等几秒后重试。',
           '打开运行记录查看 Netfix 服务是否异常退出。',
-          '必要时退出并重新打开 Netfix，再运行一键检查。'
+          '必要时退出并重新打开 Netfix，再运行检查当前网络。'
         ];
       }
       return [
@@ -629,20 +846,350 @@
       card.querySelector('.card-value').textContent = text;
     }
 
+    function dashboardActionLabel(action) {
+      if (action === 'paste_proxy') return '粘贴代理参数';
+      if (action === 'start_saved_proxy') return '继续设置代理';
+      if (action === 'recover_system_proxy') return '恢复原来的网络设置';
+      if (action === 'verify_current_proxy') return '检查当前网络';
+      if (action === 'diagnose') return '检查当前网络';
+      if (action === 'none') return '无需操作';
+      return '检查当前网络';
+    }
+
+    function normalizePrimaryTarget(action) {
+      const item = typeof action === 'object' && action ? action : { id: String(action || '') };
+      const aliases = {
+        'settings:proxy': 'flow:proxy_setup',
+        'recover:system_proxy': 'recover:stale_bridge',
+      };
+      const targetsById = {
+        paste_proxy: 'flow:proxy_setup',
+        start_saved_proxy: 'flow:proxy_setup',
+        recover_system_proxy: 'recover:stale_bridge',
+        verify_current_proxy: 'run:doctor',
+        diagnose: 'run:doctor',
+        none: 'none',
+      };
+      const raw = String(item.target || targetsById[item.id] || 'none');
+      return aliases[raw] || raw;
+    }
+
+    function primaryActionFromVerdict(state) {
+      const verdict = state.verdict || {};
+      const action = verdict.primary_action || {};
+      const legacy = state.decision || {};
+      const id = action.id || legacy.primary_action || 'diagnose';
+      const normalized = {
+        id,
+        label: action.label || dashboardActionLabel(id),
+        enabled: action.enabled !== false && id !== 'none',
+        target: action.target || '',
+        requires_confirmation: !!(action.requires_confirmation || legacy.requires_confirmation)
+      };
+      normalized.target = normalizePrimaryTarget(normalized);
+      return normalized;
+    }
+
+    function dashboardRouteLabel(route) {
+      if (route === 'none') return '未使用代理';
+      if (route === 'saved_only') return '已保存未启用';
+      if (route === 'external_system_proxy') return '系统路径已启用';
+      if (route === 'netfix_applied') return 'Netfix 已启用';
+      if (route === 'degraded') return '代理待复查';
+      if (route === 'recovery_required') return '需要恢复';
+      return route || '未检测';
+    }
+
+    const KNOWN_PRIMARY_TARGETS = new Set([
+      'flow:proxy_setup',
+      'run:doctor',
+      'recover:stale_bridge',
+      'none',
+    ]);
+
+    function setPrimaryActionBusy(busy) {
+      const button = document.getElementById('dashboard-primary-button');
+      if (!button) return;
+      button.disabled = busy || !currentPrimaryAction.enabled || currentPrimaryAction.target === 'none';
+      button.setAttribute('aria-busy', busy ? 'true' : 'false');
+      button.textContent = busy ? '处理中...' : currentPrimaryAction.label;
+    }
+
+    async function recoverStaleBridgeFromDashboard() {
+      const confirmed = confirm('将恢复上次由 Netfix 修改前保存的系统网络设置。继续？');
+      if (!confirmed) return;
+      setStatus('warn', '正在恢复系统网络设置');
+      const result = await api('POST', '/proxy/bridge/recover', {
+        confirmed: true,
+        confirmation: 'RESTORE_STALE_PROXY_BRIDGE',
+      });
+      if (!result.ok) {
+        const detail = result.error || result.reason_code || '恢复没有完成';
+        showJobRecovery('恢复网络设置', null, 0, null, detail);
+        return;
+      }
+      setStatus('ok', '系统网络设置已恢复');
+      await loadDashboardState();
+    }
+
+    function runDashboardPrimaryAction(primaryAction = currentPrimaryAction) {
+      const raw = typeof primaryAction === 'object' && primaryAction
+        ? primaryAction
+        : { id: primaryAction || currentPrimaryAction.id };
+      const action = { ...raw, target: normalizePrimaryTarget(raw) };
+      if (action.id === 'reload_dashboard') return loadDashboardState();
+      const target = action.target;
+      if (!action.enabled && action.enabled !== undefined) return Promise.resolve();
+      if (target === 'none' || action.id === 'none') return Promise.resolve();
+      if (!KNOWN_PRIMARY_TARGETS.has(target)) {
+        setStatus('warn', `此动作（${target || action.id || '未知'}）在 Web 控制台尚未支持，请到 Netfix App 操作。`);
+        log('primary_action.target unknown: ' + (target || action.id || ''));
+        return Promise.resolve();
+      }
+      if (operationInProgress && activeOperationPromise) return activeOperationPromise;
+      if (target === 'run:doctor') return runDiagnose();
+
+      operationInProgress = true;
+      setPrimaryActionBusy(true);
+      const task = target === 'flow:proxy_setup'
+        ? openProxyPanel()
+        : recoverStaleBridgeFromDashboard();
+      activeOperationPromise = Promise.resolve(task)
+        .catch(error => {
+          setStatus('fail', '操作没有完成');
+          log('主操作失败: ' + (error.message || error));
+        })
+        .finally(() => {
+          operationInProgress = false;
+          activeOperationPromise = null;
+          setPrimaryActionBusy(false);
+        });
+      return activeOperationPromise;
+    }
+
+    function verdictStateCopy(severity) {
+      if (severity === 'ok') return { label: '状态：可用', className: 'ok' };
+      if (severity === 'warn') return { label: '状态：需要留意', className: 'warn' };
+      if (severity === 'fail') return { label: '状态：需要处理', className: 'fail' };
+      return { label: '状态：待确认', className: '' };
+    }
+
+    function systemPathLabel(system, saved, applied = {}) {
+      if (system.detection_status === 'unknown') return '状态待确认';
+      if (applied.owner === 'netfix') return 'Netfix 代理使用中';
+      if (system.active) return '其他代理正在使用';
+      if ((saved.count || 0) > 0) return '已保存，尚未启用';
+      return '未启用代理';
+    }
+
+    function friendlyInterface(value) {
+      return value ? '已连接' : '未检测';
+    }
+
+    function sectionPresentationState(sectionId, visibleSections, collapsedSections, suppressedSections) {
+      if (visibleSections.has(sectionId)) return 'visible';
+      if (collapsedSections.has(sectionId)) return 'collapsed';
+      if (suppressedSections.has(sectionId)) return 'suppressed';
+      return 'suppressed';
+    }
+
+    function renderSectionByPresentation(sectionId, element, visibleSections, collapsedSections, suppressedSections) {
+      if (!element) return;
+      const state = sectionPresentationState(sectionId, visibleSections, collapsedSections, suppressedSections);
+      const isDetails = String(element.tagName || '').toUpperCase() === 'DETAILS';
+      element.dataset.presentationState = state;
+      element.hidden = state === 'suppressed';
+      element.classList.toggle('hidden', state === 'suppressed');
+      if (state === 'collapsed' && !isDetails) {
+        element.dataset.presentationError = 'collapsed_requires_details';
+        element.hidden = true;
+        element.classList.add('hidden');
+        return;
+      }
+      if (isDetails) element.open = state === 'visible';
+    }
+
+    function renderConnectionQuality(quality) {
+      const target = document.getElementById('connection-quality');
+      if (!target) return;
+      const q = quality || {};
+      const metric = (key, title, fallbackValue) => {
+        const item = q[key] || {};
+        const label = item.label || '未测';
+        const value = item.value || fallbackValue;
+        const hint = item.hint || '本机未返回这项数据。';
+        return `
+          <div class="quality-item">
+            <div class="quality-label">${escapeHtml(title)}</div>
+            <div class="quality-value">${escapeHtml(label)} · ${escapeHtml(value)}</div>
+            <div class="quality-hint">${escapeHtml(hint)}</div>
+          </div>
+        `;
+      };
+      const collectionCopy = {
+        never_run: '还没有本次数据。',
+        unavailable: '本机未能采样，未使用猜测值。',
+        partial: '来自最近一次检查，缺少的项目保持未测。',
+        stale: '上次数据已过期，请重新检查。',
+        complete: '来自最近一次检查，不会额外测速。',
+      }[q.collection_state] || '只显示本机实际返回的数据。';
+      target.innerHTML = `
+        <div class="quality-head">
+          <div>
+            <div class="headline">网络体感</div>
+            <div class="muted">${escapeHtml(collectionCopy)}</div>
+          </div>
+          <span class="badge ${q.status === 'ok' ? 'ok' : q.status === 'warn' ? 'warn' : q.status === 'fail' ? 'fail' : ''}">${escapeHtml(q.status === 'ok' ? '可用' : q.status === 'warn' ? '留意' : q.status === 'fail' ? '异常' : '未测')}</span>
+        </div>
+        <div class="quality-grid">
+          ${metric('speed', '速度', '还没测')}
+          ${metric('latency', '延迟', '还没测')}
+          ${metric('stability', '稳定性', '还没测')}
+          ${metric('background_activity', '后台占用', '还没采样')}
+        </div>
+      `;
+    }
+
+    function renderDashboardState(state) {
+      const decision = state.decision || {};
+      const verdict = state.verdict || {};
+      const presentation = state.presentation || {};
+      const visibleSections = new Set(presentation.visible_sections || ['current_status', 'connection_quality']);
+      const collapsedSections = new Set(presentation.collapsed_sections || ['diagnostic_evidence']);
+      const suppressedSections = new Set((presentation.suppressed_sections || [
+        { id: 'ai' },
+        { id: 'logs' },
+      ]).map(item => typeof item === 'string' ? item : item.id).filter(Boolean));
+      const machine = state.machine || {};
+      const proxy = state.proxy || {};
+      const system = proxy.system || {};
+      const saved = proxy.saved || {};
+      const applied = proxy.applied || {};
+      const primaryAction = primaryActionFromVerdict(state);
+      const connectionQualityVisible = visibleSections.has('connection_quality');
+      const firstAidVisible = visibleSections.has('first_aid');
+      const headline = verdict.headline || state.headline || decision.headline || '当前状态待确认';
+      const impact = verdict.detail || state.detail || '当前没有足够信息判断网络是否可用。';
+      const severity = verdict.severity || decision.severity || 'info';
+      const stateCopy = verdictStateCopy(severity);
+
+      document.getElementById('dashboard-headline').textContent = headline;
+      document.getElementById('dashboard-impact').textContent = impact;
+      const stateLabel = document.getElementById('dashboard-state-label');
+      stateLabel.className = `verdict-state ${stateCopy.className}`.trim();
+      stateLabel.textContent = stateCopy.label;
+      document.getElementById('home-panel').setAttribute('aria-busy', 'false');
+
+      const identity = document.getElementById('current-mac-state');
+      if (identity) {
+        identity.innerHTML = [
+          ['连接', friendlyInterface(machine.primary_interface)],
+          ['本机', machine.self_ipv4 || '未检测'],
+          ['路径', systemPathLabel(system, saved, applied)],
+        ].map(([label, value]) => `
+          <div class="identity-item" role="listitem">
+            <div class="identity-label">${escapeHtml(label)}</div>
+            <div class="identity-value">${escapeHtml(value)}</div>
+          </div>
+        `).join('');
+      }
+
+      currentPrimaryAction = primaryAction;
+      const primaryButton = document.getElementById('dashboard-primary-button');
+      primaryButton.dataset.dashboardPrimaryAction = primaryAction.id;
+      primaryButton.dataset.dashboardPrimaryTarget = primaryAction.target;
+      primaryButton.textContent = primaryAction.label;
+      primaryButton.disabled = operationInProgress || !primaryAction.enabled || primaryAction.target === 'none';
+      primaryButton.setAttribute('aria-busy', operationInProgress ? 'true' : 'false');
+
+      renderConnectionQuality(state.connection_quality || {});
+      document.querySelectorAll('[data-section]').forEach((el) => {
+        const id = el.getAttribute('data-section');
+        if (!id) return;
+        renderSectionByPresentation(id, el, visibleSections, collapsedSections, suppressedSections);
+      });
+
+      const aiState = sectionPresentationState('ai', visibleSections, collapsedSections, suppressedSections);
+      const logsState = sectionPresentationState('logs', visibleSections, collapsedSections, suppressedSections);
+      document.getElementById('btn-open-ai')?.classList.toggle('hidden', aiState === 'suppressed');
+      document.getElementById('btn-open-logs')?.classList.toggle('hidden', logsState === 'suppressed');
+      if (visibleSections.has('latest_result') && !document.getElementById('summary').textContent.trim()) {
+        document.getElementById('summary').innerHTML = `<div class="headline">${escapeHtml(headline)}</div><div class="muted">${escapeHtml(verdict.next_step || state.next_step || '')}</div>`;
+      }
+      document.body.dataset.connectionQualityVisible = connectionQualityVisible ? 'true' : 'false';
+      document.body.dataset.firstAidVisible = firstAidVisible ? 'true' : 'false';
+    }
+
+    async function loadDashboardState() {
+      try {
+        const state = await api('GET', '/dashboard/state');
+        if (state.ok === false) throw new Error(state.error || 'dashboard state unavailable');
+        renderDashboardState(state);
+      } catch (e) {
+        document.getElementById('home-panel').setAttribute('aria-busy', 'false');
+        document.getElementById('dashboard-headline').textContent = '暂时读不到当前网络状态';
+        document.getElementById('dashboard-impact').textContent = '本地服务没有返回状态；可以重新读取，代理设置和运行记录仍可使用。';
+        document.getElementById('dashboard-state-label').textContent = '状态：读取失败';
+        currentPrimaryAction = {
+          id: 'reload_dashboard',
+          label: '重新读取',
+          enabled: true,
+          target: 'none',
+          requires_confirmation: false,
+        };
+        const primaryButton = document.getElementById('dashboard-primary-button');
+        primaryButton.textContent = '重新读取';
+        primaryButton.disabled = false;
+        primaryButton.dataset.dashboardPrimaryAction = 'reload_dashboard';
+        primaryButton.dataset.dashboardPrimaryTarget = 'none';
+        document.getElementById('btn-open-proxy')?.classList.remove('hidden');
+        document.getElementById('btn-open-logs')?.classList.remove('hidden');
+        setStatus('fail', '当前状态读取失败');
+        log('读取当前状态失败: ' + (e.message || e));
+      }
+    }
+
     function selectedGoal() {
       return document.querySelector('input[name="diagnose-goal"]:checked')?.value || 'unsure';
     }
 
+    const diagnosticGoalLabels = Object.freeze({
+      chatgpt: 'ChatGPT 网页打不开',
+      codex: 'Codex / OpenAI 报错',
+      github: 'GitHub / Copilot 连不上',
+      unsure: '都连不上 / 不确定',
+    });
+
     function openAIPanel() {
-      const panel = document.getElementById('ai-panel');
-      panel.classList.remove('hidden');
-      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const disclosure = document.getElementById('ai-disclosure');
+      disclosure.hidden = false;
+      disclosure.classList.remove('hidden');
+      disclosure.open = true;
+      revealPanel('ai-panel', 'btn-open-ai');
+      return loadPanelOnce('ai', async () => {
+        await loadProviders();
+        await loadLLMSettings();
+      });
+    }
+
+    function handleAIDisclosureToggle() {
+      if (document.getElementById('ai-disclosure')?.open) return openAIPanel();
+      document.getElementById('btn-open-ai')?.setAttribute('aria-expanded', 'false');
     }
 
     function openProxyPanel() {
-      const panel = document.getElementById('proxy-panel');
-      panel.classList.remove('hidden');
-      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      revealPanel('proxy-panel', 'btn-open-proxy');
+      return loadPanelOnce('proxy', () => Promise.all([
+        loadProxyValidationTargets(),
+        loadProxyProfiles(),
+        loadProxyBridge(),
+        loadProxyMonitor(),
+        loadProxyBridgeSettings(),
+      ]));
+    }
+
+    function openPrivacyPanel() {
+      return openLogs();
     }
 
     function serviceLabel(name) {
@@ -752,20 +1299,28 @@
       `;
     }
 
-    async function checkApi() {
+    function renderApiHealth(data) {
+      if (operationInProgress) return;
+      if (data?.ok) setStatus('ok', `Netfix 已就绪 v${data.version || ''}`.trim());
+      else setStatus('fail', data?.error ? '未连接到 Netfix 本地服务' : 'Netfix 本地服务异常');
+    }
+
+    async function checkApi(renderStatus = true) {
       try {
         const data = await api('GET', '/health');
         apiReady = !!data.ok;
         if (apiReady) {
-          if (!operationInProgress) setStatus('ok', `Netfix 已就绪 v${data.version}`);
           log('API 连接成功');
         } else {
-          if (!operationInProgress) setStatus('fail', 'Netfix 本地服务异常');
           log('API 异常: ' + JSON.stringify(data));
         }
+        if (renderStatus) renderApiHealth(data);
+        return data;
       } catch (e) {
-        if (!operationInProgress) setStatus('fail', '未连接到 Netfix 本地服务');
         log('API 连接失败: ' + e.message);
+        const data = { ok: false, error: e.message || String(e) };
+        if (renderStatus) renderApiHealth(data);
+        return data;
       }
     }
 
@@ -865,7 +1420,6 @@
         else if (confirmFix) pushAction('see-actions', '先看会改什么', true);
         else pushAction('service-details', '查看目标服务', true);
       }
-      pushAction('ask-ai', '让 AI 解释', false);
       pushAction('service-details', '查看目标服务', false);
 
       if (!detail && rootCopy && normalizeCopy(rootCopy) !== normalizeCopy(headline)) {
@@ -1001,25 +1555,15 @@
 
     function renderReport(report) {
       lastReport = report;
-      const explanation = report.explanation || {};
-      renderReportSummary(report);
-      showPostCheckControls(explanation);
-
       const diags = report.diagnostics || [];
-      const hasFail = diags.some(d => d.status === 'fail');
-      const hasWarn = diags.some(d => d.status === 'warn');
-      setStatus(hasFail ? 'fail' : hasWarn ? 'warn' : 'ok',
-        hasFail ? '检测到连接故障' : hasWarn ? '部分服务需要注意' : '网络正常');
-
       const byLayer = statusByLayer(diags);
       setCard('card-network', byLayer.network.status, byLayer.network.text);
       setCard('card-dns', byLayer.dns.status, byLayer.dns.text);
       setCard('card-proxy', byLayer.proxy.status, byLayer.proxy.text);
       setCard('card-services', byLayer.services.status, byLayer.services.text);
-
-      renderServices(diags);
-      renderActions(explanation);
-      loadLogs();
+      document.getElementById('actions-panel')?.classList.add('hidden');
+      document.getElementById('services-panel')?.classList.add('hidden');
+      void loadDashboardState();
     }
 
     function showPostCheckControls(explanation) {
@@ -1209,21 +1753,28 @@
     }
 
     async function runDiagnose() {
+      if (operationInProgress && activeOperationPromise) return activeOperationPromise;
       const btn = document.getElementById('btn-diagnose');
       operationInProgress = true;
       btn.disabled = true;
       btn.textContent = '检查中...';
       btn.setAttribute('aria-busy', 'true');
+      setPrimaryActionBusy(true);
       setStatus('warn', '正在检查...');
       renderRunningState('正在检查连接路径', 'Netfix 正在检查 Wi-Fi、DNS、线路、节点和目标服务。');
-      try {
-        await runJob(['codex'], 60, '检查', renderReport);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = '一键检查';
-        btn.removeAttribute('aria-busy');
-        operationInProgress = false;
-      }
+      activeOperationPromise = (async () => {
+        try {
+          await runJob(['doctor'], 60, '检查', renderReport);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '检查当前网络';
+          btn.removeAttribute('aria-busy');
+          operationInProgress = false;
+          activeOperationPromise = null;
+          setPrimaryActionBusy(false);
+        }
+      })();
+      return activeOperationPromise;
     }
 
     async function runFix() {
@@ -1295,7 +1846,7 @@
       target.innerHTML = `
         <div class="status-card">
           <div class="headline">${escapeHtml(summary.headline || '还没有检查结果')}</div>
-          <div class="muted">${data.latest_report_exists ? '最近一次检查结果已保存。' : '完成一次一键检查后会生成检查结果。'}</div>
+          <div class="muted">${data.latest_report_exists ? '最近一次检查结果已保存。' : '完成一次检查当前网络后会生成检查结果。'}</div>
           <div style="margin-top:8px">${latestEventHtml}</div>
         </div>
         <details class="details-block">
@@ -1332,7 +1883,7 @@
       if (!confirm('只删除最近检查结果和运行记录，不删除设置或系统钥匙串。继续？')) return;
       const data = await api('POST', '/logs/clear', { latest_report: true, events: true });
       log(data.ok ? `已清理 ${data.removed ? data.removed.length : 0} 个记录文件` : '清理运行记录失败: ' + (data.error || JSON.stringify(data.errors || {})));
-      await loadLogs();
+      await loadLogs()
     }
 
     async function clearAllData() {
@@ -1343,10 +1894,16 @@
       log(data.ok ? `已删除本地数据，钥匙串项 ${deleted} 个，AI 预算账本 ${budgetRemoved} 个` : '删除本地数据失败: ' + (data.error || JSON.stringify(data)));
       if (data.ok) {
         llmSettings = {};
-        await loadLLMSettings();
-        await loadProxyProfiles();
+        llmProviders = [];
+        llmChainReadiness = {};
+        privacySettings = {};
+        proxyBridgeSettings = {};
+        panelLoadPromises.ai = null;
+        panelLoadPromises.proxy = null;
+        document.getElementById('llm-status-card').innerHTML = '<div class="headline">AI 本地设置已清空</div><div class="muted">再次打开 AI 工具时才会重新读取设置。</div>';
+        document.getElementById('proxy-profiles').innerHTML = '<div class="muted" style="margin-top:8px">本地线路数据已清空；再次打开代理设置时重新读取。</div>';
       }
-      await loadLogs();
+      await loadLogs()
     }
 
     async function loadPrivacySettings() {
@@ -1722,7 +2279,7 @@
 
     async function askAI() {
       if (!lastReport) {
-        document.getElementById('llm-result').textContent = '请先点“一键检查”，有本次检查结果后我才能解释。';
+        document.getElementById('llm-result').textContent = '请先点“检查当前网络”，有本次检查结果后我才能解释。';
         return;
       }
       const target = document.getElementById('llm-result');
@@ -1875,10 +2432,35 @@
 
     async function saveProxyProfileInput(input, pendingCopy = '正在保存并开始持续检查...') {
       const target = document.getElementById('proxy-result');
-      target.textContent = pendingCopy;
+      const normalizedInput = String(input || '').trim();
+      if (!normalizedInput) {
+        pendingProxyValidation = null;
+        target.textContent = '请先粘贴供应商给你的线路参数。';
+        document.getElementById('proxy-input').focus();
+        return;
+      }
       const target_profile = document.getElementById('proxy-target-profile').value || 'baseline';
+      const validationKey = proxyValidationKey(normalizedInput, target_profile);
+      let receipt = pendingProxyValidation?.key === validationKey
+        ? pendingProxyValidation.receipt
+        : null;
+      if (!receipt) {
+        target.textContent = '正在检查线路，检查通过后才会保存...';
+        const validation = await requestProxyValidation(normalizedInput, target_profile);
+        target.innerHTML = renderProxyValidation(validation);
+        receipt = pendingProxyValidation?.key === validationKey
+          ? pendingProxyValidation.receipt
+          : null;
+        if (!validation.ok || !receipt) {
+          target.innerHTML += '<div class="muted" style="margin-top:8px">线路没有通过检查，因此没有保存，也不能启用。</div>';
+          return;
+        }
+      }
+      target.textContent = pendingCopy;
+      pendingProxyValidation = null;
       const data = await api('POST', '/proxy/profiles', {
-        input,
+        input: normalizedInput,
+        validation_receipt: receipt,
         start_monitor: document.getElementById('proxy-start-monitor-on-save').checked,
         monitor_interval: 60,
         timeout: 10,
@@ -2068,16 +2650,42 @@
         <strong>${headline}</strong>
         <div>TCP: ${escapeHtml(check.tcp || 'unknown')} · Auth: ${escapeHtml(check.auth || 'unknown')} · HTTP: ${escapeHtml(check.http_code || 0)} · 延迟: ${escapeHtml(check.latency_ms || 0)}ms</div>
         <div class="muted">${escapeHtml(check.error || check.checked_via || '')}</div>
-        ${report ? `<div style="margin-top:10px"><strong>出口身份与泄漏风险</strong>${renderIdentityReport(report)}</div>` : ''}
+        ${report ? `<div style="margin-top:10px"><strong>出口身份与风险评分</strong>${renderIdentityReport(report)}</div>` : ''}
       `;
+    }
+
+    function proxyValidationKey(input, targetProfile) {
+      return JSON.stringify([String(input || '').trim(), String(targetProfile || 'baseline')]);
+    }
+
+    async function requestProxyValidation(input, targetProfile) {
+      const normalizedInput = String(input || '').trim();
+      const target_profile = targetProfile || 'baseline';
+      pendingProxyValidation = null;
+      if (!normalizedInput) {
+        return { ok: false, error: '请先粘贴供应商给你的线路参数。' };
+      }
+      const data = await api('POST', '/proxy/validate', {
+        input: normalizedInput,
+        timeout: 10,
+        include_identity: true,
+        target_profile,
+      });
+      if (data.ok && data.validation_receipt) {
+        pendingProxyValidation = {
+          key: proxyValidationKey(normalizedInput, target_profile),
+          receipt: data.validation_receipt,
+        };
+      }
+      return data;
     }
 
     async function validateProxy() {
       const input = document.getElementById('proxy-input').value;
       const target = document.getElementById('proxy-result');
-      target.textContent = '正在验证线路连通性和出口身份...';
+      target.textContent = '正在检查线路能不能用...';
       const target_profile = document.getElementById('proxy-target-profile').value || 'baseline';
-      const data = await api('POST', '/proxy/validate', { input, timeout: 10, include_identity: true, target_profile });
+      const data = await requestProxyValidation(input, target_profile);
       target.innerHTML = renderProxyValidation(data);
     }
 
@@ -2093,9 +2701,11 @@
     }
 
     function renderProxyProfileRow(p) {
+      const canApply = p.can_apply === true && p.verification_status === 'verified';
+      const verificationCopy = canApply ? '已检查' : '需先检查';
       return `
         <div class="profile-row">
-          <span>${escapeHtml(p.name || p.id)} · ${escapeHtml(p.protocol)}://${escapeHtml(p.host)}:${escapeHtml(p.port)}${p.last_check ? ' · ' + escapeHtml(friendlyProxyStatus(p.last_check.status || 'unknown')) : ''}</span>
+          <span>${escapeHtml(p.name || p.id)} · ${escapeHtml(p.protocol)}://${escapeHtml(p.host)}:${escapeHtml(p.port)} · ${verificationCopy}${p.last_check ? ' · ' + escapeHtml(friendlyProxyStatus(p.last_check.status || 'unknown')) : ''}</span>
           <span>
             <button data-validate-profile="${escapeHtml(p.id)}">验证</button>
             <button data-monitor-profile="${escapeHtml(p.id)}" aria-label="开始看护">验证并看护</button>
@@ -2106,7 +2716,7 @@
                 <button data-dry-run="${escapeHtml(p.id)}">部署前预览</button>
                 <button data-export-profile="${escapeHtml(p.id)}">导出配置</button>
                 <button data-apply-env="${escapeHtml(p.id)}">给命令行使用</button>
-                <button data-apply-system="${escapeHtml(p.id)}">应用到系统</button>
+                <button data-apply-system="${escapeHtml(p.id)}" ${canApply ? '' : 'disabled title="请先验证这条线路"'}>应用到系统</button>
                 <button class="btn-danger" data-delete-profile="${escapeHtml(p.id)}" aria-label="删除线路">删除</button>
               </div>
             </details>
@@ -2121,13 +2731,12 @@
       const profiles = data.profiles || [];
       if (!profiles.length) {
         target.innerHTML = '<div class="muted" style="margin-top:8px">暂无保存的网络线路。</div>';
-        loadProxyMonitor();
         return;
       }
       const visibleProfiles = profiles.slice(0, 5);
       const hiddenProfiles = profiles.slice(5);
       const hiddenHtml = hiddenProfiles.length ? `
-        <details style="margin-top:8px" data-legacy-label="查看其余 ${hiddenProfiles.length} 条线路">
+        <details style="margin-top:8px">
           <summary>查看其余 ${hiddenProfiles.length} 条网络线路</summary>
           ${hiddenProfiles.map(renderProxyProfileRow).join('')}
         </details>
@@ -2177,7 +2786,6 @@
       target.querySelectorAll('[data-delete-profile]').forEach(btn => {
         btn.addEventListener('click', () => deleteProxyProfile(btn.dataset.deleteProfile));
       });
-      loadProxyMonitor();
     }
 
     function renderProxyRepairActions(actions) {
@@ -2519,16 +3127,15 @@
         showFileModeBlocked();
         return;
       }
-      await checkApi();
-      await loadProviders();
-      await loadLLMSettings();
-      await loadPrivacySettings();
-      await loadProxyBridgeSettings();
-      await loadProxyValidationTargets();
-      await loadProxyProfiles();
-      await loadProxyBridge();
-      await loadProxyMonitor();
-      await loadLogs();
+      // /health and /dashboard/state are the only two requests allowed on
+      // first paint. Issue them in parallel so the home contract is rendered
+      // after a single network round-trip instead of two serialised ones.
+      const [health] = await Promise.all([checkApi(false), loadDashboardState()]);
+      renderApiHealth(health);
+      // Only the home contract loads on first paint. The AI / proxy / privacy
+      // panels load their data the first time the user actually opens them —
+      // this is the only honest way to honour "one conclusion, one action"
+      // and to keep the first paint under one network round-trip.
     }
 
     boot();

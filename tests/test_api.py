@@ -4,6 +4,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from http.server import HTTPServer
 from pathlib import Path
@@ -11,7 +12,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from netfix import api
+from netfix import api, cli, dashboard_state
 
 
 class TestAPI(unittest.TestCase):
@@ -457,6 +458,23 @@ class TestAPI(unittest.TestCase):
         self.assertTrue(data["requires_confirmation"])
         self.assertEqual(data["confirmation"], api.SYSTEM_FIX_CONFIRMATION)
 
+    def test_client_cannot_downgrade_a_tier2_fix_to_tier1(self):
+        with patch("netfix.api.FixEngine") as engine_cls:
+            data = self._post_json_error(
+                "/fixes/execute",
+                {
+                    "fix_id": "disable-ipv6",
+                    "tier": 1,
+                    "confirmed": True,
+                    "confirmation": "",
+                },
+                409,
+            )
+
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["confirmation"], api.SYSTEM_FIX_CONFIRMATION)
+        engine_cls.assert_not_called()
+
     def test_confirmed_fix_endpoint_allows_tier2_dry_run_without_phrase(self):
         with patch("netfix.api.detect_environment", return_value={"ok": True}), \
                 patch("netfix.api.get_core", return_value=None), \
@@ -506,6 +524,330 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(kwargs["auto_confirm"], False)
         self.assertEqual(kwargs["env"], {"ok": True})
         run.assert_called_once_with(["doctor", "--json", "--timeout", "9"], timeout=9)
+
+    def test_dashboard_state_returns_current_mac_contract_for_external_proxy(self):
+        env = {
+            "ok": True,
+            "system_proxy": {
+                "http": {"enabled": True, "server": "127.0.0.1", "port": 7890},
+                "https": {"enabled": True, "server": "127.0.0.1", "port": 7890},
+            },
+        }
+        bridge = {"lifecycle": {"status": "stopped"}, "stale_check": {}}
+        machine = {
+            "platform": "darwin",
+            "primary_interface": "en0",
+            "self_ipv4": "192.168.1.10",
+            "gateway": "192.168.1.1",
+            "has_ipv6_default_route": True,
+        }
+        with patch("netfix.api.detect_environment", return_value=env), \
+                patch("netfix.api.get_core", return_value=None), \
+                patch("netfix.api.settings.get_proxy_profiles", return_value=[]), \
+                patch("netfix.api._bridge_status_payload", return_value=bridge), \
+                patch("netfix.api._latest_dashboard_report_summary", return_value=(None, {}, {"status": "unchecked"})), \
+                patch("netfix.api.agent_tools.get_global_state", return_value=machine):
+            data = self._get("/dashboard/state")
+
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["schema_version"], "netfix_current_mac_state.v2")
+        self.assertEqual(data["decision"]["effective_route"], "external_system_proxy")
+        self.assertEqual(data["decision"]["primary_action"], "verify_current_proxy")
+        self.assertEqual(data["verdict"]["primary_action"]["label"], "检查当前网络")
+        self.assertIn("检查当前网络", data["verdict"]["next_step"])
+        self.assertNotIn("一键诊断", json.dumps(data["verdict"], ensure_ascii=False))
+        self.assertEqual(data["machine"]["primary_interface"], "en0")
+        self.assertTrue(data["proxy"]["system"]["active"])
+        self.assertEqual(data["egress"]["status"], "unchecked")
+        self.assertIn("state", data)
+        self.assertEqual(data["state"]["state"], "ready")
+
+    def test_dashboard_latest_report_summary_uses_meta_timestamp_and_worst_status(self):
+        checked_at = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        report = {
+            "meta": {"timestamp": checked_at, "origin": "doctor"},
+            "diagnostics": [
+                {"name": "gateway", "status": "ok"},
+                {"name": "github", "status": "fail"},
+                {"name": "network_quality", "status": "unknown"},
+                {"name": "egress_identity", "status": "unchecked"},
+            ],
+            "root_causes": [{"id": "github-blocked", "description": "GitHub 无法连接"}],
+            "explanation": {"headline": "GitHub 无法连接", "severity": "fail"},
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch("netfix.api.JOURNAL_DIR", Path(tempdir)):
+            Path(tempdir, "last_report.json").write_text(json.dumps(report), encoding="utf-8")
+
+            status, summary, egress = api._latest_dashboard_report_summary()
+
+        self.assertIsNone(status)
+        self.assertEqual(summary["checked_at"], checked_at)
+        self.assertEqual(summary["scope"], "doctor")
+        self.assertTrue(summary["has_report"])
+        self.assertGreaterEqual(summary["age_seconds"], 3600)
+        self.assertTrue(summary["stale"])
+        self.assertFalse(summary["usable_for_dashboard"])
+        self.assertEqual(summary["diagnostic_counts"]["fail"], 1)
+        self.assertEqual(summary["diagnostic_counts"]["unknown"], 1)
+        self.assertEqual(summary["diagnostic_counts"]["unchecked"], 1)
+        self.assertEqual(summary["status"], "ok")
+        self.assertEqual(summary["issue_count"], 0)
+        self.assertEqual(summary["advisory_count"], 1)
+        self.assertEqual(summary["invalid_reason"], "stale")
+        self.assertEqual(egress["status"], "unchecked")
+
+    def test_report_meta_records_origin_coverage_and_non_secret_route_signature(self):
+        env = {
+            "platform": {"platform": "darwin"},
+            "system_proxy": {
+                "http": "http://alice:super-secret@127.0.0.1:7890",
+                "https": "127.0.0.1:7890",
+            },
+            "active_core": "mihomo",
+            "active_profile": {"id": "profile-1"},
+            "mixed_port": 7890,
+        }
+
+        report = cli._build_report(
+            env,
+            [{"name": "system_proxy_state", "status": "ok"}],
+            [],
+            origin="doctor",
+            coverage="current_mac_full",
+        )
+
+        meta = report["meta"]
+        self.assertEqual(meta["origin"], "doctor")
+        self.assertEqual(meta["coverage"], "current_mac_full")
+        self.assertTrue(meta["route_signature"].startswith("route:v1:"))
+        self.assertNotIn("alice", json.dumps(meta))
+        self.assertNotIn("super-secret", json.dumps(meta))
+
+    def test_dashboard_report_requires_full_matching_route_context(self):
+        checked_at = datetime.now(timezone.utc).isoformat()
+        current_env = {
+            "ok": True,
+            "system_proxy": {"http": "127.0.0.1:7890", "https": "127.0.0.1:7890"},
+            "active_core": "mihomo",
+            "active_profile": {"id": "current"},
+            "mixed_port": 7890,
+        }
+        report = {
+            "meta": {"timestamp": checked_at, "origin": "doctor"},
+            "diagnostics": [{"name": "system_proxy_state", "status": "fail"}],
+            "root_causes": [{"id": "proxy-broken"}],
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch("netfix.api.JOURNAL_DIR", Path(tempdir)):
+            Path(tempdir, "last_report.json").write_text(json.dumps(report), encoding="utf-8")
+            status, summary, _egress = api._latest_dashboard_report_summary(
+                current_environment=current_env,
+            )
+
+        self.assertIsNone(status)
+        self.assertFalse(summary["usable_for_dashboard"])
+        self.assertFalse(summary["route_matches_current"])
+        self.assertEqual(summary["invalid_reason"], "incomplete_coverage")
+
+    def test_dashboard_report_uses_route_channel_not_api_key_advisory(self):
+        checked_at = datetime.now(timezone.utc).isoformat()
+        current_env = {
+            "ok": True,
+            "system_proxy": {"http": "127.0.0.1:7890", "https": "127.0.0.1:7890"},
+            "active_core": "mihomo",
+            "active_profile": {"id": "current"},
+            "mixed_port": 7890,
+        }
+        report = {
+            "meta": {
+                "timestamp": checked_at,
+                "origin": "doctor",
+                "coverage": "current_mac_full",
+                "route_signature": dashboard_state.build_route_signature(current_env),
+            },
+            "diagnostics": [
+                {"name": "system_proxy_state", "layer": "proxy", "status": "ok"},
+                {"name": "proxy_http_test", "layer": "proxy", "status": "ok"},
+                {
+                    "name": "openai_api",
+                    "status": "warn",
+                    "target": "https://api.openai.com/v1/models",
+                    "proxy_used": "system",
+                    "details": {"error": "API key missing"},
+                },
+                {"name": "ip_reputation", "layer": "egress", "status": "warn"},
+            ],
+            "root_causes": [
+                {"id": "openai-api-key-missing"},
+                {"id": "egress-reputation-warning"},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch("netfix.api.JOURNAL_DIR", Path(tempdir)):
+            Path(tempdir, "last_report.json").write_text(json.dumps(report), encoding="utf-8")
+            status, summary, _egress = api._latest_dashboard_report_summary(
+                current_environment=current_env,
+            )
+
+        self.assertEqual(status, "ok")
+        self.assertTrue(summary["usable_for_dashboard"])
+        self.assertTrue(summary["route_matches_current"])
+        self.assertIsNone(summary["invalid_reason"])
+        self.assertEqual(summary["issue_count"], 0)
+        self.assertEqual(summary["blocking_issue_count"], 0)
+        self.assertEqual(summary["advisory_count"], 2)
+        self.assertEqual(summary["diagnostic_channels"]["route_health"]["status"], "ok")
+        self.assertEqual(summary["diagnostic_channels"]["advisory"]["warn"], 1)
+        self.assertEqual(summary["diagnostic_channels"]["target_service"]["warn"], 1)
+
+    def test_dashboard_report_rejects_a_different_current_route(self):
+        checked_at = datetime.now(timezone.utc).isoformat()
+        old_env = {"ok": True, "system_proxy": {"http": "127.0.0.1:7890"}}
+        current_env = {"ok": True, "system_proxy": {"http": "127.0.0.1:8899"}}
+        report = {
+            "meta": {
+                "timestamp": checked_at,
+                "origin": "doctor",
+                "coverage": "current_mac_full",
+                "route_signature": dashboard_state.build_route_signature(old_env),
+            },
+            "diagnostics": [{"name": "proxy_http_test", "status": "fail"}],
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch("netfix.api.JOURNAL_DIR", Path(tempdir)):
+            Path(tempdir, "last_report.json").write_text(json.dumps(report), encoding="utf-8")
+            status, summary, _egress = api._latest_dashboard_report_summary(
+                current_environment=current_env,
+            )
+
+        self.assertIsNone(status)
+        self.assertFalse(summary["usable_for_dashboard"])
+        self.assertFalse(summary["route_matches_current"])
+        self.assertEqual(summary["invalid_reason"], "route_changed")
+
+    def test_no_proxy_probe_warnings_are_not_current_route_issues(self):
+        checked_at = datetime.now(timezone.utc).isoformat()
+        current_env = {"ok": True, "system_proxy": {}, "active_core": None, "mixed_port": None}
+        report = {
+            "meta": {
+                "timestamp": checked_at,
+                "origin": "doctor",
+                "coverage": "current_mac_full",
+                "route_signature": dashboard_state.build_route_signature(current_env),
+            },
+            "diagnostics": [
+                {"name": "gateway", "layer": "network", "status": "ok"},
+                {"name": "proxy_http_test", "layer": "proxy", "status": "warn", "details": {"error": "no HTTP proxy configured"}},
+                {"name": "proxy_socks_test", "layer": "proxy", "status": "warn", "details": {"error": "no SOCKS proxy configured"}},
+                {"name": "proxy_auth_check", "layer": "proxy", "status": "warn", "details": {"error": "no proxy configured"}},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch("netfix.api.JOURNAL_DIR", Path(tempdir)):
+            Path(tempdir, "last_report.json").write_text(json.dumps(report), encoding="utf-8")
+            status, summary, _egress = api._latest_dashboard_report_summary(
+                current_environment=current_env,
+            )
+
+        self.assertEqual(status, "ok")
+        self.assertEqual(summary["issue_count"], 0)
+        self.assertEqual(summary["diagnostic_channels"]["route_health"]["warn"], 0)
+        self.assertEqual(summary["diagnostic_channels"]["route_health"]["unchecked"], 3)
+
+    def test_dashboard_latest_report_summary_extracts_connection_quality(self):
+        checked_at = datetime.now(timezone.utc).isoformat()
+        current_env = {"ok": True, "system_proxy": {"http": "127.0.0.1:7890"}}
+        report = {
+            "meta": {
+                "timestamp": checked_at,
+                "origin": "doctor",
+                "coverage": "current_mac_full",
+                "route_signature": dashboard_state.build_route_signature(current_env),
+            },
+            "diagnostics": [
+                {"name": "system_proxy_state", "status": "ok"},
+                {
+                    "name": "network_quality",
+                    "status": "ok",
+                    "details": {
+                        "dl_throughput_kbps": 28400,
+                        "ul_throughput_kbps": 5200,
+                        "base_rtt_ms": 62,
+                        "responsiveness_rpm": 220,
+                    },
+                },
+                {
+                    "name": "path_trace",
+                    "status": "ok",
+                    "details": {"hops": [{"loss_percent": 0}, {"loss_percent": 1.2}]},
+                },
+                {
+                    "name": "bandwidth_hog",
+                    "status": "warn",
+                    "details": {
+                        "reason": "upload_saturated",
+                        "top_processes": [{"label": "iCloud", "direction": "upload", "rate_kbps": 3200}],
+                    },
+                },
+            ],
+            "root_causes": [],
+            "explanation": {"headline": "当前网络可用", "severity": "ok"},
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch("netfix.api.JOURNAL_DIR", Path(tempdir)):
+            Path(tempdir, "last_report.json").write_text(json.dumps(report), encoding="utf-8")
+
+            status, summary, _egress = api._latest_dashboard_report_summary(
+                current_environment=current_env,
+            )
+
+        quality = summary["connection_quality"]
+        self.assertEqual(status, "ok")
+        self.assertEqual(quality["status"], "warn")
+        self.assertEqual(quality["speed"]["label"], "充足")
+        self.assertEqual(quality["speed"]["value"], "下载 28.4 Mbps / 上传 5.2 Mbps")
+        self.assertEqual(quality["latency"]["value"], "延迟 62ms")
+        self.assertEqual(quality["stability"]["label"], "轻微波动")
+        self.assertEqual(quality["background_activity"]["label"], "上传较高")
+        self.assertIn("iCloud", quality["background_activity"]["value"])
+
+    def test_connection_quality_uses_gateway_loss_as_honest_local_stability_fallback(self):
+        quality = api._connection_quality_from_report(
+            [
+                {
+                    "name": "gateway",
+                    "status": "ok",
+                    "details": {"packet_loss": 0.0},
+                }
+            ],
+            checked_at=datetime.now(timezone.utc).isoformat(),
+            stale=False,
+        )
+
+        self.assertEqual(quality["stability"]["label"], "本地稳定")
+        self.assertEqual(quality["stability"]["value"], "本地丢包 0%")
+        self.assertIn("路由器", quality["stability"]["hint"])
+
+    def test_high_latency_cannot_be_summarized_as_smooth(self):
+        quality = api._connection_quality_from_report(
+            [
+                {
+                    "name": "network_quality",
+                    "status": "warn",
+                    "details": {
+                        "dl_throughput_kbps": 6790.561,
+                        "ul_throughput_kbps": 10855.13,
+                        "base_rtt_ms": 393.8,
+                        "responsiveness_rpm": 62.5,
+                    },
+                },
+                {"name": "gateway", "status": "ok", "details": {"packet_loss": 0.0}},
+                {"name": "bandwidth_hog", "status": "ok", "details": {}},
+            ],
+            checked_at=datetime.now(timezone.utc).isoformat(),
+            stale=False,
+        )
+
+        self.assertEqual(quality["collection_state"], "complete")
+        self.assertEqual(quality["status"], "warn")
+        self.assertEqual(quality["latency"]["label"], "较高")
+        self.assertNotIn("顺畅", quality["headline"])
+        self.assertIn("等待", quality["headline"])
 
     def test_confirmed_fix_endpoint_accepts_ipv6_fallback_warning(self):
         report = {
@@ -819,6 +1161,8 @@ class TestAPI(unittest.TestCase):
             data = self._post_json("/proxy/validate", {"input": "http://user:pass@proxy.example.com:8000"})
         self.assertTrue(data["ok"])
         self.assertEqual(data["proxy_check"]["status"], "ok")
+        self.assertTrue(data["validation_receipt"])
+        self.assertGreater(data["validation_receipt_expires_in_seconds"], 0)
         encoded = json.dumps(data, ensure_ascii=False)
         self.assertNotIn("pass@proxy", encoded)
 
@@ -955,7 +1299,7 @@ class TestAPI(unittest.TestCase):
         self.assertTrue(data["ok"])
         self.assertEqual(data["primary_insight"]["action"], "无需处理")
         self.assertEqual(data["network_activity"]["state"], "quiet")
-        insights.assert_called_once_with(sample=True)
+        insights.assert_called_once_with(sample=False)
 
     def test_network_activity_settings_endpoint_can_start_and_stop_monitor(self):
         saved_on = {"enabled": True, "interval": 120, "process_whitelist": []}
@@ -1241,7 +1585,7 @@ class TestAPI(unittest.TestCase):
         self.assertTrue(saved["settings"]["auto_restart_enabled"])
         update_settings.assert_called_once_with({"auto_restart_enabled": True, "idle_timeout": 30})
 
-    def test_startup_bridge_check_attempts_restart_only_when_opted_in(self):
+    def test_startup_bridge_check_never_self_authorizes_tier2_restart(self):
         api._STARTUP_BRIDGE_CHECK = {}
         restart = {
             "ok": True,
@@ -1268,15 +1612,11 @@ class TestAPI(unittest.TestCase):
                 patch("netfix.api.logs.append_event", return_value={"ok": True}) as append_event:
             startup = api._record_startup_bridge_check()
 
-        self.assertEqual(startup["auto_restart"]["status"], "restarted")
-        self.assertFalse(startup["auto_restart"]["system_proxy_changed"])
-        self.assertTrue(startup["auto_restart_event_appended"])
-        restart_bridge.assert_called_once_with(
-            confirmed=True,
-            confirmation="RESTART_STALE_PROXY_BRIDGE",
-            idle_timeout_s=30.0,
-        )
-        self.assertEqual(append_event.call_args.args[0]["status"], "ok")
+        self.assertEqual(startup["auto_restart"]["status"], "suppressed")
+        self.assertTrue(startup["auto_restart"]["requires_confirmation"])
+        self.assertEqual(startup["auto_restart"]["confirmation"], "RESTART_STALE_PROXY_BRIDGE")
+        restart_bridge.assert_not_called()
+        append_event.assert_not_called()
         api._STARTUP_BRIDGE_CHECK = {}
 
     def test_proxy_bridge_recover_requires_token_and_confirmation(self):
@@ -1287,10 +1627,10 @@ class TestAPI(unittest.TestCase):
             "confirmation": "RESTORE_STALE_PROXY_BRIDGE",
         }
         with patch("netfix.api.residential_proxy.recover_stale_bridge", return_value=pending) as recover:
-            data = self._post_json("/proxy/bridge/recover", {"confirmed": True, "confirmation": "wrong"})
-        self.assertTrue(data["ok"])
+            data = self._post_json_error("/proxy/bridge/recover", {"confirmed": True, "confirmation": "wrong"}, 409)
+        self.assertFalse(data["ok"])
         self.assertEqual(data["confirmation"], "RESTORE_STALE_PROXY_BRIDGE")
-        recover.assert_called_once()
+        recover.assert_not_called()
 
     def test_proxy_apply_app_env_is_token_protected_and_redacted(self):
         profile = {
@@ -1319,12 +1659,34 @@ class TestAPI(unittest.TestCase):
             "port": 8000,
             "username": "",
             "credential_ref": "",
+            "verification_status": "verified",
+            "can_apply": True,
         }
         with patch("netfix.api.settings.get_proxy_profiles", return_value=[profile]):
-            data = self._post_json("/proxy/profiles/p1/apply", {"mode": "system", "confirmed": True, "confirmation": "wrong"})
-        self.assertTrue(data["ok"])
-        self.assertEqual(data["status"], "pending_confirmation")
+            data = self._post_json_error("/proxy/profiles/p1/apply", {"mode": "system", "confirmed": True, "confirmation": "wrong"}, 409)
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["status"], "confirmation_required")
         self.assertEqual(data["confirmation"], "APPLY_PROXY_PROFILE")
+
+    def test_proxy_apply_rejects_unverified_saved_profile_before_executor(self):
+        profile = {
+            "id": "p1",
+            "protocol": "http",
+            "host": "proxy.example.com",
+            "port": 8000,
+            "verification_status": "unverified",
+            "can_apply": False,
+        }
+        with patch("netfix.api.settings.get_proxy_profiles", return_value=[profile]), \
+                patch("netfix.api.residential_proxy.apply_proxy_profile") as apply:
+            data = self._post_json_error(
+                "/proxy/profiles/p1/apply",
+                {"mode": "system", "confirmed": True, "confirmation": "APPLY_PROXY_PROFILE"},
+                409,
+            )
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["reason_code"], "profile_not_verified")
+        apply.assert_not_called()
 
     def test_proxy_apply_system_uses_bridge_for_authenticated_profile(self):
         profile = {
@@ -1335,6 +1697,8 @@ class TestAPI(unittest.TestCase):
             "port": 8000,
             "username": "user",
             "credential_ref": "keychain://netfix.proxy/p1",
+            "verification_status": "verified",
+            "can_apply": True,
         }
         applied = {
             "ok": True,
@@ -1355,6 +1719,8 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(data["bridge"]["listen_host"], "127.0.0.1")
         apply.assert_called_once()
         self.assertEqual(apply.call_args.kwargs["target_profile"], "ai_dev")
+        self.assertTrue(apply.call_args.kwargs["verify"])
+        self.assertTrue(apply.call_args.kwargs["rollback_on_verify_failure"])
 
     def test_proxy_export_profile_is_token_protected_and_uses_secret_placeholders(self):
         profile = {
@@ -1387,6 +1753,130 @@ class TestAPI(unittest.TestCase):
         self.assertFalse(data["ok"])
         self.assertIn("not found", data["error"])
 
+    def test_stateful_proxy_flow_over_real_http_uses_fake_macos_adapter(self):
+        class FakeMacAdapter:
+            def __init__(self):
+                self.profiles = []
+                self.bridge = {"lifecycle": {"status": "stopped"}, "stale_check": {}}
+                self.environment = {"ok": True, "system_proxy": {}}
+                self.route_status = None
+
+            def upsert(self, profile):
+                self.profiles = [item for item in self.profiles if item.get("id") != profile.get("id")]
+                self.profiles.append(dict(profile))
+                return dict(profile)
+
+            def apply(self, profile, **kwargs):
+                self.bridge = {
+                    "lifecycle": {"status": "running_system", "profile_id": profile["id"]},
+                    "stale_check": {},
+                }
+                self.environment = {
+                    "ok": True,
+                    "system_proxy": {"http": "127.0.0.1:19080", "https": "127.0.0.1:19080"},
+                }
+                self.route_status = "ok"
+                return {"ok": True, "status": "applied", "profile_id": profile["id"]}
+
+            def recover(self, **_kwargs):
+                self.bridge = {"lifecycle": {"status": "stopped"}, "stale_check": {}}
+                self.environment = {"ok": True, "system_proxy": {}}
+                self.route_status = None
+                return {"ok": True, "status": "recovered"}
+
+            def report(self, **_kwargs):
+                if not self.route_status:
+                    return None, {}, {"status": "unchecked"}
+                checked_at = datetime.now(timezone.utc).isoformat()
+                return self.route_status, {
+                    "has_report": True,
+                    "origin": "doctor",
+                    "scope": "doctor",
+                    "coverage": "current_mac_full",
+                    "checked_at": checked_at,
+                    "stale": False,
+                    "route_matches_current": True,
+                    "invalid_reason": None,
+                    "usable_for_dashboard": True,
+                    "valid_sample_count": 2,
+                    "status": self.route_status,
+                    "severity": self.route_status,
+                    "issue_count": 1 if self.route_status in {"warn", "fail"} else 0,
+                    "blocking_issue_count": 1 if self.route_status == "fail" else 0,
+                    "advisory_count": 0,
+                    "diagnostic_counts": {self.route_status: 2},
+                }, {"status": "unchecked"}
+
+        fake = FakeMacAdapter()
+        validation_results = [
+            {"ok": False, "proxy_check": {"status": "fail", "error": "connection_refused"}},
+            {"ok": True, "proxy_check": {"status": "ok", "http_code": 204}},
+        ]
+        with patch("netfix.api.settings.get_proxy_profiles", side_effect=lambda: list(fake.profiles)), \
+                patch("netfix.residential_proxy.get_proxy_profiles", side_effect=lambda: list(fake.profiles)), \
+                patch("netfix.residential_proxy.upsert_proxy_profile", side_effect=fake.upsert), \
+                patch("netfix.residential_proxy.keychain.set_secret", return_value={"ok": True}), \
+                patch("netfix.api._bridge_status_payload", side_effect=lambda: dict(fake.bridge)), \
+                patch("netfix.api._environment_summary", side_effect=lambda: dict(fake.environment)), \
+                patch("netfix.api._latest_dashboard_report_summary", side_effect=fake.report), \
+                patch("netfix.api._live_dashboard_signals", return_value={}), \
+                patch("netfix.api._dashboard_machine_state", return_value={"platform": "darwin"}), \
+                patch("netfix.api.residential_proxy.validate_proxy_profile", side_effect=validation_results), \
+                patch("netfix.api.residential_proxy.apply_proxy_profile", side_effect=fake.apply) as apply, \
+                patch("netfix.api.residential_proxy.recover_stale_bridge", side_effect=fake.recover):
+            initial = self._get("/dashboard/state")
+            self.assertEqual(initial["state"]["state"], "no_proxy")
+
+            failed = self._post_json_error(
+                "/proxy/validate",
+                {"input": "http://user:pass@proxy.example.com:8000"},
+                400,
+            )
+            self.assertNotIn("validation_receipt", failed)
+            self.assertEqual(fake.profiles, [])
+
+            validated = self._post_json(
+                "/proxy/validate",
+                {"input": "http://user:pass@proxy.example.com:8000"},
+            )
+            saved = self._post_json(
+                "/proxy/profiles",
+                {
+                    "input": "http://user:pass@proxy.example.com:8000",
+                    "validation_receipt": validated["validation_receipt"],
+                },
+            )
+            self.assertEqual(saved["profile"]["verification_status"], "verified")
+
+            applied = self._post_json(
+                f"/proxy/profiles/{saved['profile']['id']}/apply",
+                {"mode": "system", "confirmed": True, "confirmation": "APPLY_PROXY_PROFILE"},
+            )
+            self.assertEqual(applied["status"], "applied")
+            self.assertTrue(apply.call_args.kwargs["verify"])
+            self.assertTrue(apply.call_args.kwargs["rollback_on_verify_failure"])
+
+            fake.route_status = "fail"
+            degraded = self._get("/dashboard/state")
+            self.assertEqual(degraded["state"]["state"], "proxy_degraded")
+            self.assertEqual(degraded["verdict"]["route_health"], "fail")
+
+            fake.bridge = {
+                "lifecycle": {"status": "recovery_required", "profile_id": saved["profile"]["id"]},
+                "stale_check": {"recovery_available": True},
+            }
+            recovery = self._get("/dashboard/state")
+            self.assertEqual(recovery["state"]["state"], "network_recovery")
+            self.assertEqual(recovery["verdict"]["primary_action"]["target"], "recover:stale_bridge")
+
+            restored = self._post_json(
+                "/proxy/bridge/recover",
+                {"confirmed": True, "confirmation": "RESTORE_STALE_PROXY_BRIDGE"},
+            )
+            self.assertEqual(restored["status"], "recovered")
+            final = self._get("/dashboard/state")
+            self.assertEqual(final["state"]["state"], "proxy_saved")
+
     def test_proxy_rollback_requires_confirmation(self):
         with patch(
             "netfix.api.residential_proxy.rollback_last_proxy_apply",
@@ -1397,10 +1887,10 @@ class TestAPI(unittest.TestCase):
                 "confirmation": "ROLLBACK_PROXY_PROFILE",
             },
         ) as rollback:
-            data = self._post_json("/proxy/profiles/rollback", {"confirmed": True, "confirmation": "wrong"})
-        self.assertTrue(data["ok"])
-        self.assertEqual(data["status"], "pending_confirmation")
-        rollback.assert_called_once()
+            data = self._post_json_error("/proxy/profiles/rollback", {"confirmed": True, "confirmation": "wrong"}, 409)
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["status"], "confirmation_required")
+        rollback.assert_not_called()
 
     def test_proxy_rollback_no_journal_returns_404(self):
         with patch(

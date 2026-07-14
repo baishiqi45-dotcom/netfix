@@ -4,10 +4,13 @@ from __future__ import annotations
 import json
 import copy
 import hashlib
+import hmac
+import secrets
 import subprocess
 import sys
 import re
 import socket
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -32,6 +35,10 @@ SYSTEM_APPLY_CONFIRMATION = "APPLY_PROXY_PROFILE"
 PROXY_ROLLBACK_CONFIRMATION = "ROLLBACK_PROXY_PROFILE"
 BRIDGE_RECOVERY_CONFIRMATION = "RESTORE_STALE_PROXY_BRIDGE"
 BRIDGE_RESTART_CONFIRMATION = "RESTART_STALE_PROXY_BRIDGE"
+VALIDATION_RECEIPT_TTL_SECONDS = 300
+_VALIDATION_RECEIPT_KEY = secrets.token_bytes(32)
+_VALIDATION_RECEIPTS: Dict[str, Dict[str, Any]] = {}
+_VALIDATION_RECEIPTS_LOCK = threading.Lock()
 
 
 def endpoint_fingerprint(protocol: str, host: str, port: Any, username: str) -> str:
@@ -59,6 +66,75 @@ def fingerprint_matches(fingerprint: Any, protocol: str, host: str, port: Any, u
     if not fingerprint:
         return False
     return str(fingerprint) == endpoint_fingerprint(protocol, host, port, username)
+
+
+def _validation_binding(profile: Dict[str, Any], password: str) -> str:
+    payload = json.dumps(
+        {
+            "endpoint_fingerprint": endpoint_fingerprint(
+                str(profile.get("protocol") or ""),
+                str(profile.get("host") or ""),
+                profile.get("port"),
+                str(profile.get("username") or ""),
+            ),
+            "password": str(password or ""),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hmac.new(_VALIDATION_RECEIPT_KEY, payload, hashlib.sha256).hexdigest()
+
+
+def issue_validation_receipt(
+    profile: Dict[str, Any],
+    *,
+    password: str = "",
+    ttl_seconds: int = VALIDATION_RECEIPT_TTL_SECONDS,
+) -> Dict[str, Any]:
+    """Issue a one-use, process-local receipt bound to the exact validated input."""
+    ttl = max(1, min(int(ttl_seconds), VALIDATION_RECEIPT_TTL_SECONDS))
+    now = time.time()
+    expires_at = now + ttl
+    token = secrets.token_urlsafe(32)
+    record = {
+        "binding": _validation_binding(profile, password),
+        "validated_at": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+        "expires_at_epoch": expires_at,
+    }
+    with _VALIDATION_RECEIPTS_LOCK:
+        expired = [key for key, value in _VALIDATION_RECEIPTS.items() if float(value.get("expires_at_epoch") or 0) <= now]
+        for key in expired:
+            _VALIDATION_RECEIPTS.pop(key, None)
+        _VALIDATION_RECEIPTS[token] = record
+    return {
+        "validation_receipt": token,
+        "validation_receipt_expires_in_seconds": ttl,
+        "validation_receipt_expires_at": datetime.fromtimestamp(expires_at, timezone.utc).isoformat(),
+        "validated_at": record["validated_at"],
+    }
+
+
+def consume_validation_receipt(
+    receipt: str,
+    profile: Dict[str, Any],
+    *,
+    password: str = "",
+) -> Dict[str, Any]:
+    """Consume a receipt once and verify that it belongs to this exact input."""
+    token = str(receipt or "")
+    now = time.time()
+    with _VALIDATION_RECEIPTS_LOCK:
+        record = _VALIDATION_RECEIPTS.pop(token, None)
+    if not record:
+        return {"ok": False, "reason_code": "validation_receipt_unknown"}
+    if float(record.get("expires_at_epoch") or 0) <= now:
+        return {"ok": False, "reason_code": "validation_receipt_expired"}
+    expected = str(record.get("binding") or "")
+    actual = _validation_binding(profile, password)
+    if not secrets.compare_digest(expected, actual):
+        return {"ok": False, "reason_code": "validation_receipt_mismatch"}
+    return {"ok": True, "validated_at": record.get("validated_at")}
 ALLOWED_VALIDATION_TARGET_HOSTS = {
     "www.gstatic.com",
     "cp.cloudflare.com",
@@ -895,6 +971,62 @@ def _journal_secret_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()[:16]
 
 
+def _proxy_topology_snapshot(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a non-secret proxy topology snapshot suitable for ownership checks."""
+    snapshot: Dict[str, Any] = {"service": str(state.get("service") or "")}
+    for kind in ("web", "secure", "socks"):
+        item = state.get(kind) if isinstance(state.get(kind), dict) else {}
+        enabled = bool(item.get("enabled"))
+        server = str(item.get("server") or "").strip().lower()
+        try:
+            port = int(item.get("port") or 0)
+        except (TypeError, ValueError):
+            port = 0
+        snapshot[kind] = {
+            "enabled": enabled,
+            "endpoint_hash": _journal_secret_hash(f"{server}:{port}") if enabled and server and port else "",
+        }
+    auto_url = state.get("auto_proxy_url") if isinstance(state.get("auto_proxy_url"), dict) else {}
+    auto_discovery = state.get("auto_discovery") if isinstance(state.get("auto_discovery"), dict) else {}
+    ipv6 = state.get("ipv6") if isinstance(state.get("ipv6"), dict) else {}
+    snapshot["auto_proxy_url"] = {"enabled": bool(auto_url.get("enabled"))}
+    snapshot["auto_discovery"] = {"enabled": bool(auto_discovery.get("enabled"))}
+    snapshot["ipv6"] = {"mode": str(ipv6.get("mode") or "unknown")}
+    return snapshot
+
+
+def _expected_applied_snapshot(
+    profile: Dict[str, Any],
+    service: str,
+    backup: Dict[str, Any],
+    *,
+    ipv6_disabled: bool,
+) -> Dict[str, Any]:
+    expected = _proxy_topology_snapshot(backup)
+    expected["service"] = service
+    protocol = str(profile.get("protocol") or "")
+    endpoint = {
+        "enabled": True,
+        "endpoint_hash": _journal_secret_hash(
+            f"{str(profile.get('host') or '').strip().lower()}:{int(profile.get('port') or 0)}"
+        ),
+    }
+    if protocol in {"http", "https"}:
+        expected["web"] = dict(endpoint)
+        expected["secure"] = dict(endpoint)
+    elif protocol in {"socks5", "socks5h"}:
+        expected["socks"] = dict(endpoint)
+    expected["auto_proxy_url"] = {"enabled": False}
+    expected["auto_discovery"] = {"enabled": False}
+    if ipv6_disabled:
+        expected["ipv6"] = {"mode": "off"}
+    return expected
+
+
+def _system_proxy_matches_snapshot(current: Dict[str, Any], expected: Dict[str, Any]) -> bool:
+    return bool(expected) and _proxy_topology_snapshot(current) == expected
+
+
 def _journal_secret_account(entry_id: str, name: str) -> str:
     safe_id = re.sub(r"[^A-Za-z0-9_.:-]+", "_", entry_id or "unknown")
     return f"journal:{safe_id}:{name}"
@@ -1293,6 +1425,31 @@ def save_proxy_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
         return parsed
     profile = dict(parsed["profile"])
     password = parsed.get("_secret", {}).get("password")
+    receipt = str(payload.get("validation_receipt") or "")
+    receipt_result: Dict[str, Any] = {"ok": False, "reason_code": "validation_receipt_missing"}
+    if receipt:
+        receipt_result = consume_validation_receipt(
+            receipt,
+            profile,
+            password=str(password or ""),
+        )
+        if not receipt_result.get("ok"):
+            return {
+                "ok": False,
+                "status": "blocked",
+                "error": "validation receipt is invalid or expired",
+                "reason_code": receipt_result.get("reason_code"),
+                "requires_validation": True,
+            }
+    verified = bool(receipt_result.get("ok"))
+    profile["verification_status"] = "verified" if verified else "unverified"
+    profile["can_apply"] = verified
+    if verified:
+        profile["validated_at"] = receipt_result.get("validated_at") or _utc_now()
+        profile["validation_source"] = "preflight_receipt"
+    else:
+        profile.pop("validated_at", None)
+        profile["validation_source"] = "legacy_save_without_preflight"
     new_fingerprint = str(profile.get("endpoint_fingerprint") or "")
     reused_profile_id: Optional[str] = None
     if new_fingerprint:
@@ -1334,11 +1491,14 @@ def save_proxy_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
     saved = upsert_proxy_profile(profile)
     saved["password_set"] = bool(password)
     saved["deduplicated"] = bool(reused_profile_id)
+    warnings = list(parsed.get("warnings", []))
+    if not verified:
+        warnings.append("profile_saved_unverified")
     return {
         "ok": True,
         "profile": saved,
         "deployment_decision": deployment_decision(saved),
-        "warnings": parsed.get("warnings", []),
+        "warnings": warnings,
         "deduplicated": bool(reused_profile_id),
     }
 
@@ -1398,6 +1558,11 @@ def replace_proxy_profile(profile_id: str, payload: Dict[str, Any]) -> Dict[str,
     profile.pop("password_set", None)
     for field in ("last_check", "last_identity_report", "last_identity_summary"):
         profile.pop(field, None)
+    profile["verification_status"] = "unverified"
+    profile["can_apply"] = False
+    profile["validation_source"] = "endpoint_replaced"
+    profile.pop("validated_at", None)
+    warnings.append("profile_requires_revalidation_after_replace")
     saved = upsert_proxy_profile(profile)
     saved["password_set"] = bool(password)
     return {
@@ -2022,6 +2187,18 @@ def apply_proxy_profile(
             "dry_run": plan,
         }
 
+    if profile.get("verification_status") != "verified" or profile.get("can_apply") is not True:
+        return {
+            "ok": False,
+            "status": "blocked",
+            "mode": mode,
+            "profile_id": profile.get("id"),
+            "error": "proxy profile must pass preflight validation before system apply",
+            "reason_code": "profile_not_verified",
+            "requires_validation": True,
+            "deployment_decision": plan.get("deployment_decision"),
+        }
+
     if not confirmed or confirmation != SYSTEM_APPLY_CONFIRMATION:
         return {
             "ok": True,
@@ -2033,6 +2210,10 @@ def apply_proxy_profile(
             "deployment_decision": plan.get("deployment_decision"),
             "dry_run": plan,
         }
+    # System apply is always verified and always rolls back on verification
+    # failure. Client flags may not weaken this safety boundary.
+    verify = True
+    rollback_on_verify_failure = True
     if sys.platform != "darwin":
         return {
             "ok": False,
@@ -2120,6 +2301,12 @@ def apply_proxy_profile(
             "disabled_during_apply": bool(ipv6_commands),
             "backup_mode": (backup.get("ipv6") or {}).get("mode") if isinstance(backup.get("ipv6"), dict) else None,
         }
+        entry["applied_snapshot"] = _expected_applied_snapshot(
+            effective_profile,
+            service,
+            backup,
+            ipv6_disabled=bool(ipv6_commands),
+        )
         _write_apply_journal(entry)
     except Exception as exc:
         restore = _restore_system_proxy_backup(backup)
@@ -2231,7 +2418,8 @@ def detect_stale_bridge() -> Dict[str, Any]:
     if not entry:
         return {"ok": True, "status": "no_journal", "stale": False, "recovery_available": False}
     bridge = entry.get("bridge") if isinstance(entry.get("bridge"), dict) else None
-    if not bridge:
+    applied_snapshot = entry.get("applied_snapshot") if isinstance(entry.get("applied_snapshot"), dict) else None
+    if not bridge and not applied_snapshot:
         return {
             "ok": True,
             "status": "not_bridge_apply",
@@ -2265,6 +2453,31 @@ def detect_stale_bridge() -> Dict[str, Any]:
             "profile_id": entry.get("profile_id"),
             "network_service": service,
             "bridge": bridge,
+        }
+
+    if not bridge:
+        matches = _system_proxy_matches_snapshot(current, applied_snapshot or {})
+        public_direct = {
+            "ok": True,
+            "journal_id": entry.get("id"),
+            "profile_id": entry.get("profile_id"),
+            "profile_name": entry.get("profile_name"),
+            "network_service": service,
+            "system_points_to_netfix_apply": matches,
+            "confirmation": BRIDGE_RECOVERY_CONFIRMATION,
+        }
+        if matches:
+            return {
+                **public_direct,
+                "status": "healthy_system_apply",
+                "stale": False,
+                "recovery_available": False,
+            }
+        return {
+            **public_direct,
+            "status": "system_not_pointing_to_netfix_apply",
+            "stale": False,
+            "recovery_available": False,
         }
 
     points_to_bridge = _system_proxy_points_to_bridge(current, bridge)
@@ -2334,6 +2547,7 @@ def bridge_lifecycle(bridges: List[Dict[str, Any]], stale_check: Dict[str, Any])
         "profile_name": stale_check.get("profile_name"),
         "confirmation": stale_check.get("confirmation") if recovery_available else None,
         "system_points_to_bridge": bool(stale_check.get("system_points_to_bridge")),
+        "system_points_to_netfix_apply": bool(stale_check.get("system_points_to_netfix_apply")),
         "next_steps": ["刷新桥接状态；如果系统网络仍异常，再查看系统代理或回滚记录。"],
     }
 
@@ -2376,6 +2590,20 @@ def bridge_lifecycle(bridges: List[Dict[str, Any]], stale_check: Dict[str, Any])
             ],
         }
 
+    if status == "healthy_system_apply" and stale_check.get("system_points_to_netfix_apply") is True:
+        return {
+            **base,
+            "status": "running_system",
+            "severity": "info",
+            "headline": "Netfix 代理使用中",
+            "primary_action": "keep_running_or_restore",
+            "requires_netfix_running": False,
+            "next_steps": [
+                "保持现状即可。",
+                "不用时点击停止使用并恢复原设置。",
+            ],
+        }
+
     if first_bridge:
         audit = {
             "request_count": int(first_bridge.get("request_count") or 0),
@@ -2413,7 +2641,7 @@ def bridge_lifecycle(bridges: List[Dict[str, Any]], stale_check: Dict[str, Any])
             ],
         }
 
-    if status in {"system_not_pointing_to_bridge", "not_bridge_apply"}:
+    if status in {"system_not_pointing_to_bridge", "system_not_pointing_to_netfix_apply", "not_bridge_apply"}:
         return {
             **base,
             "status": "not_in_use",
@@ -2432,11 +2660,21 @@ def bridge_lifecycle(bridges: List[Dict[str, Any]], stale_check: Dict[str, Any])
 
 
 def recover_stale_bridge(*, confirmed: bool = False, confirmation: str = "") -> Dict[str, Any]:
-    """Restore the pre-apply system proxy when a loopback bridge is stale."""
+    """Restore a Netfix-owned loopback route, whether stale or still running."""
     state = detect_stale_bridge()
     if not state.get("ok"):
         return state
-    if not state.get("recovery_available"):
+    stop_healthy_bridge = bool(
+        state.get("status") == "healthy"
+        and state.get("system_points_to_bridge") is True
+    )
+    stop_direct_apply = bool(
+        state.get("status") == "healthy_system_apply"
+        and state.get("system_points_to_netfix_apply") is True
+    )
+    stop_active_apply = bool(stop_healthy_bridge or stop_direct_apply)
+    recovery_available = bool(state.get("recovery_available") or stop_active_apply)
+    if not recovery_available:
         return {
             "ok": True,
             "status": "no_recovery_needed",
@@ -2450,7 +2688,7 @@ def recover_stale_bridge(*, confirmed: bool = False, confirmation: str = "") -> 
             "requires_confirmation": True,
             "confirmation": BRIDGE_RECOVERY_CONFIRMATION,
             "stale_check": state,
-            "recovery_available": True,
+            "recovery_available": recovery_available,
         }
 
     journal = _read_apply_journal()
@@ -2459,7 +2697,10 @@ def recover_stale_bridge(*, confirmed: bool = False, confirmation: str = "") -> 
         return {"ok": False, "status": "no_journal", "error": "no proxy apply journal found"}
     restore = _restore_system_proxy_backup(entry.get("backup", {}))
     bridge = entry.get("bridge") if isinstance(entry.get("bridge"), dict) else None
-    bridge_stop = proxy_bridge.stop_bridge(str(bridge.get("id") or "")) if bridge else None
+    # When the bridge is healthy, keep it alive if restoring the system proxy
+    # fails. Otherwise the Mac would still point at a bridge we just stopped.
+    should_stop_bridge = bool(bridge and (restore.get("ok") or not stop_healthy_bridge))
+    bridge_stop = proxy_bridge.stop_bridge(str(bridge.get("id") or "")) if should_stop_bridge else None
     entry["stale_bridge_recovered_at"] = _utc_now()
     entry["stale_bridge_check"] = state
     entry["stale_bridge_recovery"] = restore
@@ -2468,6 +2709,7 @@ def recover_stale_bridge(*, confirmed: bool = False, confirmation: str = "") -> 
     return {
         "ok": bool(restore.get("ok")),
         "status": "recovered" if restore.get("ok") else "recovery_failed",
+        "recovery_kind": "stop_and_restore" if stop_active_apply else "stale_bridge",
         "journal_id": entry.get("id"),
         "profile_id": entry.get("profile_id"),
         "network_service": entry.get("network_service"),

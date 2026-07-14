@@ -393,8 +393,17 @@ actor APIClient {
         )
     }
 
-    func saveProxyProfile(input: String, startMonitor: Bool = true, targetProfile: String = "baseline", protocolHint: String = "auto") async throws -> ProxyProfileResponse {
+    func saveProxyProfile(
+        input: String,
+        validationReceipt: String? = nil,
+        startMonitor: Bool = true,
+        targetProfile: String = "baseline",
+        protocolHint: String = "auto"
+    ) async throws -> ProxyProfileResponse {
         var body = proxyProtocolBody(input: input, protocolHint: protocolHint)
+        if let validationReceipt, !validationReceipt.isEmpty {
+            body["validation_receipt"] = validationReceipt
+        }
         body["start_monitor"] = startMonitor
         body["monitor_interval"] = 60
         body["timeout"] = 10
@@ -470,7 +479,7 @@ actor APIClient {
         )
     }
 
-    func rollbackProxyProfile(confirmed: Bool = true) async throws -> ProxyRollbackResponse {
+    func rollbackProxyProfile(confirmed: Bool = false) async throws -> ProxyRollbackResponse {
         var body: [String: Any] = [:]
         if confirmed {
             body["confirmed"] = true
@@ -507,7 +516,7 @@ actor APIClient {
         try await get(path: "proxy/bridge", timeout: 20)
     }
 
-    func recoverProxyBridge(confirmed: Bool = true) async throws -> ProxyApplyResponse {
+    func recoverProxyBridge(confirmed: Bool = false) async throws -> ProxyApplyResponse {
         var body: [String: Any] = [:]
         if confirmed {
             body["confirmed"] = true
@@ -572,15 +581,18 @@ actor APIClient {
         throw APIError.runFailed(response.error ?? "未知错误")
     }
 
-    func executeFix(fixId: String, timeout: Int = 120) async throws -> NetfixReport {
+    func executeFix(fixId: String, timeout: Int = 120, confirmed: Bool = false) async throws -> NetfixReport {
+        var body: [String: Any] = [
+            "fix_id": fixId,
+            "timeout": timeout,
+        ]
+        if confirmed {
+            body["confirmed"] = true
+            body["confirmation"] = "APPLY_SYSTEM_FIX"
+        }
         let response: NetfixReport = try await post(
             path: "fixes/execute",
-            body: [
-                "fix_id": fixId,
-                "confirmed": true,
-                "confirmation": "APPLY_SYSTEM_FIX",
-                "timeout": timeout,
-            ],
+            body: body,
             timeout: timeout
         )
         return response
@@ -632,13 +644,13 @@ extension APIError: LocalizedError {
     private static func friendlyHTTPError(code: Int, detail: String?) -> String? {
         let lower = (detail ?? "").lowercased()
         if lower.contains("missing api key") || lower.contains("missing_api_key") {
-            return "还没配置 AI：这只影响 AI 看报告，不影响诊断和代理部署。需要 AI 时，到设置里选择供应商并粘贴 API Key。"
+            return "还没配置 AI：这只影响 AI 看报告，不影响检查网络和使用代理。需要 AI 时，到设置里选择供应商并填写 AI 密钥。"
         }
         if lower.contains("cloud ai explanation is disabled") || lower.contains("llm_disabled") {
-            return "AI 还没启用：打开设置里的 AI，启用后粘贴 API Key 并保存测试。"
+            return "AI 还没启用：打开设置里的 AI，启用后填写 AI 密钥并保存测试。"
         }
         if lower.contains("auth_failed") || lower.contains("unauthorized") || lower.contains("forbidden") || lower.contains("invalid api key") {
-            return "API Key 验证失败：请检查供应商后台复制的 Key 是否完整，保存后再测试。"
+            return "AI 密钥验证失败：请检查从供应商后台复制的内容是否完整，保存后再测试。"
         }
         if lower.contains("model_not_found") || lower.contains("model") && lower.contains("not found") {
             return "当前模型不可用：请在 AI 设置里换一个预设供应商，或检查高级模型名。"

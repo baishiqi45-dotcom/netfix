@@ -105,6 +105,10 @@ class TestMCPServer(unittest.TestCase):
             tool = next(t for t in tools if t["name"] == name)
             self.assertIn("outputSchema", tool)
 
+        apply_tool = next(t for t in tools if t["name"] == "netfix_apply_fix")
+        self.assertIn("confirmation", apply_tool["inputSchema"]["properties"])
+        self.assertIn("magic_word", apply_tool["inputSchema"]["properties"])
+
     def test_mcp_script_bootstraps_repo_root_when_started_from_other_cwd(self):
         script = ROOT / "netfix" / "mcp_server.py"
         with tempfile.TemporaryDirectory() as tmp:
@@ -238,6 +242,20 @@ class TestMCPServer(unittest.TestCase):
         self.assertEqual(data["schema_version"], "netfix_mcp.v1")
         self.assertTrue(data["requires_confirmation"])
         self.assertEqual(data["confirmation"], "APPLY_SYSTEM_FIX")
+
+    def test_mcp_apply_fix_accepts_magic_word_alias(self):
+        with patch("netfix.api._execute_confirmed_fix", return_value=(200, {"ok": True, "fix_id": "disable-ipv6"})) as execute:
+            result = mcp_server._call_tool(
+                "netfix_apply_fix",
+                {"fix_id": "disable-ipv6", "confirmed": True, "magic_word": "APPLY_SYSTEM_FIX"},
+            )
+
+        self.assertFalse(result.get("isError"))
+        data = json.loads(result["content"][0]["text"])
+        self.assertTrue(data["ok"])
+        body = execute.call_args.args[0]
+        self.assertTrue(body["confirmed"])
+        self.assertEqual(body["confirmation"], "APPLY_SYSTEM_FIX")
 
     def test_mcp_sanitized_report_redacts_latest_report(self):
         report = Mock()

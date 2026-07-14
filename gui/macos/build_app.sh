@@ -1,30 +1,25 @@
 #!/bin/bash
-# Build a minimal Netfix.app bundle from the SwiftUI menu bar target.
-# Usage: cd gui/macos && ./build_app.sh [--install] [--release-candidate] [--strict-workspace]
+# Build a self-contained, unsigned Netfix.app candidate and optional DMG.
+# Usage: cd gui/macos && ./build_app.sh [--release-candidate] [--strict-workspace]
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BUILD_DIR="${REPO_ROOT}/gui/macos/.build"
 APP_NAME="Netfix"
 APP_BUNDLE="${BUILD_DIR}/${APP_NAME}.app"
-BINARY="${BUILD_DIR}/release/${APP_NAME}"
-DMG_PATH="${BUILD_DIR}/${APP_NAME}-0.2.0.dmg"
+APP_EXECUTABLE="${BUILD_DIR}/release/${APP_NAME}"
+BACKEND_BUILD="${BUILD_DIR}/backend/netfix-backend"
+BACKEND_IN_BUNDLE="${APP_BUNDLE}/Contents/MacOS/netfix-backend"
+MANIFEST_TOOL="${REPO_ROOT}/scripts/release_manifest.py"
+VERSION="$(python3 "${MANIFEST_TOOL}" version --repo-root "${REPO_ROOT}")"
+DMG_PATH="${BUILD_DIR}/${APP_NAME}-${VERSION}.dmg"
 DMG_ROOT="${BUILD_DIR}/dmg-root"
-NOTARIZATION_RECEIPT_PATH="${BUILD_DIR}/${APP_NAME}-0.2.0.notarization.json"
 MANIFEST_PATH="${APP_BUNDLE}/Contents/Resources/release-manifest.json"
-SIGN_IDENTITY="${NETFIX_SIGN_IDENTITY:--}"
-REQUIRE_BUNDLED_RUNTIME="${NETFIX_REQUIRE_BUNDLED_RUNTIME:-false}"
-NOTARIZE=false
-if [[ -n "${NETFIX_NOTARY_PROFILE:-}" || -n "${NETFIX_NOTARY_APPLE_ID:-}" ]]; then
-    NOTARIZE=true
-fi
 
-INSTALL=false
 RELEASE_CANDIDATE=false
 STRICT_WORKSPACE=false
 for arg in "$@"; do
     case "$arg" in
-        --install) INSTALL=true ;;
         --release-candidate) RELEASE_CANDIDATE=true ;;
         --strict-workspace) STRICT_WORKSPACE=true ;;
         *)
@@ -34,35 +29,40 @@ for arg in "$@"; do
     esac
 done
 
-if [[ "${NOTARIZE}" == true && "${SIGN_IDENTITY}" == "-" ]]; then
-    echo "NETFIX_SIGN_IDENTITY must be a Developer ID Application identity when notarization is enabled" >&2
+if [[ "${NETFIX_SIGN_IDENTITY:--}" != "-" || -n "${NETFIX_NOTARY_PROFILE:-}" || -n "${NETFIX_NOTARY_APPLE_ID:-}" ]]; then
+    echo "This P0 pipeline produces an unsigned, unnotarized candidate only." >&2
+    echo "Unset NETFIX_SIGN_IDENTITY and all NETFIX_NOTARY_* variables." >&2
     exit 2
 fi
 
+GIT_SHA_BEFORE="$(git -C "${REPO_ROOT}" rev-parse --verify HEAD)"
+SOURCE_FINGERPRINT_BEFORE="$(python3 "${MANIFEST_TOOL}" fingerprint --repo-root "${REPO_ROOT}")"
+
 echo "Auditing workspace for release blockers..."
-if [[ "$STRICT_WORKSPACE" == true ]]; then
+if [[ "${STRICT_WORKSPACE}" == true ]]; then
     python3 "${REPO_ROOT}/scripts/release_audit.py" --scope workspace --root "${REPO_ROOT}"
 else
     python3 "${REPO_ROOT}/scripts/release_audit.py" --scope workspace --root "${REPO_ROOT}" --warn-only || true
 fi
 
-echo "Building release binary..."
+echo "Building Swift release executable..."
 cd "$(dirname "$0")"
 swift build -c release
 
+echo "Building self-contained backend with an existing local toolchain..."
+"${REPO_ROOT}/scripts/build_backend_binary.sh" --output "${BACKEND_BUILD}"
+if [[ ! -x "${BACKEND_BUILD}" ]]; then
+    echo "Missing executable backend build: ${BACKEND_BUILD}" >&2
+    exit 2
+fi
+
 echo "Creating ${APP_BUNDLE}..."
 rm -rf "${APP_BUNDLE}"
-mkdir -p "${APP_BUNDLE}/Contents/MacOS"
-mkdir -p "${APP_BUNDLE}/Contents/Resources"
+mkdir -p "${APP_BUNDLE}/Contents/MacOS" "${APP_BUNDLE}/Contents/Resources"
+cp "${APP_EXECUTABLE}" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
+cp "${BACKEND_BUILD}" "${BACKEND_IN_BUNDLE}"
+chmod 755 "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}" "${BACKEND_IN_BUNDLE}"
 
-cp "${BINARY}" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
-if [[ -n "${NETFIX_BACKEND_BIN:-}" ]]; then
-    if [[ ! -x "${NETFIX_BACKEND_BIN}" ]]; then
-        echo "NETFIX_BACKEND_BIN must point to an executable backend binary" >&2
-        exit 2
-    fi
-    cp "${NETFIX_BACKEND_BIN}" "${APP_BUNDLE}/Contents/MacOS/netfix-backend"
-fi
 cp "${REPO_ROOT}/netfix.py" "${APP_BUNDLE}/Contents/Resources/"
 cp -R "${REPO_ROOT}/netfix" "${APP_BUNDLE}/Contents/Resources/"
 cp -R "${REPO_ROOT}/rules" "${APP_BUNDLE}/Contents/Resources/"
@@ -70,58 +70,6 @@ mkdir -p "${APP_BUNDLE}/Contents/Resources/gui"
 cp -R "${REPO_ROOT}/gui/web" "${APP_BUNDLE}/Contents/Resources/gui/"
 cp -R "${REPO_ROOT}/bin" "${APP_BUNDLE}/Contents/Resources/"
 cp "${REPO_ROOT}/gui/macos/PrivacyInfo.xcprivacy" "${APP_BUNDLE}/Contents/Resources/"
-
-WORKSPACE_AUDIT_JSON="$(python3 "${REPO_ROOT}/scripts/release_audit.py" --scope workspace --root "${REPO_ROOT}" --warn-only --json)"
-WORKSPACE_FINDING_COUNT="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin)["findings"]))' <<<"${WORKSPACE_AUDIT_JSON}")"
-DEVELOPER_ID_SIGNED=false
-if [[ "${SIGN_IDENTITY}" != "-" ]]; then
-    DEVELOPER_ID_SIGNED=true
-fi
-BUNDLED_BACKEND=false
-if [[ -x "${APP_BUNDLE}/Contents/MacOS/netfix-backend" ]]; then
-    BUNDLED_BACKEND=true
-fi
-BUNDLED_PYTHON=false
-if [[ -x "${APP_BUNDLE}/Contents/Resources/python/bin/python3" ]]; then
-    BUNDLED_PYTHON=true
-fi
-if [[ "${REQUIRE_BUNDLED_RUNTIME}" == "1" || "${REQUIRE_BUNDLED_RUNTIME}" == "true" ]]; then
-    if [[ "${BUNDLED_BACKEND}" != true && "${BUNDLED_PYTHON}" != true ]]; then
-        echo "Bundled runtime is required, but no netfix-backend or Resources/python/bin/python3 exists in the app bundle." >&2
-        echo "Build with NETFIX_BACKEND_BIN=/path/to/netfix-backend or include a bundled Python runtime." >&2
-        exit 2
-    fi
-fi
-python3 - <<PY
-import json
-from datetime import datetime, timezone
-from pathlib import Path
-
-manifest = {
-    "name": "${APP_NAME}",
-    "version": "0.2.0",
-    "bundle_id": "dev.netfix.Netfix",
-    "build_time": datetime.now(timezone.utc).isoformat(),
-    "release_candidate": "${RELEASE_CANDIDATE}" == "true",
-    "artifact_scope": "binary-app-bundle",
-    "workspace_audit_findings": int("${WORKSPACE_FINDING_COUNT}"),
-    "workspace_audit_note": "Workspace findings are excluded from the binary artifact by allowlisted bundle copy; use --strict-workspace for source release gating.",
-    "backend_runtime": {
-        "bundled_backend": "${BUNDLED_BACKEND}" == "true",
-        "bundled_python": "${BUNDLED_PYTHON}" == "true",
-        "bundled_runtime_required": "${REQUIRE_BUNDLED_RUNTIME}" in {"1", "true"},
-        "system_python_fallback": True
-    },
-    "distribution": {
-        "developer_id_signed": "${DEVELOPER_ID_SIGNED}" == "true",
-        "notarization_requested": "${NOTARIZE}" == "true",
-        "notarized": False,
-        "notarization_receipt": "${NOTARIZATION_RECEIPT_PATH}" if "${NOTARIZE}" == "true" else None,
-        "dmg_created": "${RELEASE_CANDIDATE}" == "true"
-    }
-}
-Path("${MANIFEST_PATH}").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-PY
 
 cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -135,9 +83,9 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
     <key>CFBundleName</key>
     <string>${APP_NAME}</string>
     <key>CFBundleVersion</key>
-    <string>0.2.0</string>
+    <string>${VERSION}</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.0</string>
+    <string>${VERSION}</string>
     <key>LSUIElement</key>
     <false/>
     <key>LSMinimumSystemVersion</key>
@@ -146,96 +94,54 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-BACKEND_IN_BUNDLE="${APP_BUNDLE}/Contents/MacOS/netfix-backend"
-if [[ "${SIGN_IDENTITY}" == "-" ]]; then
-    if [[ -x "${BACKEND_IN_BUNDLE}" ]]; then
-        echo "Ad-hoc signing bundled backend..."
-        codesign --force --sign - "${BACKEND_IN_BUNDLE}"
-    fi
-    echo "Skipping ad-hoc app bundle signing for local runnable candidate."
-else
-    if [[ -x "${BACKEND_IN_BUNDLE}" ]]; then
-        echo "Developer ID signing bundled backend with ${SIGN_IDENTITY}..."
-        codesign --force --options runtime --timestamp --sign "${SIGN_IDENTITY}" "${BACKEND_IN_BUNDLE}"
-    fi
-    echo "Developer ID signing app bundle with ${SIGN_IDENTITY}..."
-    codesign --force --options runtime --timestamp --sign "${SIGN_IDENTITY}" "${APP_BUNDLE}"
+echo "Skipping ad-hoc app bundle signing for local runnable candidate."
+if ! "${BACKEND_IN_BUNDLE}" --version >/dev/null 2>&1; then
+    echo "Re-signing bundled backend after copy..."
+    codesign --force --sign - "${BACKEND_IN_BUNDLE}"
+fi
+"${BACKEND_IN_BUNDLE}" --version >/dev/null
+codesign --verify --strict "${BACKEND_IN_BUNDLE}"
+echo "Skipping app bundle code-sign verification for unsigned local candidate."
+
+GIT_SHA_AFTER="$(git -C "${REPO_ROOT}" rev-parse --verify HEAD)"
+SOURCE_FINGERPRINT_AFTER="$(python3 "${MANIFEST_TOOL}" fingerprint --repo-root "${REPO_ROOT}")"
+if [[ "${SOURCE_FINGERPRINT_BEFORE}" != "${SOURCE_FINGERPRINT_AFTER}" || "${GIT_SHA_BEFORE}" != "${GIT_SHA_AFTER}" ]]; then
+    echo "Release source changed during the build; refusing to write a misleading manifest." >&2
+    exit 2
 fi
 
-if [[ -x "${BACKEND_IN_BUNDLE}" ]]; then
-    if ! "${BACKEND_IN_BUNDLE}" --version >/dev/null 2>&1; then
-        if [[ "${SIGN_IDENTITY}" == "-" ]]; then
-            echo "Re-signing bundled backend after copy..."
-            codesign --force --sign - "${BACKEND_IN_BUNDLE}"
-        else
-            echo "Re-signing bundled backend after app signing with ${SIGN_IDENTITY}..."
-            codesign --force --options runtime --timestamp --sign "${SIGN_IDENTITY}" "${BACKEND_IN_BUNDLE}"
-        fi
-    fi
-    "${BACKEND_IN_BUNDLE}" --version >/dev/null
+WORKSPACE_AUDIT_JSON="$(python3 "${REPO_ROOT}/scripts/release_audit.py" --scope workspace --root "${REPO_ROOT}" --warn-only --json)"
+WORKSPACE_FINDING_COUNT="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin)["findings"]))' <<<"${WORKSPACE_AUDIT_JSON}")"
+MANIFEST_ARGS=(
+    create
+    --repo-root "${REPO_ROOT}"
+    --app-bundle "${APP_BUNDLE}"
+    --output "${MANIFEST_PATH}"
+    --workspace-audit-findings "${WORKSPACE_FINDING_COUNT}"
+)
+if [[ "${RELEASE_CANDIDATE}" == true ]]; then
+    MANIFEST_ARGS+=(--release-candidate)
 fi
+python3 "${MANIFEST_TOOL}" "${MANIFEST_ARGS[@]}"
+python3 "${MANIFEST_TOOL}" verify \
+    --repo-root "${REPO_ROOT}" \
+    --app-bundle "${APP_BUNDLE}" \
+    --manifest "${MANIFEST_PATH}"
 
 echo "Auditing app bundle..."
 python3 "${REPO_ROOT}/scripts/release_audit.py" --scope bundle --root "${APP_BUNDLE}"
-if [[ "${SIGN_IDENTITY}" == "-" ]]; then
-    echo "Skipping app bundle code-sign verification for unsigned local candidate."
-else
-    codesign --verify --deep --strict "${APP_BUNDLE}"
-fi
 
-if [[ "$RELEASE_CANDIDATE" == true ]]; then
-    echo "Creating local DMG candidate..."
+if [[ "${RELEASE_CANDIDATE}" == true ]]; then
+    echo "Creating unsigned, unnotarized DMG candidate..."
     rm -f "${DMG_PATH}"
-    rm -f "${NOTARIZATION_RECEIPT_PATH}"
     rm -rf "${DMG_ROOT}"
     mkdir -p "${DMG_ROOT}"
     cp -R "${APP_BUNDLE}" "${DMG_ROOT}/"
     hdiutil create -volname "${APP_NAME}" -srcfolder "${DMG_ROOT}" -ov -format UDZO "${DMG_PATH}" >/dev/null
-    if [[ "${SIGN_IDENTITY}" != "-" ]]; then
-        echo "Signing DMG with ${SIGN_IDENTITY}..."
-        codesign --force --timestamp --sign "${SIGN_IDENTITY}" "${DMG_PATH}"
-    fi
-    if [[ "${NOTARIZE}" == true ]]; then
-        echo "Submitting DMG for notarization..."
-        if [[ -n "${NETFIX_NOTARY_PROFILE:-}" ]]; then
-            xcrun notarytool submit "${DMG_PATH}" --keychain-profile "${NETFIX_NOTARY_PROFILE}" --wait
-        else
-            : "${NETFIX_NOTARY_APPLE_ID:?NETFIX_NOTARY_APPLE_ID required when NETFIX_NOTARY_PROFILE is not set}"
-            : "${NETFIX_NOTARY_TEAM_ID:?NETFIX_NOTARY_TEAM_ID required when NETFIX_NOTARY_PROFILE is not set}"
-            : "${NETFIX_NOTARY_PASSWORD:?NETFIX_NOTARY_PASSWORD required when NETFIX_NOTARY_PROFILE is not set}"
-            xcrun notarytool submit "${DMG_PATH}" \
-                --apple-id "${NETFIX_NOTARY_APPLE_ID}" \
-                --team-id "${NETFIX_NOTARY_TEAM_ID}" \
-                --password "${NETFIX_NOTARY_PASSWORD}" \
-                --wait
-        fi
-        xcrun stapler staple "${DMG_PATH}"
-        python3 - <<PY
-import json
-from datetime import datetime, timezone
-from pathlib import Path
-
-receipt = {
-    "name": "${APP_NAME}",
-    "version": "0.2.0",
-    "artifact": "${DMG_PATH}",
-    "developer_id_signed": "${DEVELOPER_ID_SIGNED}" == "true",
-    "notarized": True,
-    "stapled": True,
-    "completed_at": datetime.now(timezone.utc).isoformat(),
-}
-Path("${NOTARIZATION_RECEIPT_PATH}").write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
-PY
-    fi
     hdiutil verify "${DMG_PATH}" >/dev/null
     echo "Built DMG ${DMG_PATH}"
 fi
 
-if [[ "$INSTALL" == true ]]; then
-    rm -rf "/Applications/${APP_NAME}.app"
-    cp -R "${APP_BUNDLE}" "/Applications/${APP_NAME}.app"
-    echo "Installed to /Applications/${APP_NAME}.app"
-fi
-
 echo "Built ${APP_BUNDLE}"
-echo "Run: open '${APP_BUNDLE}'"
+echo "Candidate is not Developer ID signed and is not notarized."
+echo "No application process was stopped or started; no desktop link was changed."

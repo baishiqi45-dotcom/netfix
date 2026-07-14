@@ -160,7 +160,7 @@ def network_quality(env: Dict[str, Any], core: Any, timeout: int = 30) -> Dict[s
         pass
 
     if data:
-        base_rtt = data.get("baseRTT")
+        base_rtt = data.get("base_rtt", data.get("baseRTT"))
         dl = data.get("dl_throughput")
         ul = data.get("ul_throughput")
         rpm = data.get("responsiveness")
@@ -169,6 +169,12 @@ def network_quality(env: Dict[str, Any], core: Any, timeout: int = 30) -> Dict[s
         dl = _re_float(r"dl_throughput\s*[:=]\s*([\d.]+)", text)
         ul = _re_float(r"ul_throughput\s*[:=]\s*([\d.]+)", text)
         rpm = _re_float(r"responsiveness\s*[:=]\s*([\d.]+)", text)
+
+    # Apple's compact output reports throughput in bits per second. The
+    # dashboard contract stores kbit/s so it can format Mbps without inflating
+    # the value by 1000x.
+    dl_kbps = float(dl) / 1000.0 if dl is not None else None
+    ul_kbps = float(ul) / 1000.0 if ul is not None else None
 
     status = "ok"
     if rpm is not None and rpm < 50:
@@ -184,8 +190,8 @@ def network_quality(env: Dict[str, Any], core: Any, timeout: int = 30) -> Dict[s
         status,
         {
             "base_rtt_ms": base_rtt,
-            "dl_throughput_kbps": dl,
-            "ul_throughput_kbps": ul,
+            "dl_throughput_kbps": dl_kbps,
+            "ul_throughput_kbps": ul_kbps,
             "responsiveness_rpm": rpm,
         },
     )

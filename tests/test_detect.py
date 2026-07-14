@@ -53,6 +53,21 @@ class TestDetectSystemProxy(unittest.TestCase):
         self.assertEqual(proxy["https"], "127.0.0.1:10808")
         self.assertEqual(proxy["socks"], "127.0.0.1:10808")
         self.assertEqual(proxy["pac"], "http://wpad/wpad.dat")
+        self.assertEqual(proxy["_detection_status"], "ok")
+
+    def test_command_failure_is_unknown_not_an_empty_no_proxy_result(self):
+        failed = {
+            "cmd": "scutil --proxy",
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "not available",
+            "ok": False,
+        }
+        with patch("netfix.detect.run_command", return_value=failed):
+            proxy = detect.detect_system_proxy()
+
+        self.assertEqual(proxy["_detection_status"], "unknown")
+        self.assertIsNone(proxy["http"])
 
 
 class TestDetectRunningProxies(unittest.TestCase):

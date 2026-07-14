@@ -33,11 +33,11 @@ def test_macos_bridge_status_surfaces_local_access_audit():
     assert "state.lifecycle" in settings
     assert "state.startupCheck" in settings
     assert "proxyBridgeAutoRestartEnabled" in settings
-    assert "重启时自动恢复上次代理连接" in settings
-    assert "不会静默修改网络代理设置" in settings
+    assert "启动时检查上次代理连接" in settings
+    assert "必须由你点击恢复并确认" in settings
     assert "saveProxyBridgeSettings" in settings
     assert "启动时代理检查" in settings
-    assert "启动时已自动恢复代理连接" in settings
+    assert "启动时已自动恢复代理连接" not in settings
     assert "bridgeStopLabel" in settings
     assert ".onChange(of: backend.state)" in settings
     assert "请保持 Netfix 打开" in settings
@@ -58,11 +58,11 @@ def test_macos_bridge_status_surfaces_local_access_audit():
     assert "notifyBridgeAttention" in app_delegate
     assert 'UserDefaults.standard.bool(forKey: "netfix.notificationsEnabled")' in app_delegate
     assert "需要恢复网络设置" in app_delegate
-    assert "已自动恢复代理连接" in app_delegate
-    assert "没有静默修改网络代理设置" in app_delegate
+    assert "DashboardStateStore" in app_delegate
+    assert "已自动恢复代理连接" not in app_delegate
     assert "bridgeMenuTitle" in app_delegate
-    assert "代理状态：需要恢复网络设置" in app_delegate
-    assert "代理状态：这台 Mac 正在使用" in app_delegate
+    assert "网络状态：" in app_delegate
+    assert "Netfix 代理使用中" in app_delegate
 
 
 def test_macos_notifications_respect_user_toggle_for_health_and_bridge():

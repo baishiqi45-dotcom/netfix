@@ -2,6 +2,201 @@ import XCTest
 @testable import Netfix
 
 final class NetfixTests: XCTestCase {
+    func testDashboardStateContractDecodingAndCTAVisibility() throws {
+        let json = """
+        {
+            "ok": true,
+            "schema_version": "netfix_current_mac_state.v1",
+            "decision": {
+                "ui_state": "network_recovery",
+                "effective_route": "recovery_required",
+                "severity": "fail",
+                "primary_action": "recover_system_proxy",
+                "reason_codes": ["bridge_needs_recovery"],
+                "headline": "系统网络需要恢复",
+                "next_step": "点恢复原来的网络设置。",
+                "requires_confirmation": true
+            },
+            "machine": {
+                "platform": "darwin",
+                "primary_interface": "en0",
+                "self_ipv4": "192.168.1.10",
+                "gateway": "192.168.1.1",
+                "has_ipv6_default_route": true
+            },
+            "proxy": {
+                "saved": { "count": 1, "selected_profile_id": "p1" },
+                "system": { "active": true, "kind": "http_https", "redacted": {}, "network_service": "Wi-Fi" },
+                "bridge": { "lifecycle_status": "recovery_required", "in_use": false, "needs_recovery": true, "recovery_available": true, "profile_id": "p1" },
+                "applied": { "active": false, "owner": "netfix", "profile_id": "p1", "via": "system_proxy" },
+                "verified": { "status": "unknown", "checked_at": null, "source": "none" }
+            },
+            "egress": { "status": "unchecked", "cached": false },
+            "last_report_summary": {},
+            "state": {
+                "state": "network_recovery",
+                "headline": "系统网络需要恢复",
+                "next_step": "点恢复原来的网络设置。",
+                "saved_profile_count": 1,
+                "bridge_in_use": false,
+                "bridge_needs_recovery": true
+            },
+            "saved_profile_count": 1
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(DashboardStateResponse.self, from: json)
+
+        XCTAssertEqual(response.schemaVersion, "netfix_current_mac_state.v1")
+        XCTAssertEqual(response.primaryActionID, "recover_system_proxy")
+        XCTAssertFalse(response.shouldShowProxyDeployCTA)
+        XCTAssertEqual(response.machine?.primaryInterface, "en0")
+        XCTAssertEqual(response.proxy?.system.kind, "http_https")
+        XCTAssertEqual(response.egress?.status, "unchecked")
+        XCTAssertTrue(response.decision?.requiresConfirmation == true)
+    }
+
+    func testDashboardStateShowsProxyCTAOnlyForPasteAction() throws {
+        let json = """
+        {
+            "ok": true,
+            "decision": {
+                "ui_state": "no_proxy",
+                "effective_route": "none",
+                "severity": "info",
+                "primary_action": "paste_proxy",
+                "reason_codes": ["no_saved_profile_or_system_proxy"],
+                "headline": "还没有粘贴代理参数",
+                "next_step": "点粘贴代理参数。",
+                "requires_confirmation": false
+            },
+            "state": {
+                "state": "no_proxy",
+                "headline": "还没有粘贴代理参数",
+                "next_step": "点粘贴代理参数。"
+            }
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(DashboardStateResponse.self, from: json)
+
+        XCTAssertTrue(response.shouldShowProxyDeployCTA)
+        XCTAssertEqual(response.primaryActionID, "paste_proxy")
+    }
+
+    func testDashboardStateV2VerdictDecodingUsesPrimaryActionLabel() throws {
+        let json = """
+        {
+            "ok": true,
+            "schema_version": "netfix_current_mac_state.v2",
+            "decision": {
+                "ui_state": "ready",
+                "effective_route": "external_system_proxy",
+                "severity": "ok",
+                "primary_action": "verify_current_proxy",
+                "reason_codes": ["external_system_proxy_active"],
+                "headline": "外部系统代理已启用",
+                "next_step": "保持现状即可；想再确认一次就点「检查当前网络」。",
+                "requires_confirmation": false
+            },
+            "verdict": {
+                "status": "ok",
+                "severity": "ok",
+                "usability": "usable",
+                "headline": "外部系统代理已启用",
+                "detail": "Netfix 没有改这台 Mac 的系统代理。",
+                "next_step": "保持现状即可；想再确认一次就点「检查当前网络」。",
+                "issue_count": 0,
+                "blocking_issue_count": 0,
+                "advisory_count": 0,
+                "diagnostic_counts": { "ok": 0, "warn": 0, "fail": 0, "unknown": 0 },
+                "primary_action": {
+                    "id": "verify_current_proxy",
+                    "label": "检查当前网络",
+                    "enabled": true,
+                    "target": "run:doctor",
+                    "requires_confirmation": false
+                },
+                "freshness": {
+                    "checked_at": null,
+                    "age_seconds": null,
+                    "stale": true
+                }
+            },
+            "presentation": {
+                "visible_sections": ["current_status", "connection_quality"],
+                "collapsed_sections": ["diagnostic_evidence"],
+                "suppressed_sections": [
+                    { "id": "recent_events", "reason": "history_only" }
+                ]
+            },
+            "connection_quality": {
+                "status": "ok",
+                "headline": "体感顺畅",
+                "detail": "速度、延迟和稳定性都有数据。",
+                "speed": { "label": "充足", "value": "下载 28.4 Mbps / 上传 5.2 Mbps", "hint": "日常使用够用" },
+                "latency": { "label": "中等", "value": "延迟 62ms", "hint": "实时输出会有轻微等待" },
+                "stability": { "label": "稳定", "value": "丢包 0%", "hint": "路径稳定" },
+                "background_activity": { "label": "平稳", "value": "后台占用不高", "hint": "没有看到明显上传或下载占用" },
+                "checked_at": "2026-07-09T06:00:00+00:00",
+                "stale": false,
+                "source": "last_report"
+            },
+            "machine": {
+                "platform": "darwin",
+                "primary_interface": "en0",
+                "self_ipv4": "192.168.1.10",
+                "gateway": "192.168.1.1",
+                "has_ipv6_default_route": false
+            },
+            "proxy": {
+                "saved": { "count": 0, "selected_profile_id": null },
+                "system": { "active": true, "kind": "http_https", "network_service": "Wi-Fi" },
+                "bridge": { "lifecycle_status": "stopped", "in_use": false, "needs_recovery": false, "recovery_available": false, "profile_id": null },
+                "applied": { "active": true, "owner": "external", "profile_id": null, "via": "system_proxy" },
+                "verified": { "status": "unknown", "checked_at": null, "source": "none" }
+            },
+            "egress": { "status": "unchecked", "cached": false },
+            "state": {
+                "state": "ready",
+                "headline": "外部系统代理已启用",
+                "next_step": "保持现状即可；想再确认一次就点「检查当前网络」。"
+            }
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(DashboardStateResponse.self, from: json)
+
+        XCTAssertEqual(response.schemaVersion, "netfix_current_mac_state.v2")
+        XCTAssertEqual(response.primaryActionID, "verify_current_proxy")
+        XCTAssertEqual(response.primaryActionLabel, "检查当前网络")
+        XCTAssertEqual(response.headline, "外部系统代理已启用")
+        XCTAssertFalse(response.nextStep.contains("一键诊断"))
+        XCTAssertEqual(response.presentation?.visibleSections, ["current_status", "connection_quality"])
+        XCTAssertEqual(response.connectionQuality?.speed.value, "下载 28.4 Mbps / 上传 5.2 Mbps")
+        XCTAssertEqual(response.connectionQuality?.latency.value, "延迟 62ms")
+    }
+
+    func testReportUnknownAndUncheckedDoNotCountAsIssues() throws {
+        let json = """
+        {
+            "diagnostics": [
+                { "name": "gateway", "status": "ok" },
+                { "name": "egress_identity", "status": "unchecked" },
+                { "name": "network_quality", "status": "unknown" }
+            ],
+            "root_causes": [],
+            "fixes": [],
+            "manual_steps": []
+        }
+        """.data(using: .utf8)!
+
+        let report = try JSONDecoder().decode(NetfixReport.self, from: json)
+
+        XCTAssertEqual(report.overallStatus, .ok)
+        XCTAssertEqual(report.summaryHeadline, "网络看起来正常")
+    }
+
     /// 验证后端可执行文件路径解析不为空。
     func testBackendPathResolution() {
         let path = Backend.backendPath
@@ -428,5 +623,250 @@ final class NetfixTests: XCTestCase {
         XCTAssertEqual(response.package?.files?.count, 2)
         XCTAssertEqual(response.package?.files?.last?.path, "proxy.sing-box.json")
         XCTAssertTrue(response.package?.files?.last?.secretPlaceholder == true)
+    }
+
+    func testPrimaryActionLabelIsVerdictAuthoritativeAndEmptyWhenMissing() throws {
+        // Backend omits label entirely — UI must NOT invent hard-coded copy.
+        let jsonMissing = """
+        {
+            "ok": true,
+            "schema_version": "netfix_current_mac_state.v2",
+            "decision": {
+                "ui_state": "proxy_in_use",
+                "effective_route": "netfix_applied",
+                "primary_action": "diagnose",
+                "requires_confirmation": false
+            },
+            "verdict": {
+                "status": "unknown",
+                "severity": "info",
+                "primary_action": {
+                    "id": "diagnose",
+                    "enabled": true
+                }
+            },
+            "presentation": {
+                "visible_sections": ["current_status"],
+                "collapsed_sections": [],
+                "suppressed_sections": []
+            },
+            "state": {
+                "state": "proxy_in_use",
+                "headline": "正在使用代理上网",
+                "next_step": "Netfix 会持续检查网络状态。"
+            }
+        }
+        """.data(using: .utf8)!
+        let missing = try JSONDecoder().decode(DashboardStateResponse.self, from: jsonMissing)
+        XCTAssertEqual(missing.primaryActionLabel, "")
+        XCTAssertEqual(missing.primaryActionTarget, "run:doctor")
+        XCTAssertEqual(missing.primaryActionID, "diagnose")
+
+        // Backend supplies label — UI must use it verbatim, no fallback switch.
+        let jsonPaste = """
+        {
+            "ok": true,
+            "schema_version": "netfix_current_mac_state.v2",
+            "decision": {
+                "ui_state": "no_proxy",
+                "effective_route": "none",
+                "primary_action": "paste_proxy",
+                "requires_confirmation": false
+            },
+            "verdict": {
+                "status": "unknown",
+                "severity": "info",
+                "primary_action": {
+                    "id": "paste_proxy",
+                    "label": "粘贴代理参数",
+                    "enabled": true,
+                    "target": "settings:proxy"
+                }
+            },
+            "presentation": {
+                "visible_sections": ["current_status"],
+                "collapsed_sections": [],
+                "suppressed_sections": []
+            },
+            "state": {
+                "state": "no_proxy",
+                "headline": "还没有粘贴代理参数",
+                "next_step": "点「粘贴代理参数」，把服务商给的那一行粘进来。"
+            }
+        }
+        """.data(using: .utf8)!
+        let paste = try JSONDecoder().decode(DashboardStateResponse.self, from: jsonPaste)
+        XCTAssertEqual(paste.primaryActionLabel, "粘贴代理参数")
+        XCTAssertEqual(paste.primaryActionTarget, "flow:proxy_setup")
+    }
+
+    func testPresentationVisibleSectionsAreDecoded() throws {
+        let json = """
+        {
+            "ok": true,
+            "schema_version": "netfix_current_mac_state.v2",
+            "decision": { "ui_state": "proxy_degraded" },
+            "verdict": { "status": "attention" },
+            "presentation": {
+                "visible_sections": ["current_status", "diagnostic_evidence", "first_aid", "diagnose_goals"],
+                "collapsed_sections": ["network_quality"],
+                "suppressed_sections": [
+                    {"id": "ai", "reason": "optional_support"},
+                    {"id": "logs", "reason": "history_only"}
+                ]
+            },
+            "state": { "state": "proxy_degraded", "headline": "代理需要复查", "next_step": "点检查" }
+        }
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(DashboardStateResponse.self, from: json)
+        XCTAssertTrue(response.presentation?.visibleSections.contains("diagnostic_evidence") == true)
+        XCTAssertTrue(response.presentation?.visibleSections.contains("first_aid") == true)
+        XCTAssertTrue(response.presentation?.visibleSections.contains("diagnose_goals") == true)
+    }
+
+    // MARK: - P0 contract guard rails added 2026-07-09
+
+    func testProxySystemMissing_decodesWithNilSystem() throws {
+        // Backend may omit `proxy.system` when it cannot read the Mac's
+        // system proxy; the home screen must not crash decoding.
+        let json = """
+        {
+            "ok": true,
+            "schema_version": "netfix_current_mac_state.v2",
+            "decision": { "ui_state": "proxy_in_use" },
+            "verdict": { "status": "ok", "severity": "info" },
+            "presentation": { "visible_sections": ["current_status"], "collapsed_sections": [], "suppressed_sections": [] },
+            "proxy": { "saved": null, "bridge": null, "applied": null, "verified": null },
+            "state": { "state": "proxy_in_use", "headline": "代理已启用", "next_step": "" }
+        }
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(DashboardStateResponse.self, from: json)
+        XCTAssertNil(response.proxy?.system, "proxy.system must be Optional and decode to nil")
+    }
+
+    func testConnectionQualitySpeedMetricMissing_decodesWithoutCrash() throws {
+        // Missing one metric (e.g. speed not sampled) must NOT take down the
+        // whole ConnectionQuality decode.
+        let json = """
+        {
+            "ok": true,
+            "schema_version": "netfix_current_mac_state.v2",
+            "decision": { "ui_state": "ready" },
+            "verdict": { "status": "unknown", "severity": "info" },
+            "presentation": { "visible_sections": ["current_status"], "collapsed_sections": [], "suppressed_sections": [] },
+            "connection_quality": {
+                "status": "unchecked",
+                "headline": "还没采样",
+                "detail": "",
+                "latency": { "label": "延迟", "value": "未测", "hint": "" },
+                "stability": { "label": "稳定性", "value": "未测", "hint": "" },
+                "background_activity": { "label": "后台占用", "value": "未测", "hint": "" }
+            },
+            "state": { "state": "ready", "headline": "系统代理", "next_step": "" }
+        }
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(DashboardStateResponse.self, from: json)
+        XCTAssertNil(response.connectionQuality?.speed, "missing speed must decode as nil")
+        XCTAssertNotNil(response.connectionQuality?.latency, "other metrics still present")
+    }
+
+    func testPrimaryActionTargetRoutingKnownValues() throws {
+        // Legacy Settings target must normalize to the canonical setup flow.
+        let settingsJSON = """
+        {
+            "ok": true,
+            "schema_version": "netfix_current_mac_state.v2",
+            "decision": { "ui_state": "no_proxy" },
+            "verdict": {
+                "status": "unknown",
+                "severity": "info",
+                "primary_action": {
+                    "id": "paste_proxy",
+                    "label": "粘贴代理参数",
+                    "enabled": true,
+                    "target": "settings:proxy",
+                    "requires_confirmation": false
+                }
+            },
+            "presentation": { "visible_sections": ["current_status"], "collapsed_sections": [], "suppressed_sections": [] },
+            "state": { "state": "no_proxy", "headline": "", "next_step": "" }
+        }
+        """.data(using: .utf8)!
+        let r1 = try JSONDecoder().decode(DashboardStateResponse.self, from: settingsJSON)
+        XCTAssertEqual(r1.primaryActionTarget, "flow:proxy_setup")
+        XCTAssertEqual(r1.verdict?.primaryAction?.id, "paste_proxy")
+
+        // Legacy recovery target must normalize to the stale-bridge endpoint.
+        let recoverJSON = """
+        {
+            "ok": true,
+            "schema_version": "netfix_current_mac_state.v2",
+            "decision": { "ui_state": "network_recovery" },
+            "verdict": {
+                "status": "blocked",
+                "severity": "fail",
+                "primary_action": {
+                    "id": "recover_system_proxy",
+                    "label": "恢复原来的网络设置",
+                    "enabled": true,
+                    "target": "recover:system_proxy",
+                    "requires_confirmation": true
+                }
+            },
+            "presentation": { "visible_sections": ["current_status"], "collapsed_sections": [], "suppressed_sections": [] },
+            "state": { "state": "network_recovery", "headline": "", "next_step": "" }
+        }
+        """.data(using: .utf8)!
+        let r2 = try JSONDecoder().decode(DashboardStateResponse.self, from: recoverJSON)
+        XCTAssertEqual(r2.primaryActionTarget, "recover:stale_bridge")
+        XCTAssertEqual(r2.verdict?.primaryAction?.id, "recover_system_proxy")
+        XCTAssertEqual(r2.verdict?.primaryAction?.requiresConfirmation, true)
+
+        // None target must round-trip and decode to an empty / no-op action.
+        let noneJSON = """
+        {
+            "ok": true,
+            "schema_version": "netfix_current_mac_state.v2",
+            "decision": { "ui_state": "ready" },
+            "verdict": {
+                "status": "ok",
+                "severity": "ok",
+                "primary_action": { "id": "none", "label": "", "enabled": false, "target": "none", "requires_confirmation": false }
+            },
+            "presentation": { "visible_sections": ["current_status"], "collapsed_sections": [], "suppressed_sections": [] },
+            "state": { "state": "ready", "headline": "", "next_step": "" }
+        }
+        """.data(using: .utf8)!
+        let r3 = try JSONDecoder().decode(DashboardStateResponse.self, from: noneJSON)
+        XCTAssertEqual(r3.primaryActionTarget, "none")
+        XCTAssertEqual(r3.verdict?.primaryAction?.enabled, false)
+    }
+
+    func testTopLevelHeadlineAndDetailAreDecoded() throws {
+        // Swift side reads `response.headline / detail / next_step` at the top
+        // level (DashboardHomePresentation); the contract must expose them.
+        let json = """
+        {
+            "ok": true,
+            "schema_version": "netfix_current_mac_state.v2",
+            "decision": { "ui_state": "no_proxy" },
+            "verdict": {
+                "status": "unknown",
+                "severity": "info",
+                "headline": "还没有粘贴代理参数",
+                "detail": "当前没有 Netfix 保存或启用的代理。",
+                "next_step": "点「粘贴代理参数」。"
+            },
+            "presentation": { "visible_sections": ["current_status"], "collapsed_sections": [], "suppressed_sections": [] },
+            "state": { "state": "no_proxy", "headline": "", "next_step": "" },
+            "headline": "还没有粘贴代理参数",
+            "detail": "当前没有 Netfix 保存或启用的代理。",
+            "next_step": "点「粘贴代理参数」。"
+        }
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(DashboardStateResponse.self, from: json)
+        XCTAssertEqual(response.headline, "还没有粘贴代理参数")
+        XCTAssertEqual(response.narrativeDetail, "当前没有 Netfix 保存或启用的代理。")
+        XCTAssertEqual(response.nextStep, "点「粘贴代理参数」。")
     }
 }

@@ -178,6 +178,56 @@ class TestResidentialProxy(unittest.TestCase):
         self.assertNotIn("_secret", result)
         self.assertNotIn("super-secret-password", encoded)
 
+    def test_validation_receipt_saves_exact_proxy_as_verified(self):
+        payload = {"input": "http://user:pass@proxy.example.com:8000"}
+        parsed = parse_proxy_input(payload)
+        receipt = residential_proxy.issue_validation_receipt(
+            parsed["profile"],
+            password="pass",
+        )["validation_receipt"]
+
+        with patch("netfix.residential_proxy.get_proxy_profiles", return_value=[]), \
+                patch("netfix.residential_proxy.upsert_proxy_profile", side_effect=lambda profile: profile), \
+                patch("netfix.residential_proxy.keychain.set_secret", return_value={"ok": True}):
+            result = residential_proxy.save_proxy_profile({**payload, "validation_receipt": receipt})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["profile"]["verification_status"], "verified")
+        self.assertTrue(result["profile"]["can_apply"])
+        self.assertIn("validated_at", result["profile"])
+
+    def test_legacy_save_without_receipt_is_unverified_and_cannot_system_apply(self):
+        with patch("netfix.residential_proxy.get_proxy_profiles", return_value=[]), \
+                patch("netfix.residential_proxy.upsert_proxy_profile", side_effect=lambda profile: profile):
+            saved = residential_proxy.save_proxy_profile({"input": "http://proxy.example.com:8000"})
+
+        self.assertTrue(saved["ok"])
+        self.assertEqual(saved["profile"]["verification_status"], "unverified")
+        self.assertFalse(saved["profile"]["can_apply"])
+        with patch("netfix.residential_proxy.choose_network_service") as choose:
+            applied = apply_proxy_profile(
+                saved["profile"],
+                mode="system",
+                confirmed=True,
+                confirmation=SYSTEM_APPLY_CONFIRMATION,
+            )
+        self.assertFalse(applied["ok"])
+        self.assertEqual(applied["reason_code"], "profile_not_verified")
+        choose.assert_not_called()
+
+    def test_validation_receipt_is_one_time_and_bound_to_the_exact_secret(self):
+        parsed = parse_proxy_input({"input": "http://user:pass@proxy.example.com:8000"})
+        receipt = residential_proxy.issue_validation_receipt(parsed["profile"], password="pass")["validation_receipt"]
+        self.assertTrue(residential_proxy.consume_validation_receipt(receipt, parsed["profile"], password="pass")["ok"])
+        reused = residential_proxy.consume_validation_receipt(receipt, parsed["profile"], password="pass")
+        self.assertFalse(reused["ok"])
+        self.assertEqual(reused["reason_code"], "validation_receipt_unknown")
+
+        other = residential_proxy.issue_validation_receipt(parsed["profile"], password="pass")["validation_receipt"]
+        mismatch = residential_proxy.consume_validation_receipt(other, parsed["profile"], password="different")
+        self.assertFalse(mismatch["ok"])
+        self.assertEqual(mismatch["reason_code"], "validation_receipt_mismatch")
+
     def test_replace_proxy_profile_preserves_id_and_rotates_keychain_secret(self):
         existing = {
             "id": "p1",
@@ -209,6 +259,8 @@ class TestResidentialProxy(unittest.TestCase):
         self.assertEqual(result["profile"]["provider"], "provider-a")
         self.assertEqual(result["profile"]["expected_geo"], {"country": "US"})
         self.assertNotIn("last_check", result["profile"])
+        self.assertEqual(result["profile"]["verification_status"], "unverified")
+        self.assertFalse(result["profile"]["can_apply"])
         self.assertEqual(result["previous_endpoint"]["host"], "old.proxy.example.com")
         self.assertEqual(result["previous_endpoint"]["port"], 8000)
         self.assertEqual(result["new_endpoint"]["host"], "new.proxy.example.com")
@@ -338,6 +390,7 @@ class TestResidentialProxy(unittest.TestCase):
 
     def test_system_apply_requires_confirmation_phrase(self):
         parsed = parse_proxy_input({"input": "http://proxy.example.com:8000"})
+        parsed["profile"].update({"verification_status": "verified", "can_apply": True})
         result = apply_proxy_profile(parsed["profile"], mode="system", confirmed=True, confirmation="wrong")
         self.assertTrue(result["ok"])
         self.assertEqual(result["status"], "pending_confirmation")
@@ -362,6 +415,7 @@ class TestResidentialProxy(unittest.TestCase):
 
     def test_system_apply_uses_bridge_for_authenticated_http_proxy(self):
         parsed = parse_proxy_input({"input": "http://user:pass@proxy.example.com:8000"})
+        parsed["profile"].update({"verification_status": "verified", "can_apply": True})
         backup = {
             "service": "Wi-Fi",
             "web": {"enabled": False, "authenticated": False},
@@ -398,6 +452,7 @@ class TestResidentialProxy(unittest.TestCase):
 
     def test_system_apply_uses_bridge_for_authenticated_socks_proxy(self):
         parsed = parse_proxy_input({"input": "socks5://user:pass@proxy.example.com:1080"})
+        parsed["profile"].update({"verification_status": "verified", "can_apply": True})
         backup = {
             "service": "Wi-Fi",
             "web": {"enabled": False, "authenticated": False},
@@ -435,6 +490,7 @@ class TestResidentialProxy(unittest.TestCase):
 
     def test_system_apply_uses_networksetup_with_backup_and_verify(self):
         parsed = parse_proxy_input({"input": "http://proxy.example.com:8000"})
+        parsed["profile"].update({"verification_status": "verified", "can_apply": True})
         backup = {
             "service": "Wi-Fi",
             "web": {"enabled": False, "authenticated": False},
@@ -460,13 +516,51 @@ class TestResidentialProxy(unittest.TestCase):
         capture.assert_called_once_with("Wi-Fi")
         validate.assert_called_once()
         journal.assert_called()
+        applied_snapshot = journal.call_args_list[-1].args[0]["applied_snapshot"]
+        self.assertTrue(applied_snapshot["web"]["enabled"])
+        self.assertEqual(len(applied_snapshot["web"]["endpoint_hash"]), 16)
+        self.assertNotIn("proxy.example.com", str(applied_snapshot))
+        self.assertTrue(applied_snapshot["secure"]["enabled"])
+        self.assertFalse(applied_snapshot["auto_proxy_url"]["enabled"])
         calls = [call.args[0] for call in networksetup.call_args_list]
         self.assertIn(["-setautoproxystate", "Wi-Fi", "off"], calls)
         self.assertIn(["-setwebproxy", "Wi-Fi", "proxy.example.com", "8000"], calls)
         self.assertIn(["-setsecurewebproxy", "Wi-Fi", "proxy.example.com", "8000"], calls)
 
+    def test_system_apply_cannot_disable_verification_or_automatic_rollback(self):
+        parsed = parse_proxy_input({"input": "http://proxy.example.com:8000"})
+        parsed["profile"].update({"verification_status": "verified", "can_apply": True})
+        backup = {
+            "service": "Wi-Fi",
+            "web": {"enabled": False, "authenticated": False},
+            "secure": {"enabled": False, "authenticated": False},
+            "socks": {"enabled": False, "authenticated": False},
+            "auto_proxy_url": {"enabled": False},
+            "auto_discovery": {"enabled": False},
+        }
+        with patch("netfix.residential_proxy.choose_network_service", return_value="Wi-Fi"), \
+                patch("netfix.residential_proxy._capture_system_proxy_backup", return_value=backup), \
+                patch("netfix.residential_proxy._run_networksetup", return_value={"ok": True}), \
+                patch("netfix.residential_proxy.validate_proxy_profile", return_value={"ok": False, "proxy_check": {"status": "fail"}}) as validate, \
+                patch("netfix.residential_proxy._restore_system_proxy_backup", return_value={"ok": True}) as restore, \
+                patch("netfix.residential_proxy._write_apply_journal"):
+            result = apply_proxy_profile(
+                parsed["profile"],
+                mode="system",
+                confirmed=True,
+                confirmation=SYSTEM_APPLY_CONFIRMATION,
+                verify=False,
+                rollback_on_verify_failure=False,
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "rolled_back_after_verify_failure")
+        validate.assert_called_once()
+        restore.assert_called_once_with(backup)
+
     def test_system_apply_disables_restorable_ipv6_and_records_state(self):
         parsed = parse_proxy_input({"input": "http://proxy.example.com:8000"})
+        parsed["profile"].update({"verification_status": "verified", "can_apply": True})
         backup = {
             "service": "Wi-Fi",
             "web": {"enabled": False, "authenticated": False},
@@ -665,6 +759,55 @@ class TestResidentialProxy(unittest.TestCase):
         self.assertEqual(result["status"], "healthy")
         self.assertFalse(result["recovery_available"])
 
+    def test_detect_direct_system_apply_as_netfix_owned_only_while_snapshot_matches(self):
+        current = {
+            "service": "Wi-Fi",
+            "web": {"enabled": True, "server": "proxy.example.com", "port": 8000},
+            "secure": {"enabled": True, "server": "proxy.example.com", "port": 8000},
+            "socks": {"enabled": False, "server": "", "port": 0},
+            "auto_proxy_url": {"enabled": False},
+            "auto_discovery": {"enabled": False},
+            "ipv6": {"mode": "off"},
+        }
+        entry = {
+            "id": "j-direct",
+            "profile_id": "p-direct",
+            "network_service": "Wi-Fi",
+            "bridge": None,
+            "applied_snapshot": residential_proxy._proxy_topology_snapshot(current),
+        }
+        with patch("netfix.residential_proxy._read_apply_journal", return_value={"last_apply": entry}), \
+                patch("netfix.residential_proxy._capture_system_proxy_backup", return_value=current):
+            owned = detect_stale_bridge()
+
+        self.assertEqual(owned["status"], "healthy_system_apply")
+        self.assertTrue(owned["system_points_to_netfix_apply"])
+        self.assertFalse(owned["recovery_available"])
+
+        changed = {**current, "web": {"enabled": True, "server": "other.example.com", "port": 8000}}
+        with patch("netfix.residential_proxy._read_apply_journal", return_value={"last_apply": entry}), \
+                patch("netfix.residential_proxy._capture_system_proxy_backup", return_value=changed):
+            not_owned = detect_stale_bridge()
+
+        self.assertEqual(not_owned["status"], "system_not_pointing_to_netfix_apply")
+        self.assertFalse(not_owned["system_points_to_netfix_apply"])
+
+    def test_direct_system_apply_lifecycle_is_running_without_backend_dependency(self):
+        lifecycle = bridge_lifecycle(
+            [],
+            {
+                "ok": True,
+                "status": "healthy_system_apply",
+                "system_points_to_netfix_apply": True,
+                "profile_id": "p-direct",
+                "network_service": "Wi-Fi",
+            },
+        )
+
+        self.assertEqual(lifecycle["status"], "running_system")
+        self.assertFalse(lifecycle["requires_netfix_running"])
+        self.assertEqual(lifecycle["profile_id"], "p-direct")
+
     def test_recover_stale_bridge_requires_confirmation_then_restores_backup(self):
         stale = {"ok": True, "status": "stale_bridge", "stale": True, "recovery_available": True}
         entry = {
@@ -691,6 +834,95 @@ class TestResidentialProxy(unittest.TestCase):
         restore.assert_called_once_with({"service": "Wi-Fi"})
         stop.assert_called_once_with("b1")
         journal.assert_called_once()
+
+    def test_confirmed_bridge_recovery_also_stops_a_healthy_netfix_owned_bridge(self):
+        healthy = {
+            "ok": True,
+            "status": "healthy",
+            "stale": False,
+            "recovery_available": False,
+            "system_points_to_bridge": True,
+        }
+        entry = {
+            "id": "j1",
+            "profile_id": "p1",
+            "network_service": "Wi-Fi",
+            "backup": {"service": "Wi-Fi"},
+            "bridge": {"id": "b1", "listen_host": "127.0.0.1", "listen_port": 19080},
+        }
+        with patch("netfix.residential_proxy.detect_stale_bridge", return_value=healthy), \
+                patch("netfix.residential_proxy._read_apply_journal", return_value={"last_apply": entry}), \
+                patch("netfix.residential_proxy._restore_system_proxy_backup", return_value={"ok": True, "network_service": "Wi-Fi"}) as restore, \
+                patch("netfix.residential_proxy.proxy_bridge.stop_bridge", return_value={"ok": True}) as stop, \
+                patch("netfix.residential_proxy._write_apply_journal") as journal:
+            recovered = recover_stale_bridge(
+                confirmed=True,
+                confirmation=BRIDGE_RECOVERY_CONFIRMATION,
+            )
+
+        self.assertTrue(recovered["ok"])
+        self.assertEqual(recovered["status"], "recovered")
+        self.assertEqual(recovered["recovery_kind"], "stop_and_restore")
+        restore.assert_called_once_with({"service": "Wi-Fi"})
+        stop.assert_called_once_with("b1")
+        journal.assert_called_once()
+
+    def test_healthy_bridge_is_not_stopped_when_restore_fails(self):
+        healthy = {
+            "ok": True,
+            "status": "healthy",
+            "stale": False,
+            "recovery_available": False,
+            "system_points_to_bridge": True,
+        }
+        entry = {
+            "id": "j1",
+            "backup": {"service": "Wi-Fi"},
+            "bridge": {"id": "b1"},
+        }
+        with patch("netfix.residential_proxy.detect_stale_bridge", return_value=healthy), \
+                patch("netfix.residential_proxy._read_apply_journal", return_value={"last_apply": entry}), \
+                patch("netfix.residential_proxy._restore_system_proxy_backup", return_value={"ok": False, "error": "restore failed"}), \
+                patch("netfix.residential_proxy.proxy_bridge.stop_bridge") as stop, \
+                patch("netfix.residential_proxy._write_apply_journal"):
+            recovered = recover_stale_bridge(
+                confirmed=True,
+                confirmation=BRIDGE_RECOVERY_CONFIRMATION,
+            )
+
+        self.assertFalse(recovered["ok"])
+        self.assertEqual(recovered["status"], "recovery_failed")
+        stop.assert_not_called()
+
+    def test_confirmed_recovery_restores_a_matching_direct_system_apply(self):
+        owned = {
+            "ok": True,
+            "status": "healthy_system_apply",
+            "stale": False,
+            "recovery_available": False,
+            "system_points_to_netfix_apply": True,
+        }
+        entry = {
+            "id": "j-direct",
+            "profile_id": "p-direct",
+            "network_service": "Wi-Fi",
+            "backup": {"service": "Wi-Fi"},
+            "bridge": None,
+        }
+        with patch("netfix.residential_proxy.detect_stale_bridge", return_value=owned), \
+                patch("netfix.residential_proxy._read_apply_journal", return_value={"last_apply": entry}), \
+                patch("netfix.residential_proxy._restore_system_proxy_backup", return_value={"ok": True}) as restore, \
+                patch("netfix.residential_proxy.proxy_bridge.stop_bridge") as stop, \
+                patch("netfix.residential_proxy._write_apply_journal"):
+            recovered = recover_stale_bridge(
+                confirmed=True,
+                confirmation=BRIDGE_RECOVERY_CONFIRMATION,
+            )
+
+        self.assertEqual(recovered["status"], "recovered")
+        self.assertEqual(recovered["recovery_kind"], "stop_and_restore")
+        restore.assert_called_once_with({"service": "Wi-Fi"})
+        stop.assert_not_called()
 
     def test_restart_stale_bridge_restarts_same_loopback_port_without_system_proxy_write(self):
         stale = {

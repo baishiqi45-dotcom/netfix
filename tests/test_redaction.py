@@ -45,6 +45,15 @@ class TestRedaction(unittest.TestCase):
         self.assertIn("max_tokens_field", redacted)
         self.assertIn("max_completion_tokens", redacted)
 
+    def test_keeps_non_secret_route_signature_stable(self):
+        signature = "route:v1:0123456789abcdef"
+        redacted = redact_report({"meta": {"route_signature": signature}})
+
+        self.assertEqual(
+            redacted["redacted_report"]["meta"]["route_signature"],
+            signature,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

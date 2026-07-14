@@ -114,7 +114,7 @@ def _listeners() -> List[Dict[str, Any]]:
     return out
 
 
-def get_global_state() -> Dict[str, Any]:
+def get_global_state(include_public_ipv4: bool = True) -> Dict[str, Any]:
     """High-level network path summary."""
     iface = default_interface()
     return {
@@ -124,7 +124,7 @@ def get_global_state() -> Dict[str, Any]:
         "self_ipv4": interface_ipv4(iface) if iface else None,
         "self_ipv6": interface_ipv6s(iface) if iface else [],
         "has_ipv6_default_route": has_ipv6_default_route(),
-        "public_ipv4": current_ipv4(timeout=10),
+        "public_ipv4": current_ipv4(timeout=10) if include_public_ipv4 else None,
     }
 
 

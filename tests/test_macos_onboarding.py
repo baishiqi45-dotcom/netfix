@@ -9,6 +9,7 @@ PROXY_SETUP_VIEW = ROOT / "gui" / "macos" / "Sources" / "Views" / "ProxySetupVie
 PRIVACY_VIEW = ROOT / "gui" / "macos" / "Sources" / "Views" / "PrivacyDisclosureView.swift"
 DASHBOARD_VIEW = ROOT / "gui" / "macos" / "Sources" / "Views" / "DashboardView.swift"
 SETTINGS_VIEW = ROOT / "gui" / "macos" / "Sources" / "Views" / "SettingsView.swift"
+PROXY_SETUP_WORKFLOW = ROOT / "gui" / "macos" / "Sources" / "ProxySetupWorkflow.swift"
 
 
 def test_welcome_skip_still_shows_privacy_disclosure_before_completion():
@@ -34,6 +35,7 @@ def test_proxy_setup_does_not_claim_client_detected_when_environment_has_no_clie
 
 def test_proxy_setup_exposes_one_paste_proxy_onboarding_path():
     proxy_setup = PROXY_SETUP_VIEW.read_text(encoding="utf-8")
+    workflow = PROXY_SETUP_WORKFLOW.read_text(encoding="utf-8")
 
     assert "你有合法代理参数吗？有的话复制粘贴" in proxy_setup
     assert "TextEditor(text: $proxyInput)" in proxy_setup
@@ -43,12 +45,13 @@ def test_proxy_setup_exposes_one_paste_proxy_onboarding_path():
     assert "showProxyDeployConfirmation" in proxy_setup
     assert "applyProxyDryRun(profileID: profile.id, mode: \"system\")" in proxy_setup
     assert "applyProxyProfile(profileID: profile.id, mode: \"system\", confirmed: true" in proxy_setup
-    assert "importProxyPreview(input: proxyInput" in proxy_setup
-    assert "saveProxyProfile(input: proxyInput, startMonitor: true" in proxy_setup
+    assert "ProxySetupWorkflow(client: client).validateAndSave" in proxy_setup
+    assert "validationReceipt" in workflow
+    assert "missingValidationReceipt" in workflow
     assert "密码保存到本机密码库" in proxy_setup
     assert "去你的代理服务后台，复制一整行连接信息" in proxy_setup
     assert "不要只复制出口 IP" in proxy_setup
-    assert "点下面“开始使用代理”才会生效" in proxy_setup
+    assert "点下面「开始使用代理」才会改变网络设置" in proxy_setup
     assert "NSApp.sendAction(#selector(AppDelegate.showProxySettings)" not in proxy_setup
     save_fn = proxy_setup.split("private func saveProxyInput() async", 1)[1].split("private func bindClient()", 1)[0]
     assert "onContinue()" not in save_fn
@@ -70,9 +73,8 @@ def test_macos_primary_ui_does_not_expose_tier_language():
 def test_dashboard_header_shows_plain_proxy_usage_state():
     dashboard = DASHBOARD_VIEW.read_text(encoding="utf-8")
 
-    assert "viewModel.proxyUsageLabel" in dashboard
-    assert "代理状态：未使用 Netfix 代理" in dashboard
-    assert "代理状态：正在使用 Netfix 代理" in dashboard
-    assert 'lifecycle.status == "running_system"' in dashboard
-    assert "systemPointsToBridge == true" in dashboard
-    assert "refreshProxyUsage()" in dashboard
+    assert "currentStatusSection" in dashboard
+    assert "state.routeLabel" in dashboard
+    assert "其他代理正在使用" in dashboard
+    assert "viewModel.proxyUsageLabel" not in dashboard
+    assert "dashboardStore.refresh()" in dashboard

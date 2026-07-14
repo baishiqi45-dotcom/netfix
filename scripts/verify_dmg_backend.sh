@@ -2,8 +2,9 @@
 # Verify a DMG contains a runnable Netfix.app bundled backend.
 set -euo pipefail
 
-DMG_PATH="${1:-gui/macos/.build/Netfix-0.2.0.dmg}"
-REQUIRE_RUNTIME="${NETFIX_REQUIRE_BUNDLED_RUNTIME:-false}"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+VERSION="$(python3 "${REPO_ROOT}/scripts/release_manifest.py" version --repo-root "${REPO_ROOT}")"
+DMG_PATH="${1:-${REPO_ROOT}/gui/macos/.build/Netfix-${VERSION}.dmg}"
 
 if [[ ! -f "${DMG_PATH}" ]]; then
     echo "DMG not found: ${DMG_PATH}" >&2
@@ -13,6 +14,7 @@ fi
 MNT="$(mktemp -d /tmp/netfix-dmg-backend.XXXXXX)"
 SERVER_PID=""
 SERVER_LOG="$(mktemp /tmp/netfix-dmg-backend-log.XXXXXX)"
+RUNTIME_HOME="$(mktemp -d /tmp/netfix-dmg-backend-home.XXXXXX)"
 
 cleanup() {
     if [[ -n "${SERVER_PID}" ]]; then
@@ -43,6 +45,7 @@ cleanup() {
     fi
     rmdir "${MNT}" >/dev/null 2>&1 || true
     rm -f "${SERVER_LOG}"
+    rm -rf "${RUNTIME_HOME}"
 }
 trap cleanup EXIT
 
@@ -56,30 +59,11 @@ MCP_SERVER="${APP}/Contents/Resources/netfix/mcp_server.py"
 test -d "${APP}/Contents"
 test -f "${MANIFEST}"
 test -f "${MCP_SERVER}"
+test -x "${BACKEND}"
 
-python3 - "${MANIFEST}" "${REQUIRE_RUNTIME}" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-runtime = manifest.get("backend_runtime", {})
-require_runtime = sys.argv[2].lower() in {"1", "true", "yes"}
-if require_runtime and not (runtime.get("bundled_backend") or runtime.get("bundled_python")):
-    raise SystemExit("manifest does not prove a bundled runtime")
-if require_runtime and not runtime.get("bundled_runtime_required"):
-    raise SystemExit("manifest does not record bundled_runtime_required=true")
-print(json.dumps({
-    "ok": True,
-    "bundled_backend": bool(runtime.get("bundled_backend")),
-    "bundled_python": bool(runtime.get("bundled_python")),
-    "bundled_runtime_required": bool(runtime.get("bundled_runtime_required")),
-}, ensure_ascii=False))
-PY
-
-if [[ "${REQUIRE_RUNTIME}" == "1" || "${REQUIRE_RUNTIME}" == "true" ]]; then
-    test -x "${BACKEND}"
-fi
+python3 "${REPO_ROOT}/scripts/release_manifest.py" verify \
+    --app-bundle "${APP}" \
+    --manifest "${MANIFEST}"
 
 MCP_JSON="$(cd /tmp && printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"dmg-smoke","version":"1.0"}}}' | python3 "${MCP_SERVER}")"
 MCP_JSON="${MCP_JSON}" python3 - <<'PY'
@@ -99,7 +83,7 @@ PY
 
 if [[ -x "${BACKEND}" ]]; then
     "${BACKEND}" --version >/dev/null
-    "${BACKEND}" server --host 127.0.0.1 --port 0 --timeout 30 >"${SERVER_LOG}" 2>&1 &
+    HOME="${RUNTIME_HOME}" "${BACKEND}" server --host 127.0.0.1 --port 0 --timeout 30 >"${SERVER_LOG}" 2>&1 &
     SERVER_PID="$!"
     PORT=""
     TOKEN=""

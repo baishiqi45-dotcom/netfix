@@ -4,6 +4,7 @@ import AppKit
 /// 首次启动的代理设置页。
 struct ProxySetupView: View {
     @ObservedObject var backend: Backend
+    @ObservedObject var dashboardStore: DashboardStateStore
     var onContinue: () -> Void
     var onSkip: () -> Void
 
@@ -20,10 +21,13 @@ struct ProxySetupView: View {
         ProxyValidationTargetProfile(id: "ai_dev", label: "AI 与开发工具", description: nil, probes: nil),
     ]
     @State private var proxyPreview: ProxyImportPreviewResponse?
+    @State private var proxyParseResult: ProxyParseResponse?
+    @State private var proxyValidateResult: ProxyValidateResponse?
     @State private var proxySaveStatus: String?
     @State private var savedProxyProfile: ProxyProfile?
     @State private var proxyDeployPlan: ProxyApplyPlan?
     @State private var showProxyDeployConfirmation = false
+    @State private var showProxyRecoveryConfirmation = false
     @State private var isProxyWorking = false
 
     var body: some View {
@@ -31,6 +35,7 @@ struct ProxySetupView: View {
             Image(systemName: "network.badge.shield.half.filled")
                 .font(.system(size: 46))
                 .foregroundStyle(.blue)
+                .accessibilityHidden(true)
 
             VStack(spacing: 10) {
                 Text("添加你的代理")
@@ -80,6 +85,7 @@ struct ProxySetupView: View {
                     Text("SOCKS5").tag("socks5h")
                 }
                 .pickerStyle(.segmented)
+                .accessibilityHint("不确定时保持自动判断")
 
                 Picker("检测目标", selection: $proxyTargetProfile) {
                     ForEach(proxyValidationTargets) { target in
@@ -88,6 +94,7 @@ struct ProxySetupView: View {
                 }
                 .pickerStyle(.segmented)
                 .help("默认选「通用连通性」；只有当你需要检查 GitHub / OpenAI / DeepSeek / Kimi / MiniMax 时再选「AI 与开发工具」。")
+                .accessibilityHint("选择你最关心的网络用途")
 
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $proxyInput)
@@ -97,6 +104,8 @@ struct ProxySetupView: View {
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(Color.secondary.opacity(0.25))
                         )
+                        .accessibilityLabel("代理连接参数")
+                        .accessibilityHint("粘贴包含地址、端口、用户名和密码的完整一行")
                     if proxyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text("例如 proxy.example.com:8001:用户名:密码\n也支持 http:// 或 socks5h:// 链接")
                             .font(.caption2)
@@ -161,6 +170,15 @@ struct ProxySetupView: View {
                     }
                     .font(.caption)
                 }
+                if dashboardStore.state?.resolvedSecondaryActionTarget == .staleBridgeRecovery {
+                    Button(role: .destructive) {
+                        showProxyRecoveryConfirmation = true
+                    } label: {
+                        Label("停止使用并恢复原设置", systemImage: "stop.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!backend.isReady || isProxyWorking)
+                }
             }
             .padding()
             .background(Color(nsColor: .controlBackgroundColor))
@@ -191,6 +209,7 @@ struct ProxySetupView: View {
         .frame(minWidth: 460, minHeight: 560)
         .task {
             bindClient()
+            await dashboardStore.refresh()
             await loadEnvironment()
         }
         .onChange(of: backend.state) { _ in
@@ -207,6 +226,14 @@ struct ProxySetupView: View {
         } message: {
             Text(proxyDeploymentConfirmationText())
         }
+        .confirmationDialog("停止使用代理？", isPresented: $showProxyRecoveryConfirmation, titleVisibility: .visible) {
+            Button("停止并恢复", role: .destructive) {
+                Task { await recoverProxyBridge() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("这会停止 Netfix 代理，并恢复使用代理前的网络设置。")
+        }
     }
 
     private func previewProxyInput() async {
@@ -215,8 +242,38 @@ struct ProxySetupView: View {
         proxySaveStatus = nil
         savedProxyProfile = nil
         do {
-            proxyPreview = try await client.importProxyPreview(input: proxyInput, limit: 20, protocolHint: proxyProtocolHint)
+            let parsed = try await client.parseProxy(
+                input: proxyInput,
+                protocolHint: proxyProtocolHint
+            )
+            guard parsed.ok else {
+                throw ProxySetupWorkflowError.parseFailed(
+                    parsed.errors?.joined(separator: "、") ?? "格式不正确"
+                )
+            }
+            proxyParseResult = parsed
+            let validation = try await client.validateProxy(
+                input: proxyInput,
+                timeout: 10,
+                includeIdentity: true,
+                targetProfile: proxyTargetProfile,
+                protocolHint: proxyProtocolHint
+            )
+            proxyValidateResult = validation
+            proxyPreview = nil
+            if validation.ok && validation.proxyCheck?.status == "ok" {
+                let latency = validation.proxyCheck?.latencyMs.map { "，延迟 \($0)ms" } ?? ""
+                proxySaveStatus = "检查通过\(latency)。还没有保存或启用。"
+            } else {
+                throw ProxySetupWorkflowError.validationFailed(
+                    validation.errors?.joined(separator: "、")
+                        ?? validation.proxyCheck?.error
+                        ?? "无法连通"
+                )
+            }
         } catch {
+            proxyParseResult = nil
+            proxyValidateResult = nil
             proxySaveStatus = "失败：\(error.localizedDescription)"
         }
         isProxyWorking = false
@@ -225,40 +282,48 @@ struct ProxySetupView: View {
     private func saveProxyInput() async {
         guard let client = client else { return }
         isProxyWorking = true
-        proxySaveStatus = "正在保存到本机密码库并启动健康监控，暂不改系统网络…"
+        proxySaveStatus = "正在识别并检查这组代理，通过后才会保存…"
         savedProxyProfile = nil
         do {
-            let response = try await client.saveProxyProfile(input: proxyInput, startMonitor: true, targetProfile: proxyTargetProfile, protocolHint: proxyProtocolHint)
-            if response.ok {
-                savedProxyProfile = response.profile
-                proxySaveStatus = response.monitor?.running == true
-                    ? "已保存并启动健康监控。点下面“开始使用代理”才会生效。"
-                    : "已保存到本机，密码已写入本机密码库。点下面“开始使用代理”才会生效。"
-            } else {
-                let card = UserFacingMessages.render(
-                    code: response.reasonCode,
-                    message: response.error ?? "无法保存代理"
-                )
-                proxySaveStatus = "\(card.headline)\n\(card.nextStep)"
-            }
+            let result = try await ProxySetupWorkflow(client: client).validateAndSave(
+                input: proxyInput,
+                protocolHint: proxyProtocolHint,
+                targetProfile: proxyTargetProfile,
+                startMonitor: true
+            )
+            proxyParseResult = result.parsed
+            proxyValidateResult = result.validation
+            proxyPreview = nil
+            savedProxyProfile = result.savedProfile
+            proxySaveStatus = result.saveResponse.monitor?.running == true
+                ? "检查通过，已保存并开始持续检查。点下面「开始使用代理」才会改变网络设置。"
+                : "检查通过，已保存到这台 Mac。点下面「开始使用代理」才会改变网络设置。"
+            await dashboardStore.refresh()
         } catch {
+            proxyParseResult = nil
+            proxyValidateResult = nil
+            savedProxyProfile = nil
             let card = UserFacingMessages.classify(error.localizedDescription)
-            proxySaveStatus = "\(card.headline)\n\(card.nextStep)"
+            proxySaveStatus = "失败：\(card.headline)\n\(card.nextStep)"
         }
         isProxyWorking = false
     }
 
     private func prepareProxyDeployment(_ profile: ProxyProfile) async {
         guard let client = client else { return }
+        guard profile.verificationStatus == "verified", profile.canApply == true else {
+            proxySaveStatus = "这条代理还没通过检查，不会启用。请重新检查并保存。"
+            return
+        }
         isProxyWorking = true
-        proxySaveStatus = "正在生成部署预览，不会修改网络设置…"
+        proxySaveStatus = "正在准备启用预览，不会修改网络设置…"
         do {
             proxyDeployPlan = try await client.applyProxyDryRun(profileID: profile.id, mode: "system")
             proxySaveStatus = nil
             showProxyDeployConfirmation = true
         } catch {
             proxyDeployPlan = nil
-            proxySaveStatus = "失败：无法生成部署预览。\(error.localizedDescription)"
+            proxySaveStatus = "失败：无法准备启用预览。\(error.localizedDescription)"
         }
         isProxyWorking = false
     }
@@ -270,12 +335,17 @@ struct ProxySetupView: View {
         do {
             let response = try await client.applyProxyProfile(profileID: profile.id, mode: "system", confirmed: true, targetProfile: proxyTargetProfile)
             if response.ok && response.status == "applied" {
+                if response.verify?.ok == false {
+                    proxySaveStatus = "失败：启用后的网络检查未通过，Netfix 已停止继续使用这条线路。"
+                    await dashboardStore.refresh()
+                    isProxyWorking = false
+                    return
+                }
                 if response.applied?.scope == "loopback_bridge" {
-                    let port = response.bridge?.listenPort.map(String.init) ?? "?"
-                    proxySaveStatus = "已部署，本机转发端口 \(port)。请保持 Netfix 打开；不用时到设置里点“恢复原来的网络设置”。"
+                    proxySaveStatus = "已开始使用代理。请保持 Netfix 打开；不用时点「停止使用并恢复原设置」。"
                 } else {
                     let service = response.networkService ?? "当前网络服务"
-                    proxySaveStatus = "已部署到 \(service)。不用时到设置里点“恢复原来的网络设置”。"
+                    proxySaveStatus = "已在 \(service) 开始使用代理。不用时点「停止使用并恢复原设置」。"
                 }
             } else if response.status == "pending_confirmation" {
                 proxySaveStatus = "还需要确认。请再点一次“开始使用代理”。"
@@ -285,6 +355,27 @@ struct ProxySetupView: View {
         } catch {
             proxySaveStatus = "失败：\(error.localizedDescription)"
         }
+        await dashboardStore.refresh()
+        isProxyWorking = false
+    }
+
+    private func recoverProxyBridge() async {
+        guard let client else { return }
+        isProxyWorking = true
+        proxySaveStatus = "正在停止代理并恢复原设置…"
+        do {
+            let response = try await client.recoverProxyBridge(confirmed: true)
+            if response.ok && response.status == "recovered" {
+                proxySaveStatus = "已停止使用代理，并恢复原来的网络设置。"
+            } else if response.ok && response.status == "no_recovery_needed" {
+                proxySaveStatus = "失败：当前没有执行恢复。代理可能仍在使用中，请保持 Netfix 运行并重新读取状态。"
+            } else {
+                proxySaveStatus = "失败：\(response.error ?? response.status ?? "恢复没有完成")"
+            }
+        } catch {
+            proxySaveStatus = "失败：\(error.localizedDescription)"
+        }
+        await dashboardStore.refresh()
         isProxyWorking = false
     }
 

@@ -106,7 +106,7 @@ def test_macos_ai_settings_has_plain_minimax_setup_path():
     assert 'Text("高级与开发者")' in view
     assert "让 AI 帮我看诊断报告" in view
     assert "这是可选的 AI 看报告功能" in view
-    assert "没有 API Key 也能诊断、部署代理和处理 IPv6" in view
+    assert "没有 AI 密钥也能检查网络、使用代理和处理 IPv6" in view
     assert "用 MiniMax 配置" in view
     assert "prepareRecommendedLLMProvider(\"minimax\")" in view
     assert "可选：AI 密钥（只用于 AI 看报告）" in view
@@ -119,5 +119,5 @@ def test_macos_ai_settings_has_plain_minimax_setup_path():
     assert "#selector(AppDelegate.showAISettings)" in dashboard
     assert "showProxySettings" in delegate
     assert 'UserDefaults.standard.set("proxy", forKey: "netfix.settings.selectedTab")' in delegate
-    assert 'NSMenuItem(title: "部署代理…", action: #selector(showProxySettings)' in delegate
+    assert 'NSMenuItem(title: "代理设置…", action: #selector(showProxySettings)' in delegate
     assert "#selector(AppDelegate.showProxySettings)" in dashboard

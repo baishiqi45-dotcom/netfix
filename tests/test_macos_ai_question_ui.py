@@ -13,7 +13,8 @@ def test_macos_dashboard_has_consent_gated_ai_question_sheet_with_image_picker()
     models = MODELS.read_text(encoding="utf-8")
 
     assert "AIQuestionSheet" in source
-    assert "看不懂结果？让 AI 解释一下" in source
+    assert "生成简明说明" in source
+    assert "看不懂结果？让 AI 解释一下" not in source
     assert "aiAssistantSection" not in source
     assert ".buttonStyle(.borderless)" in source
     assert "下一步怎么处理？" in source
@@ -32,8 +33,8 @@ def test_macos_dashboard_has_consent_gated_ai_question_sheet_with_image_picker()
     assert "留空也可以，Netfix 会直接解释当前诊断报告" in source
     assert "AI 设置" in source
     assert "showAISettings" in source
-    assert "这只影响 AI 看报告，不影响诊断和代理部署" in source
-    assert "选择供应商并粘贴 API Key" in source
+    assert "这只影响 AI 看报告，不影响检查网络、使用代理或恢复网络设置" in source
+    assert "选择供应商并填写 AI 密钥" in source
     assert "4_500_000" in source
     assert "data:\\(mime);base64" in source
     assert "Toggle(isOn: $uploadConfirmed)" in source
@@ -41,7 +42,7 @@ def test_macos_dashboard_has_consent_gated_ai_question_sheet_with_image_picker()
     assert "imageDataURLs.isEmpty ? \"explain\" : \"image_question\"" in source
     assert "fallbackReasonLabel ?? result.fallbackReason" in source
     assert "fallbackReasonLabel" in models
-    assert "AI 给出的解释" in source
+    assert "AI 解释" in source
     assert "Netfix 本地解释" in source
     assert "技术详情" in source
     assert "脱敏报告指纹" in source
@@ -51,12 +52,15 @@ def test_macos_dashboard_has_consent_gated_ai_question_sheet_with_image_picker()
 def test_macos_dashboard_surfaces_proxy_deployment_without_ai_api_requirement():
     source = DASHBOARD.read_text(encoding="utf-8")
 
-    assert "proxyDeploySection" in source
-    assert 'Label("粘贴代理参数", systemImage: "point.3.connected.trianglepath.dotted")' in source
-    assert "不需要 API Key 也能用" in source
-    assert "从服务商后台复制一整行" in source
-    assert 'Label("去粘贴代理参数", systemImage: "square.and.arrow.down")' in source
-    assert 'Label("问 AI", systemImage: "sparkles")' in source
+    assert "currentStatusSection" in source
+    assert "DashboardHomePresentation" in source
+    assert "proxyDeploySection" not in source
+    assert "case .proxySetup" in source
+    assert "state.primaryActionLabel" in source
+    assert "粘贴代理参数" in source
+    assert "不需要 API Key 也能用" not in source
+    assert "外部系统代理" not in source
+    assert "从服务商后台复制一整行" not in source
     assert "aiQuestionContext = .proxy" in source
     assert 'Button("我该复制什么？")' not in source
     assert "openProxySettings()" in source

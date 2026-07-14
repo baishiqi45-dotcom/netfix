@@ -114,6 +114,32 @@ netfix 没覆盖的场景才手写命令。优先顺序：
 
 ---
 
+## P0 App 发布与文档契约
+
+根目录 README 只面向 App 用户，首段只说明：粘贴用户已有的 HTTP/SOCKS 参数 → 先验证 → 用户确认后安全启用 → 随时停止并恢复。不要在 README 承诺“一键诊断”或“重启即可恢复”，也不要把 CLI、HTTP API、MCP 命令重新放回 README；这些接口统一维护在 `docs/developer/interfaces.md`。
+
+macOS 候选构建必须满足：
+
+- `gui/macos/build_app.sh` 自动使用仓库或本机已经存在的 PyInstaller 构建独立 `netfix-backend`，不安装插件或构建依赖。
+- `Netfix.app/Contents/MacOS/netfix-backend` 必须存在且可执行；运行时优先启动这个 bundle 内 backend，候选 App 不依赖系统 Python。
+- `pyproject.toml` 是唯一版本来源，脚本和产物名不得另写硬编码版本。
+- `release-manifest.json` 必须写入 `git_sha`、`dirty`、`source_fingerprint`、`backend_sha256`、`app_executable_sha256`、`build_id`、`built_at`、`version`。
+- backend 或 App 主可执行文件缺失、不可执行、SHA-256 不符时，构建和 DMG 校验必须失败。
+- 当前 P0 产物只能标为**未签名、未公证候选**：没有 Developer ID 签名，也没有 Apple 公证。backend 的 ad-hoc 本地签名不等于发行签名。
+- 构建脚本不得退出、启动或安装 App，也不得创建或修改桌面链接。
+
+发布构建入口：
+
+```bash
+gui/macos/build_app.sh --release-candidate
+python3 scripts/release_manifest.py verify \
+  --app-bundle gui/macos/.build/Netfix.app \
+  --manifest gui/macos/.build/Netfix.app/Contents/Resources/release-manifest.json \
+  --repo-root .
+```
+
+---
+
 ## HTTP API 与 MCP 服务
 
 netfix 也提供两种机器可消费的接口：
@@ -134,6 +160,10 @@ HTTP 端点：
 - `GET /jobs/<id>`
 - `GET /report/latest`
 - `GET /services/groups`
+- `GET /dashboard/state`
+- `GET /llm/providers`
+- `POST /settings/llm`
+- `POST /explain_llm`
 
 MCP 暴露的工具包括 `netfix_codex`、`netfix_services`、`netfix_triage`、`netfix_doctor`、`netfix_report`、`netfix_kb_query`、`netfix_fix_issue`、`netfix_rollback`、`netfix_proxy_switch`。
 
@@ -141,9 +171,27 @@ Agent 优先用这些更清楚的新工具：
 
 - `netfix_list_fixes`：列出当前已知修复项、Tier、风险和是否需要确认。
 - `netfix_dry_run_fix`：只预演一个修复，不改系统设置。
-- `netfix_apply_fix`：真正执行修复。Tier 2 必须传 `confirmed=true` 和 `magic_word=APPLY_SYSTEM_FIX`。
+- `netfix_apply_fix`：真正执行修复。Tier 2 必须传 `confirmed=true` 和 `confirmation=<见下表>`。`magic_word` 是 `confirmation` 的 deprecated alias，优先用 `confirmation`。
 - `netfix_evidence_chain`：给出“为什么判断这个根因”的诊断证据链。
 - `netfix_sanitized_report`：返回已脱敏报告，适合贴 issue 或发给 AI。
+
+#### Confirmation 字面值清单（按触发条件）
+
+任意 `Tier ≥ 2` 操作必须传对应 magic phrase；HTTP/MCP/CLI 三处用法不一致时以代码为准：
+
+| Confirmation 字面值 | 触发路径 | 风险等级 |
+|---|---|---|
+| `APPLY_SYSTEM_FIX` | `POST /fixes/execute`, `netfix_apply_fix` | Tier 2：恢复系统网络 |
+| `TEST_LLM_PROVIDER` | `POST /llm/test` | Tier 1：触发一次 LLM 测试调用 |
+| `TEST_LLM_CHAIN` | `POST /llm/chain-test` | Tier 1：触发 LLM 链路测试 |
+| `APPLY_PROXY_PROFILE` | `POST /proxy/<id>/apply` | Tier 2：把代理写进系统网络 |
+| `ROLLBACK_PROXY_PROFILE` | `POST /proxy/profiles/rollback` | Tier 2：回滚上次代理部署 |
+| `RESTORE_STALE_PROXY_BRIDGE` | `POST /proxy/bridge/recover` | Tier 2：从 stale 状态恢复 |
+| `RESTART_STALE_PROXY_BRIDGE` | `_record_startup_bridge_check` → `restart_stale_bridge` | Tier 2：重启桥接 |
+| `IMPORT_DEEPSEEK_SIDECAR_KEY` | `POST /llm/import-deepseek-sidecar-key` | Tier 1：写入 Keychain |
+| `DELETE_NETFIX_LOCAL_DATA` | `POST /data/clear` | Tier 2：清空本地数据 |
+
+新增 confirmation 字面值时必须同步：① `netfix/api.py` / `residential_proxy.py` / `deepseek_sidecar.py` 的常量；② 本表；③ `tests/test_docs_contract.py` 的字面值断言。
 
 旧的 `netfix_fix_issue` 仍保留兼容，但新 Agent 应该优先 `list_fixes → dry_run_fix → apply_fix`。
 
@@ -159,6 +207,12 @@ Agent 优先用这些更清楚的新工具：
 ./scripts/install_mcp.sh --codex
 ```
 
+远程源码注册、App 候选安装和发布预检分别由以下脚本维护；这些属于开发者/Agent 入口，不回填根 README：
+
+- `scripts/install_codex_mcp_from_github.sh`
+- `scripts/install_mac_app_from_github.sh`
+- `scripts/release_preflight.py`
+
 也可以预览将要执行的注册命令，不写入任何 Agent 配置：
 
 ```bash
@@ -170,7 +224,9 @@ Agent 优先用这些更清楚的新工具：
 Minimax 没有官方 MCP client，但模型支持 Function Calling。把 `netfix/mcp_server.py` 的 `tools/list` 输出转成 OpenAI-compatible functions，让模型在需要时调用本地 HTTP API：
 
 ```bash
+# NETFIX_API_TOKEN 可从 App 或 ~/.netfix/api-token-<pid>.txt 获取
 curl -s http://127.0.0.1:8765/run \
+  -H "X-Netfix-Token: $NETFIX_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"command":["codex"],"timeout":15}'
 ```

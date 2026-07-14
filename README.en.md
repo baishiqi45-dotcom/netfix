@@ -2,120 +2,26 @@
 
 [中文 README](README.md)
 
-![Netfix local-first macOS network rescue kit](assets/github/hero.en.png)
+![Netfix - paste, verify, and safely enable an existing proxy](assets/github/hero.en.png)
 
 ![license: MIT](https://img.shields.io/badge/license-MIT-green)
 ![platform: macOS](https://img.shields.io/badge/platform-macOS-blue)
 ![privacy: local first](https://img.shields.io/badge/privacy-local--first-0f766e)
 
-> **Bought a proxy but can't configure your Mac? Paste the connection line, let Netfix precheck it, then start using it with one click.**
+> **Netfix handles HTTP/HTTPS/SOCKS proxy credentials you already have: paste the connection details, verify them first, then enable the proxy safely after explicit confirmation; you can stop it and restore the previously saved network settings at any time.**
 
-Netfix is a small macOS utility: paste the connection parameters from your proxy provider, it tests whether they work, saves them to the macOS Keychain, and only then asks you to confirm whether this Mac should start using the proxy. It backs up your original network settings before changing anything, so you can restore them in one click.
+## Get Started
 
-When Codex, ChatGPT, GitHub, or any API client suddenly stops connecting, **Netfix also tells you which layer broke**:
-DNS, system proxy, the proxy app you are running (xray / sing-box / mihomo / Clash), IPv6, TLS, the target service — or the proxy parameters you pasted yourself.
-No API key is required. If you do configure one, the model only ever sees an on-device-redacted version of the diagnostic.
+The current macOS candidate is **not Developer ID signed and not notarized**. It is for technical testing only and must not be presented as a finished installer for general users. If macOS blocks it, use **Open Anyway** in System Settings -> Privacy & Security.
 
-## Get started in 60 seconds
+The system requirement is macOS 13 or newer.
 
-> ⚠️ The current DMG is the **v0.2.0-qa.1 preview build, unsigned and not notarized**. On first launch, macOS will block it; open System Settings → Privacy & Security → Open Anyway. This is suitable for technical testing, not a finished non-technical public installer.
+1. Drag `Netfix.app` from the candidate DMG into Applications. If macOS blocks the first launch, confirm it in System Settings -> Privacy & Security.
+2. Copy HTTP, HTTPS, or SOCKS5 connection parameters from a proxy service you legally own or operate, then paste them into Netfix.
+3. Verify the connection first. Netfix only enables the proxy after verification succeeds and you explicitly confirm the change.
+4. When finished, stop the proxy in the app and restore the network settings saved before enablement.
 
-Prepare the HTTP/SOCKS5 connection parameters from your proxy provider dashboard, such as `host:port:username:password`. These are usually found under "Connection Info", "Endpoint", or "My Subscription" in the provider dashboard — copy the HTTP or SOCKS5 line, not the current exit IP shown on an IP lookup page. Netfix is not a Clash client and does not import subscriptions; `ss://`, `vmess://`, and Clash/sing-box subscription links are not supported yet.
-
-Requirements: macOS 13 or newer; Apple Silicon and Intel Macs are both in scope; macOS may ask for your local password when system proxy settings are changed.
-
-```bash
-# Preview installer actions without installing or changing configuration
-curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash -s -- --dry-run
-
-# Technical testers: install Netfix.app (QA build, unsigned)
-curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
-
-# Uninstall the local app
-curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash -s -- --uninstall
-```
-
-From source:
-
-```bash
-pip install -e .
-python3 netfix.py codex --json
-```
-
-## How this differs
-
-| Tool | What it is | What Netfix adds |
-|---|---|---|
-| **ClashX / Surge / Shadowrocket / sing-box** | Client apps for an already-working proxy. You bring the node, they route traffic. | Netfix tells you *whether the proxy can exist* on your Mac right now, prechecks before applying, and rolls back if it breaks. |
-| **Activity Monitor / `netstat`** | Generic process and port inspection. | One report covers DNS, system proxy, proxy core, IPv6, TLS, and target service in parallel and labels the failed layer. |
-| **Random `curl` / `ping` from a chatbot** | Manual probes the model improvises. | Structured JSON, tiered fixes with confirmation, automatic rollback, and mandatory redaction before any optional cloud call. |
-| **Network monitoring widgets** | Live throughput / signal display. | Recovery-oriented: paste → precheck → deploy → monitor → restore. |
-
-## What it does NOT do
-
-- **No proxy selling. No built-in nodes. No promises about third-party quality.** Netfix only parses, prechecks, stores, deploys, monitors, and restores credentials **you already have**.
-- **Strict compliance with third-party platform account, risk-control, geo, and abuse rules; no circumvention.**
-- **No** automatic leak of your proxy passwords, API keys, raw reports, QR codes, or cookies to the cloud, shell history, screenshots, or GitHub Issues.
-
-## Current Use
-
-This repository is ready for source-first open-source review and local execution. A public signed `.dmg` is not ready yet because Developer ID signing and notarization are still missing. Do not market the local candidate build as an official external download.
-
-One-line Codex MCP install for other users. This downloads the installer from `main`, and the installer downloads `main` source by default. Use `NETFIX_REF` / `NETFIX_REF_KIND=tags` if you want to pin a release tag:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_codex_mcp_from_github.sh | bash
-```
-
-The command downloads source to `~/.netfix/netfix-codex-mcp-source`, runs an MCP initialization check, and registers `codex mcp add netfix -- python3 .../netfix/mcp_server.py`. Restart Codex or open a new Codex thread afterwards. It does not copy proxy passwords or API keys.
-
-One-line local macOS app install. This downloads the installer from `main`; the installer currently downloads the unsigned QA DMG from `v0.2.0-qa.1`:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/baishiqi45-dotcom/netfix/main/scripts/install_mac_app_from_github.sh | bash
-```
-
-The command downloads the DMG, verifies SHA256, installs `Netfix.app` to `~/Applications`, opens the app, smoke-checks the bundled MCP server, registers Netfix MCP for Codex when the Codex CLI exists, and prints stdio config for Kimi / Claude / Cursor / MiniMax-compatible local agents. The current QA DMG is not Developer ID signed or notarized, so it is suitable for technical testers, not finished non-technical distribution.
-
-From a source checkout:
-
-```bash
-python3 netfix.py codex
-python3 netfix.py codex --json
-python3 netfix.py server --host 127.0.0.1 --port 8765
-```
-
-The third command starts the local Web dashboard at `http://127.0.0.1:8765/`. Do not open `gui/web/index.html` directly through `file://`; that page has no backend.
-
-Build the local macOS app:
-
-```bash
-cd gui/macos
-swift build
-./build_app.sh
-open .build/Netfix.app
-```
-
-The intended user entry is `Netfix.app`: double-click, let the app start the local engine, and use the UI instead of a terminal.
-
-![Netfix user path](assets/github/workflow.en.png)
-
-## Real cases
-
-`cases/` holds sanitized real scenarios; start from the [Case Index](cases/INDEX.md). The best first story is [9 pitfalls for a non-technical user deploying their first proxy](cases/2026-06-29-普通用户代理部署体验审查.md). It explains why Netfix is shaped as paste → precheck → deploy → rollback, instead of making users guess system proxy settings, IPv6 behavior, exit IPs, and password storage.
-
-A few more worth quoting:
-
-- **[Codex reports unreachable — turns out the API key expired](cases/20260617-1405-codex-reachable-needs-key.md)**: The network was fine; Netfix points away from the wrong suspect.
-- **[Healthy baseline snapshot](cases/2026-06-17-healthy-baseline.md)**: Before/after comparison for fast triage next time.
-
-New cases welcome. Use `cases/TEMPLATE.md`, read [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) before opening a PR.
-
-## What To Paste For Proxy Setup
-
-Do not paste the current exit IP from an IP lookup page. That is only a result, not a connection string.
-
-Paste the connection parameters from a proxy service you legally own or operate. Netfix accepts common forms:
+Common input formats:
 
 ```text
 socks5h://user:pass@proxy.example.com:1080
@@ -124,139 +30,28 @@ proxy.example.com:1080:user:pass
 host,port,username,password
 ```
 
-In the app, open Settings -> Proxy, paste the parameters, click Check whether this line works, then save them to this Mac. To route system apps through the saved profile, click Start using this proxy on this Mac. Authenticated HTTP/HTTPS/SOCKS proxies are bridged locally by Netfix; passwords go to macOS Keychain and are not written to shell history, logs, reports, screenshots, or release packages. Netfix backs up the original network settings before applying changes so you can restore them.
+Copy connection parameters from the provider dashboard, not the current exit IP shown by an IP lookup page. Netfix does not currently parse `ss://`, `vmess://`, or Clash/sing-box subscription links.
 
-Boundary: Netfix does not sell proxies, ship built-in nodes, promise provider quality, promise any specific exit quality, or help bypass third-party account, risk, geo, or abuse controls. It only parses, prechecks, stores, deploys, monitors, and restores credentials the user already has.
+Authenticated HTTP/HTTPS/SOCKS connections are forwarded locally by Netfix, while passwords remain in macOS Keychain.
 
-## FAQ
+![Netfix user path](assets/github/workflow.en.png)
 
-**Can I use it without an API key?**
-Yes. Diagnosis, local rule explanations, proxy precheck, save, apply, and restore work locally. API keys are only used when you explicitly enable optional cloud AI explanation.
+## Stop And Restore
 
-**Can it break my network?**
-Netfix backs up your previous system proxy settings before applying changes. Click Restore original network settings when you want to stop using the proxy.
+Netfix saves the current system network settings before enabling a proxy. To stop, use the app to disable the proxy and restore that saved state. Treat the state shown in the app as the result; restarting the Mac is not a recovery guarantee.
 
-**Where are proxy passwords and API keys stored?**
-Only in macOS Keychain. They are not written to logs, reports, screenshots, release packages, or GitHub Issues.
+## Safety Boundary
 
-**Which proxy formats are supported?**
-`host:port:user:pass`, `http://user:pass@host:port`, `socks5://user:pass@host:port`, and `host,port,user,pass`. `ss://`, `vmess://`, and Clash/sing-box subscription links are not supported yet.
+- **No proxy selling.** Netfix does not ship built-in nodes or promise provider or exit quality.
+- Proxy passwords belong in macOS Keychain and must not appear in logs, reports, screenshots, release packages, or GitHub Issues.
+- Every system proxy change requires user confirmation; a failed verification never enables the proxy automatically.
+- Netfix does not help bypass third-party account, risk-control, geographic, or abuse policies.
 
-## Optional AI Explanation
+## Project Material
 
-Netfix works without an AI API key. Local rules produce the first explanation. If you configure a provider, the cloud model only explains a redacted report.
+Technical testers who used the candidate installer can remove the local app with its `--uninstall` option; the installer source is [`scripts/install_mac_app_from_github.sh`](scripts/install_mac_app_from_github.sh).
 
-App path: Settings -> AI, choose DeepSeek, Kimi/Moonshot, MiniMax, Qwen, or a custom OpenAI-compatible provider, then save the key to Keychain.
-
-Environment variable path:
-
-```bash
-export NETFIX_LLM_API_KEY_DEEPSEEK="sk-..."
-python3 netfix.py explain --provider deepseek --json
-```
-
-DeepSeek is the default text explanation provider. Image question flows route to MiniMax, Kimi/Moonshot, or Qwen after explicit upload confirmation. Do not describe DeepSeek as a vision or screenshot model.
-
-## Connect Codex / Kimi / Claude / Cursor / MiniMax-compatible Local Agents
-
-Users who installed the app should not hunt for repository scripts:
-
-1. Open Netfix.
-2. Go to Settings -> AI Coding Assistant -> Copy for Codex, paste the command into a Codex terminal, then restart Codex.
-3. For Kimi, use Copy Kimi / generic config. Some current Kimi Code CLI versions do not expose `mcp add`; do not paste old commands. Use the generic stdio config in a Kimi/Agent host that supports MCP.
-4. For Claude Desktop / Cursor, copy the `mcp.json` snippet from the app and paste it into the matching MCP config file (paths are in [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md)).
-5. For MiniMax or any other local agent, use the same `command: python3` and `args` if the host supports MCP stdio. Netfix does not assume MiniMax has an official MCP client.
-
-Source checkout users can register Codex and detect Kimi support from the repository root:
-
-```bash
-./scripts/install_mcp.sh --all
-./scripts/install_mcp.sh --all --dry-run
-```
-
-Manual Codex registration:
-
-```bash
-codex mcp add netfix -- python3 "$(pwd)/netfix/mcp_server.py"
-codex mcp list
-```
-
-Kimi / Claude / Cursor / MiniMax-compatible MCP stdio config:
-
-```yaml
-name: netfix
-command: python3
-args:
-  - /Users/you/Applications/Netfix.app/Contents/Resources/netfix/mcp_server.py
-```
-
-The standard agent entry is:
-
-```bash
-python3 netfix.py codex --json
-```
-
-Agents should read `environment.active_profile`, `diagnostics`, `root_causes`, `fixes`, and `manual_steps`. Low-risk fixes may run directly. Any config-changing action must ask the user first. Manual-only steps should stay as checklists.
-
-## Features
-
-| Capability | User view | Developer surface |
-|---|---|---|
-| One-click diagnosis | Shows the failed layer and next step | `python3 netfix.py codex --json` |
-| Proxy paste deploy | Paste, precheck, save, deploy, restore | `proxy`, `proxy-monitor`, `proxy-switch` |
-| AI explanation | Optional cloud explanation after redaction | Local HTTP API / MCP |
-| Health maintenance | Route, IPv6, TLS, DNS, and service hints | `watch`, `report`, `logs` |
-| Agent integration | Copy Codex / Kimi / Claude / Cursor registration commands | `netfix/mcp_server.py` |
-| Rollback | Backup before config changes | `fix`, `rollback`, journal |
-
-## Safety Model
-
-- Local-first diagnosis and rule reasoning do not require an external LLM.
-- Low-risk fixes can run directly; config-changing fixes require explicit user confirmation.
-- Proxy passwords and API keys must not appear in reports, screenshots, logs, export packages, or GitHub Issues.
-- Image uploads are explicit; Netfix cannot automatically redact visible text inside image pixels.
-- Netfix is not a proxy provider and does not promise third-party service availability.
-
-## Open-Source Release State
-
-Use `scripts/source_export.py` to create a clean source snapshot before publication. It excludes old proxy credential packages, generated DMG/ZIP files, build outputs, and local runtime state. Publish `open-source-export/Netfix-0.2.0-source` rather than a private development workspace.
-
-Verification:
-
-```bash
-python3 -m pytest -q
-python3 scripts/source_export.py --zip --json
-python3 scripts/release_audit.py --scope workspace --root open-source-export/Netfix-0.2.0-source
-python3 scripts/release_audit.py --scope workspace --root .
-python3 scripts/release_preflight.py --with-dmg-smoke
-```
-
-If `release_audit` reports `tracked-release-artifact`, remove release artifacts from the git index without deleting local files:
-
-```bash
-git ls-files 'Netfix-*.dmg' 'Netfix-*.zip'
-git rm --cached Netfix-0.2.0.dmg Netfix-0.2.0-macos.zip
-python3 scripts/release_audit.py --scope workspace --root .
-```
-
-External binary distribution still requires Developer ID signing, notarization, clean-machine QA, legal review, and live provider smoke evidence.
-
-## Repository Map
-
-```text
-netfix/
-├── netfix.py              CLI entry
-├── netfix/                diagnosis, reasoning, fixes, API, MCP
-├── gui/macos/             SwiftUI local app
-├── gui/web/               local Web dashboard
-├── rules/                 services, symptoms, root-cause rules
-├── scripts/               release, audit, MCP installer scripts
-├── tests/                 Python / API / MCP / UI text tests
-├── assets/github/         Chinese and English GitHub visuals
-└── docs/github/           GitHub release and screenshot notes
-```
-
-If Netfix helped you identify a Mac network problem, starring the repo is the easiest way to follow the signed build, screenshots/GIFs, and new cases.
+Sanitized usage records are indexed in [Case Index](cases/INDEX.md). Engineering integration, source execution, build, and release verification are in the [developer documentation](docs/developer/interfaces.md). Read [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) before contributing.
 
 ## License
 

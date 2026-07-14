@@ -11,8 +11,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover?
     private var settingsWindowController: NSWindowController?
     let backend = Backend()
+    let dashboardStateStore = DashboardStateStore()
     private let healthMonitor = HealthMonitor()
-    private let bridgeStatusMenuItem = NSMenuItem(title: "桥接状态：未读取", action: nil, keyEquivalent: "")
+    private let bridgeStatusMenuItem = NSMenuItem(title: "网络状态：未读取", action: nil, keyEquivalent: "")
     private var bridgeStatusOverride: DiagnosticStatus?
     private var bridgeStatusTimer: Timer?
     private var lastBridgeNotificationKey: String?
@@ -61,6 +62,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
+            if backend.isReady {
+                Task { await dashboardStateStore.refresh() }
+            }
         }
     }
 
@@ -71,7 +75,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentSize = NSSize(width: 460, height: 620)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(
-            rootView: RootView(backend: backend, healthMonitor: healthMonitor)
+            rootView: RootView(
+                backend: backend,
+                healthMonitor: healthMonitor,
+                dashboardStore: dashboardStateStore
+            )
         )
         self.popover = popover
     }
@@ -83,18 +91,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showSettings() {
         if settingsWindowController == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 520, height: 400),
-                styleMask: [.titled, .closable, .miniaturizable],
+                contentRect: NSRect(x: 0, y: 0, width: 720, height: 640),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered,
                 defer: false
             )
             window.title = "Netfix 设置"
+            window.contentMinSize = NSSize(width: 520, height: 400)
             window.center()
-            window.contentViewController = NSHostingController(rootView: SettingsView(backend: backend))
+            window.contentViewController = NSHostingController(
+                rootView: SettingsView(
+                    backend: backend,
+                    dashboardStore: dashboardStateStore
+                )
+            )
             settingsWindowController = NSWindowController(window: window)
         }
         settingsWindowController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+        if backend.isReady {
+            Task { await dashboardStateStore.refresh() }
+        }
     }
 
     @objc func showAISettings() {
@@ -113,7 +130,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private enum BridgeQuitAction {
         case none
-        case rollback
         case recover
         case cancel
         case forceQuit
@@ -126,44 +142,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let client = APIClient(baseURL: url, apiToken: token)
-        do {
-            let state = try await client.proxyBridge()
-            switch bridgeQuitAction(for: state) {
-            case .none:
-                sender.reply(toApplicationShouldTerminate: true)
-            case .recover:
-                await confirmAndRecoverBeforeQuit(client: client, sender: sender)
-            case .rollback:
-                await confirmAndRollbackBeforeQuit(client: client, sender: sender)
-            case .cancel:
-                sender.reply(toApplicationShouldTerminate: false)
-            case .forceQuit:
-                sender.reply(toApplicationShouldTerminate: true)
-            }
-        } catch {
-            let shouldQuit = presentBridgeCheckFailedAlert(error.localizedDescription)
+        await dashboardStateStore.refresh()
+        guard dashboardStateStore.errorMessage == nil,
+              let state = dashboardStateStore.state else {
+            let shouldQuit = presentBridgeCheckFailedAlert(
+                dashboardStateStore.errorMessage ?? "暂时读不到当前状态。"
+            )
             sender.reply(toApplicationShouldTerminate: shouldQuit)
+            return
+        }
+        switch bridgeQuitAction(for: state) {
+        case .none:
+            sender.reply(toApplicationShouldTerminate: true)
+        case .recover:
+            await confirmAndRecoverBeforeQuit(client: client, sender: sender)
+        case .cancel:
+            sender.reply(toApplicationShouldTerminate: false)
+        case .forceQuit:
+            sender.reply(toApplicationShouldTerminate: true)
         }
     }
 
-    private func bridgeQuitAction(for state: ProxyBridgeResponse) -> BridgeQuitAction {
-        guard let lifecycle = state.lifecycle else {
-            return .none
-        }
-        if lifecycle.status == "recovery_required" || lifecycle.recoveryAvailable == true {
+    private func bridgeQuitAction(for state: DashboardStateResponse) -> BridgeQuitAction {
+        let bridge = state.proxy?.bridge
+        if bridge?.needsRecovery == true || bridge?.recoveryAvailable == true {
             return presentBridgeQuitAlert(
                 title: "退出前恢复原来的网络设置？",
-                message: "这台 Mac 还在使用上次 Netfix 部署的代理，但代理转发可能已经失效。建议先恢复，避免退出后网络不可用。",
+                message: "这台 Mac 还保留着 Netfix 上次使用的代理设置。建议先恢复，避免退出后网络不可用。",
                 primary: "恢复网络设置后退出",
                 primaryAction: .recover
             )
         }
-        if lifecycle.status == "running_system" || (lifecycle.requiresNetfixRunning == true && lifecycle.systemPointsToBridge == true) {
+        if bridge?.inUse == true || state.proxy?.applied?.active == true {
             return presentBridgeQuitAlert(
                 title: "这台 Mac 正在使用 Netfix 部署的代理",
-                message: "退出会停止 Netfix 的代理转发。建议先恢复原来的网络设置，避免退出后网络不可用。",
+                message: "退出会停止当前代理。建议先恢复原来的网络设置。",
                 primary: "恢复网络设置后退出",
-                primaryAction: .rollback
+                primaryAction: .recover
             )
         }
         return .none
@@ -202,28 +217,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return alert.runModal() == .alertSecondButtonReturn
     }
 
-    private func confirmAndRollbackBeforeQuit(client: APIClient, sender: NSApplication) async {
-        do {
-            let result = try await client.rollbackProxyProfile(confirmed: true)
-            if result.ok {
-                sender.reply(toApplicationShouldTerminate: true)
-            } else {
-                presentBridgeOperationFailedAlert("恢复网络设置失败", detail: result.error ?? result.status ?? "unknown")
-                sender.reply(toApplicationShouldTerminate: false)
-            }
-        } catch {
-            presentBridgeOperationFailedAlert("恢复网络设置失败", detail: error.localizedDescription)
-            sender.reply(toApplicationShouldTerminate: false)
-        }
-    }
-
     private func confirmAndRecoverBeforeQuit(client: APIClient, sender: NSApplication) async {
         do {
             let result = try await client.recoverProxyBridge(confirmed: true)
-            if result.ok {
+            if result.ok && result.status == "recovered" {
                 sender.reply(toApplicationShouldTerminate: true)
             } else {
-                presentBridgeOperationFailedAlert("恢复网络设置失败", detail: result.error ?? result.status ?? "unknown")
+                let detail = result.status == "no_recovery_needed"
+                    ? "当前代理仍在使用中，没有执行恢复。请先在 Netfix 中停止使用代理。"
+                    : (result.error ?? result.status ?? "恢复没有完成")
+                presentBridgeOperationFailedAlert("恢复网络设置失败", detail: detail)
                 sender.reply(toApplicationShouldTerminate: false)
             }
         } catch {
@@ -248,7 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bridgeStatusMenuItem.isEnabled = false
         let items = [
             NSMenuItem(title: "打开 Netfix", action: #selector(showPopoverFromMenu), keyEquivalent: ""),
-            NSMenuItem(title: "部署代理…", action: #selector(showProxySettings), keyEquivalent: ""),
+            NSMenuItem(title: "代理设置…", action: #selector(showProxySettings), keyEquivalent: ""),
             NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ","),
             NSMenuItem.separator(),
             bridgeStatusMenuItem,
@@ -291,25 +294,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func bindHealthMonitor() {
-        healthMonitor.$healthStatus
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] status in
-                self?.refreshStatusIcon(healthStatus: status)
-            }
-            .store(in: &cancellables)
-
         backend.$state
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
                 guard let self = self else { return }
-                if case .ready(let url) = state, let token = self.backend.apiToken, self.healthMonitor.lastReport == nil {
-                    self.healthMonitor.bind(client: APIClient(baseURL: url, apiToken: token))
-                }
-                if case .ready = state {
+                if case .ready(let url) = state, let token = self.backend.apiToken {
+                    self.dashboardStateStore.configure(
+                        client: APIClient(baseURL: url, apiToken: token)
+                    )
                     self.startBridgeStatusPolling()
                 } else {
+                    self.dashboardStateStore.clearClient()
                     self.stopBridgeStatusPolling()
                 }
+            }
+            .store(in: &cancellables)
+
+        dashboardStateStore.$state
+            .receive(on: DispatchQueue.main)
+            .compactMap { $0 }
+            .sink { [weak self] state in
+                _ = self?.applyBridgeState(state, notify: true)
             }
             .store(in: &cancellables)
     }
@@ -328,117 +333,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopBridgeStatusPolling() {
         bridgeStatusTimer?.invalidate()
         bridgeStatusTimer = nil
-        bridgeStatusOverride = backend.isReady ? nil : .warn
+        bridgeStatusOverride = backend.isReady ? nil : .unknown
         lastBridgeNotificationKey = nil
         refreshStatusIcon()
     }
 
     private func refreshBridgeAttentionStatus(notify: Bool) async {
-        guard backend.isReady, let url = backend.apiURL, let token = backend.apiToken else {
-            bridgeStatusOverride = .warn
+        guard backend.isReady else {
+            bridgeStatusOverride = .unknown
             refreshStatusIcon()
             return
         }
-        let client = APIClient(baseURL: url, apiToken: token)
-        do {
-            let state = try await client.proxyBridge()
+        await dashboardStateStore.refresh()
+        if let state = dashboardStateStore.state {
             applyBridgeState(state, notify: notify)
-        } catch {
-            bridgeStatusOverride = .warn
-            statusItem?.button?.toolTip = "Netfix 网络自救 · 桥接状态读取失败"
+        } else {
+            bridgeStatusOverride = .unknown
+            statusItem?.button?.toolTip = "Netfix · 暂时读不到网络状态"
             refreshStatusIcon()
         }
     }
 
     private func refreshBridgeMenuStatus() {
-        guard backend.isReady, let url = backend.apiURL, let token = backend.apiToken else {
-            bridgeStatusMenuItem.title = "代理状态：Netfix 还没准备好"
+        guard backend.isReady else {
+            bridgeStatusMenuItem.title = "网络状态：Netfix 还没准备好"
             return
         }
-        bridgeStatusMenuItem.title = "桥接状态：读取中…"
+        bridgeStatusMenuItem.title = "网络状态：读取中…"
         Task {
-            let client = APIClient(baseURL: url, apiToken: token)
-            do {
-                let state = try await client.proxyBridge()
+            await dashboardStateStore.refresh()
+            if let state = dashboardStateStore.state {
                 bridgeStatusMenuItem.title = applyBridgeState(state, notify: false)
-            } catch {
-                bridgeStatusMenuItem.title = "桥接状态：读取失败"
-                bridgeStatusOverride = .warn
-                statusItem?.button?.toolTip = "Netfix 网络自救 · 桥接状态读取失败"
+            } else {
+                bridgeStatusMenuItem.title = "网络状态：暂时无法读取"
+                bridgeStatusOverride = .unknown
+                statusItem?.button?.toolTip = "Netfix · 暂时读不到网络状态"
                 refreshStatusIcon()
             }
         }
     }
 
     @discardableResult
-    private func applyBridgeState(_ state: ProxyBridgeResponse, notify: Bool) -> String {
+    private func applyBridgeState(_ state: DashboardStateResponse, notify: Bool) -> String {
         let title = bridgeMenuTitle(for: state)
         let attention = bridgeAttention(for: state)
         bridgeStatusOverride = attention.status
-        statusItem?.button?.toolTip = bridgeToolTip(for: state, menuTitle: title)
+        statusItem?.button?.toolTip = "Netfix · \(state.headline)"
         refreshStatusIcon()
         if notify, let key = attention.notificationKey, key != lastBridgeNotificationKey {
             notifyBridgeAttention(key: key, title: attention.notificationTitle, body: attention.notificationBody)
             lastBridgeNotificationKey = key
         }
-        if attention.notificationKey == nil && state.lifecycle?.needsAttention != true {
+        if attention.notificationKey == nil && state.proxy?.bridge?.needsRecovery != true {
             lastBridgeNotificationKey = nil
         }
         return title
     }
 
-    private func bridgeToolTip(for state: ProxyBridgeResponse, menuTitle: String) -> String {
-        if let lifecycle = state.lifecycle, let headline = lifecycle.headline, !headline.isEmpty {
-            return "Netfix 网络自救 · \(headline)"
-        }
-        if let restart = state.startupCheck?.autoRestart, restart.status == "restarted" {
-            return "Netfix 网络自救 · 启动时已自动恢复代理连接"
-        }
-        return "Netfix 网络自救 · \(menuTitle.replacingOccurrences(of: "代理状态：", with: "代理"))"
-    }
-
-    private func bridgeAttention(for state: ProxyBridgeResponse) -> (
+    private func bridgeAttention(for state: DashboardStateResponse) -> (
         status: DiagnosticStatus?,
         notificationKey: String?,
         notificationTitle: String,
         notificationBody: String
     ) {
-        if let lifecycle = state.lifecycle {
-            if lifecycle.status == "recovery_required" || lifecycle.recoveryAvailable == true {
-                return (
-                    .fail,
-                    "bridge-recovery-required-\(lifecycle.networkService ?? "default")-\(lifecycle.bridge?.listenPort ?? 0)",
-                    "Netfix：需要恢复网络设置",
-                    lifecycle.detail ?? "这台 Mac 还在使用上次 Netfix 部署的代理，请打开 Netfix 恢复原来的网络设置。"
-                )
-            }
-            if lifecycle.status == "check_failed" {
-                return (
-                    .fail,
-                    "bridge-check-failed-\(lifecycle.networkService ?? "default")",
-                    "Netfix：代理状态检查失败",
-                    lifecycle.detail ?? "Netfix 未能确认这台 Mac 是否仍在使用 Netfix 部署的代理。"
-                )
-            }
-            if lifecycle.status == "running_system" || (lifecycle.requiresNetfixRunning == true && lifecycle.systemPointsToBridge == true) {
-                return (
-                    .warn,
-                    nil,
-                    "Netfix：这台 Mac 正在使用 Netfix 代理",
-                    lifecycle.detail ?? "请保持 Netfix 运行；退出前建议恢复原来的网络设置。"
-                )
-            }
-        }
-        if let restart = state.startupCheck?.autoRestart, restart.status == "restarted" {
-            let port = restart.bridge?.listenPort.map(String.init) ?? "?"
+        if state.proxy?.bridge?.needsRecovery == true || state.proxy?.bridge?.recoveryAvailable == true {
             return (
-                .warn,
-                "bridge-auto-restarted-\(restart.profileId ?? "profile")-\(port)",
-                "Netfix：已自动恢复代理连接",
-                "已在本机端口 \(port) 恢复代理转发；没有静默修改网络代理设置。"
+                .fail,
+                "network-recovery-required",
+                "Netfix：需要恢复网络设置",
+                state.narrativeDetail ?? "请打开 Netfix 恢复原来的网络设置。"
             )
         }
-        return (nil, nil, "Netfix", "")
+        switch state.verdict?.severity ?? state.decision?.severity {
+        case "fail": return (.fail, nil, "Netfix", "")
+        case "warn": return (.warn, nil, "Netfix", "")
+        case "ok": return (.ok, nil, "Netfix", "")
+        default: return (.unknown, nil, "Netfix", "")
+        }
     }
 
     private func notifyBridgeAttention(key: String, title: String, body: String) {
@@ -452,28 +423,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UNUserNotificationCenter.current().add(request)
     }
 
-    private func bridgeMenuTitle(for state: ProxyBridgeResponse) -> String {
-        guard let lifecycle = state.lifecycle else {
-            return "代理状态：未知"
+    private func bridgeMenuTitle(for state: DashboardStateResponse) -> String {
+        let route: String
+        switch state.decision?.effectiveRoute {
+        case "netfix_applied": route = "Netfix 代理使用中"
+        case "external_system_proxy": route = "系统代理使用中"
+        case "saved_only": route = "代理已保存，未启用"
+        case "recovery_required": route = "需要恢复网络设置"
+        case "none": route = "未使用代理"
+        default: route = state.headline
         }
-        switch lifecycle.status {
-        case "running_system":
-            let port = lifecycle.bridge?.listenPort.map(String.init) ?? "?"
-            return "代理状态：这台 Mac 正在使用本机端口 \(port)"
-        case "running_local":
-            let port = lifecycle.bridge?.listenPort.map(String.init) ?? "?"
-            return "代理状态：本机端口 \(port) 正在转发"
-        case "recovery_required":
-            return "代理状态：需要恢复网络设置"
-        case "check_failed":
-            return "代理状态：检查失败"
-        case "not_in_use":
-            return "代理状态：这台 Mac 未使用 Netfix 代理"
-        case "stopped":
-            return "代理状态：未启动"
-        default:
-            return "代理状态：\(lifecycle.status ?? "未知")"
-        }
+        return "网络状态：\(route)"
     }
 
     private func refreshStatusIcon(healthStatus: DiagnosticStatus? = nil) {
@@ -492,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .fail:
             color = .systemRed
         case .unknown:
-            color = backend.isReady ? .systemGreen : .systemYellow
+            color = .systemGray
         }
         let monochrome = UserDefaults.standard.integer(forKey: "netfix.iconStyle") == 1
         button.image = makeStatusIcon(color: color, monochrome: monochrome)
@@ -500,7 +460,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 合成 network 图标与右下角状态圆点。
     private func makeStatusIcon(color: NSColor, monochrome: Bool) -> NSImage? {
-        guard let base = NSImage(systemSymbolName: "network", accessibilityDescription: "netfix") else {
+        guard let base = NSImage(systemSymbolName: "network", accessibilityDescription: "Netfix 网络状态") else {
             return nil
         }
         let size = NSSize(width: 18, height: 18)

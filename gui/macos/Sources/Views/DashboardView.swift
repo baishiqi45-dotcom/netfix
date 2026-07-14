@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 struct DashboardView: View {
     @ObservedObject var backend: Backend
     @ObservedObject var healthMonitor: HealthMonitor
+    @ObservedObject var dashboardStore: DashboardStateStore
     @StateObject private var viewModel = DashboardViewModel()
     @State private var pendingAction: Action?
     @State private var showConfirmation = false
@@ -25,13 +26,12 @@ struct DashboardView: View {
 
             ScrollView {
                 VStack(spacing: 16) {
-                    landingStateBanner
+                    currentStatusSection
+                    connectionQualitySection
 
-                    proxyDeploySection
-
-                    statusCards
-
-                    firstAidSection
+                    if let stateError = dashboardStore.errorMessage {
+                        stateReadError(stateError)
+                    }
 
                     if viewModel.isWorking {
                         progressSection
@@ -41,15 +41,7 @@ struct DashboardView: View {
                         errorBanner(error)
                     }
 
-                    if let report = viewModel.report {
-                        resultSection(report: report)
-                    }
-
-                    aiQuickActionsSection
-
-                    if !healthMonitor.events.isEmpty {
-                        eventsSection
-                    }
+                    diagnosticEvidenceSection
                 }
                 .padding()
             }
@@ -61,12 +53,12 @@ struct DashboardView: View {
         }
         .frame(minWidth: 420, idealWidth: 460, minHeight: 520)
         .task {
-            await viewModel.bind(backend: backend)
+            await viewModel.bind(backend: backend, dashboardStore: dashboardStore)
         }
         .confirmationDialog("让 Netfix 处理这个问题？", isPresented: $showConfirmation, titleVisibility: .visible) {
             Button("让 Netfix 处理", role: .none) {
                 if let action = pendingAction {
-                    Task { await viewModel.executeAction(action) }
+                    Task { await viewModel.executeAction(action, confirmed: true) }
                 }
                 pendingAction = nil
             }
@@ -80,11 +72,11 @@ struct DashboardView: View {
         }
         .alert("恢复原来的网络设置？", isPresented: $showRollbackConfirmation) {
             Button("恢复", role: .destructive) {
-                Task { await viewModel.rollback() }
+                Task { await viewModel.recoverStaleBridge() }
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("这会恢复上一次修改网络设置前的配置。")
+            Text("这会停止 Netfix 代理，并恢复使用代理前的网络设置。")
         }
         .sheet(isPresented: $showLogsSheet) {
             LogsSheetView(
@@ -127,27 +119,35 @@ struct DashboardView: View {
         HStack(spacing: 10) {
             statusDot
             VStack(alignment: .leading, spacing: 2) {
-                Text(viewModel.headline)
+                Text("Netfix")
                     .font(.headline)
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Label(viewModel.proxyUsageLabel, systemImage: viewModel.proxyUsageIcon)
-                    .font(.caption2)
-                    .foregroundStyle(viewModel.proxyUsageColor)
             }
             Spacer()
+            if let route = viewModel.dashboardState?.routeLabel {
+                Text(route)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Netfix，\(viewModel.dashboardState?.headline ?? subtitle)")
     }
 
     private var subtitle: String {
         if !backend.isReady {
             return friendlyStatusMessage(backend.statusMessage)
         }
-        if let date = healthMonitor.lastCheck {
+        if dashboardStore.isRefreshing {
+            return "正在更新当前状态…"
+        }
+        if let date = dashboardStore.lastUpdated {
             let formatter = RelativeDateTimeFormatter()
             formatter.unitsStyle = .short
-            return "上次检测：\(formatter.localizedString(for: date, relativeTo: Date()))"
+            return "更新于 \(formatter.localizedString(for: date, relativeTo: Date()))"
         }
         return friendlyStatusMessage(backend.statusMessage)
     }
@@ -170,23 +170,23 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var statusDot: some View {
-        switch healthMonitor.healthStatus {
-        case .ok:
+        if let severity = viewModel.dashboardState?.severity {
             Circle()
-                .fill(Color.green)
+                .fill(statusColor(for: severity))
                 .frame(width: 12, height: 12)
-        case .warn:
+        } else {
             Circle()
-                .fill(Color.orange)
+                .fill(Color.secondary)
                 .frame(width: 12, height: 12)
-        case .fail:
-            Circle()
-                .fill(Color.red)
-                .frame(width: 12, height: 12)
-        case .unknown:
-            ProgressView()
-                .controlSize(.small)
-                .frame(width: 14, height: 14)
+        }
+    }
+
+    private func statusColor(for severity: String) -> Color {
+        switch severity {
+        case "ok": return .green
+        case "warn": return .orange
+        case "fail": return .red
+        default: return .blue
         }
     }
 
@@ -299,7 +299,7 @@ struct DashboardView: View {
                     if summary.responsivenessRPM == nil && summary.baseRTTMs == nil
                         && summary.dlThroughputKbps == nil && summary.ulThroughputKbps == nil
                         && summary.packetLossPercent == nil {
-                        Text("还没有速度、延迟和后台占用数据。点「一键诊断」后会出现在这里。")
+                        Text("本次未采集速度和延迟数据。")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -310,7 +310,7 @@ struct DashboardView: View {
         }
         .padding()
         .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(10)
+        .cornerRadius(8)
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
@@ -394,7 +394,9 @@ struct DashboardView: View {
     private var networkActivityTop3Section: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("后台网络活动", systemImage: "arrow.up.arrow.down.circle")
+                Image(systemName: "arrow.up.arrow.down.circle")
+                    .foregroundStyle(.secondary)
+                Text("后台网络活动")
                     .font(.subheadline)
                     .fontWeight(.semibold)
                 Spacer()
@@ -478,9 +480,13 @@ struct DashboardView: View {
     private var recentLagEventsSection: some View {
         let events = Array((viewModel.insights?.lagEvents ?? []).reversed())
         VStack(alignment: .leading, spacing: 6) {
-            Label("近期网络事件", systemImage: "clock.arrow.circlepath")
-                .font(.subheadline)
-                .fontWeight(.semibold)
+            HStack(spacing: 6) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .foregroundStyle(.secondary)
+                Text("近期网络事件")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+            }
             if events.isEmpty {
                 Text("近期没有记录到明显影响。")
                     .font(.caption)
@@ -509,7 +515,9 @@ struct DashboardView: View {
         let trend = viewModel.insights?.proxyHealthTrend
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Label("代理近 10 次", systemImage: "waveform.path.ecg")
+                Image(systemName: "waveform.path.ecg")
+                    .foregroundStyle(.secondary)
+                Text("代理近 10 次")
                     .font(.subheadline)
                     .fontWeight(.semibold)
                 Spacer()
@@ -630,8 +638,8 @@ struct DashboardView: View {
         }
         if hasWarn {
             switch key {
-            case .network: return ("待确认", "网络可用，有几项信息需要复查")
-            case .proxy:   return ("待确认", "代理可用性需要再确认")
+            case .network: return ("需复查", "网络可用，有几项信息需要复查")
+            case .proxy:   return ("需复查", "代理可用性需要再确认")
             case .targets: return ("部分失败", "只有部分目标网站能打开")
             }
         }
@@ -685,7 +693,7 @@ struct DashboardView: View {
         }
         .padding()
         .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(10)
+        .cornerRadius(8)
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
@@ -770,7 +778,6 @@ struct DashboardView: View {
     private func errorBanner(_ message: String) -> some View {
         let card = UserFacingMessages.classify(message)
         let humanReadable = "\(card.headline)\n\(card.nextStep)"
-        let technicalDetail = card.technical ?? message
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 8) {
@@ -789,43 +796,44 @@ struct DashboardView: View {
                 .buttonStyle(.plain)
             }
 
-            HStack(spacing: 12) {
-                if viewModel.lastOperation != nil {
-                    Button("重试") {
-                        Task { await viewModel.retryLastOperation() }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    if viewModel.lastOperation != nil {
+                        Button("重试") {
+                            Task { await viewModel.retryLastOperation() }
+                        }
+                        // Kept intentionally as `.bordered` (not `.borderedProminent`)
+                        // so the home screen never shows two prominent CTAs at
+                        // once when an error banner is up — the primary CTA
+                        // (state.primaryActionLabel) stays the only `.borderedProminent`.
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                        .controlSize(.small)
+                        .fixedSize()
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.orange)
+
+                    Button("复制这段说明") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(humanReadable, forType: .string)
+                    }
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
-                }
+                    .fixedSize()
+                    .help("复制结论和下一步，不包含详细日志。")
 
-                Button("复制这段说明") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(humanReadable, forType: .string)
+                    Button("查看日志") {
+                        openNetfixLogsFolder()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize()
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("复制普通人能看懂的一句话 + 下一步；不会带 reason_code、HTTP 状态或技术错误码。")
-
-                Button("查看日志") {
-                    openNetfixLogsFolder()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
 
-            DisclosureGroup("查看技术详情") {
-                Text(technicalDetail.isEmpty ? "暂无技术详情。" : scrubInternalPhrases(technicalDetail))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .padding(.top, 4)
-            }
-            .font(.caption)
         }
         .padding()
         .background(Color.orange.opacity(0.15))
-        .cornerRadius(10)
+        .cornerRadius(8)
     }
 
     /// 把 reason_code / HTTP 400 / proxy_used / layer / traceback / raw JSON
@@ -906,152 +914,352 @@ struct DashboardView: View {
         NSApp.sendAction(#selector(AppDelegate.showProxySettings), to: nil, from: nil)
     }
 
-    private var proxyDeploySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("粘贴代理参数", systemImage: "point.3.connected.trianglepath.dotted")
-                    .font(.headline)
-                Spacer()
-                Text("不需要 API Key 也能用")
-                    .font(.caption2)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.green.opacity(0.14))
-                    .foregroundStyle(.green)
-                    .cornerRadius(6)
-            }
-
-            Text("从服务商后台复制一整行，包含地址、端口、账号、密码。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                Button {
-                    openProxySettings()
-                } label: {
-                    Label("去粘贴代理参数", systemImage: "square.and.arrow.down")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!backend.isReady)
-
-                Button {
-                    aiQuestionContext = .proxy
-                    showAIQuestionSheet = true
-                } label: {
-                    Label("问 AI", systemImage: "sparkles")
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isWorking)
-            }
+    private func performDashboardPrimaryAction() {
+        let target = viewModel.dashboardPrimaryActionTarget
+        switch target {
+        case .proxySetup:
+            openProxySettings()
+        case .doctor:
+            Task { await viewModel.diagnose() }
+        case .staleBridgeRecovery:
+            showRollbackConfirmation = true
+        case .none:
+            return
+        case .unsupported(let value):
+            viewModel.errorMessage = "当前版本还不能执行这个动作。请重新读取状态后再试。"
+            NSLog("Netfix dashboard action target unsupported: %@", value)
         }
-        .padding()
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(10)
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.blue.opacity(0.16), lineWidth: 1)
-        )
     }
 
     // MARK: - 首页状态条
 
     @ViewBuilder
-    private var landingStateBanner: some View {
+    private var currentStatusSection: some View {
         if let state = viewModel.dashboardState {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: state.iconName)
-                    .font(.title3)
-                    .foregroundStyle(state.tintColor)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(state.headline)
-                        .font(.headline)
-                    Text(state.nextStep)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: state.iconName)
+                        .font(.title3)
+                        .foregroundStyle(state.tintColor)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(state.headline)
+                            .font(.headline)
+                        Text(state.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Text(state.routeLabel)
+                        .font(.caption2)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(state.tintColor.opacity(0.14))
+                        .foregroundStyle(state.tintColor)
+                        .cornerRadius(6)
                 }
-                Spacer()
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("当前结论：\(state.headline)。影响：\(state.detail)")
+
+                Divider()
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        compactIdentityItem(
+                            "\(state.interfaceLabel) · \(state.localIPLabel)",
+                            icon: "wifi"
+                        )
+                        Divider().frame(height: 16)
+                        compactIdentityItem(state.systemProxyLabel, icon: "switch.2")
+                        Divider().frame(height: 16)
+                        compactIdentityItem(state.egressLabel, icon: "globe")
+                    }
+                }
+                .accessibilityLabel("当前网络身份")
+
+                if !state.primaryActionLabel.isEmpty && state.primaryActionTarget != .none {
+                    Button {
+                        performDashboardPrimaryAction()
+                    } label: {
+                        Label(state.primaryActionLabel, systemImage: state.primaryActionIcon)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(!backend.isReady || viewModel.isWorking)
+                    .accessibilityHint(state.nextStep)
+                }
+
+                if let secondaryLabel = state.secondaryActionLabel,
+                   state.secondaryActionTarget == .staleBridgeRecovery {
+                    Button {
+                        showRollbackConfirmation = true
+                    } label: {
+                        Label(secondaryLabel, systemImage: "stop.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!backend.isReady || viewModel.isWorking)
+                    .accessibilityHint("停止使用 Netfix 代理，并恢复之前的网络设置")
+                }
             }
             .padding()
-            .background(state.tintColor.opacity(0.10))
-            .cornerRadius(10)
-        } else {
-            EmptyView()
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(state.tintColor.opacity(0.18), lineWidth: 1)
+            )
         }
     }
 
-    // MARK: - AI 快捷按钮（没 API Key 也能用本地版本）
+    private func compactIdentityItem(_ value: String, icon: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(value)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .fixedSize()
+    }
 
     @ViewBuilder
-    private var aiQuickActionsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "sparkles")
-                    .foregroundStyle(.purple)
-                Text("看不懂诊断结果？")
-                    .font(.headline)
-                Spacer()
-            }
-            Text(viewModel.hasCloudAI
-                 ? "用本地规则解释当前报告，也可以请求云端 AI 再确认。"
-                 : "走本地规则解释，不需要 API Key；想用云端 AI 再到设置里开启。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private var connectionQualitySection: some View {
+        if isSectionRendered("connection_quality") {
+            let quality = viewModel.dashboardState?.connectionQuality
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: connectionQualityIcon(quality?.status))
+                        .foregroundStyle(connectionQualityColor(quality?.status))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("网络体感")
+                            .font(.headline)
+                        Text(connectionQualitySourceText(quality))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(connectionQualityBadge(quality))
+                        .font(.caption2)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(connectionQualityColor(quality?.status).opacity(0.12))
+                        .foregroundStyle(connectionQualityColor(quality?.status))
+                        .cornerRadius(6)
+                }
 
-            HStack(spacing: 10) {
-                aiQuickButton(
-                    title: "解释当前问题",
-                    systemImage: "questionmark.bubble",
-                    prompt: "请用普通人能听懂的话，解释当前诊断报告里最严重的一个问题，并告诉我下一步应该点什么。"
-                )
-                aiQuickButton(
-                    title: "复制脱敏报告",
-                    systemImage: "doc.on.clipboard",
-                    prompt: nil,
-                    action: { Task { await viewModel.copySupportBundle() } }
-                )
-                Menu {
-                    Button("我该点哪个按钮") {
-                        Task {
-                            await viewModel.answerQuickQuestion(
-                                prompt: "基于当前诊断结果，告诉我现在该先点哪个按钮、要不要确认、会有什么后果。",
-                                context: aiQuestionContext
-                            )
-                        }
-                    }
-                    Button("检查代理参数格式") {
-                        Task { await viewModel.checkProxyInputFormat() }
-                    }
-                } label: {
-                    Label("更多", systemImage: "ellipsis.circle")
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 8) {
+                    connectionQualityMetric(title: "速度", metric: quality?.speed, icon: "speedometer")
+                    connectionQualityMetric(title: "延迟", metric: quality?.latency, icon: "timer")
+                    connectionQualityMetric(title: "稳定性", metric: quality?.stability, icon: "waveform.path")
+                    connectionQualityMetric(title: "后台占用", metric: quality?.backgroundActivity, icon: "arrow.up.arrow.down.circle")
                 }
             }
-            .controlSize(.small)
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+            )
         }
-        .padding()
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(10)
     }
 
-    private func aiQuickButton(
-        title: String,
-        systemImage: String,
-        prompt: String?,
-        action: (() -> Void)? = nil
-    ) -> some View {
-        Button {
-            if let action {
-                action()
-            } else if let prompt {
-                Task { await viewModel.answerQuickQuestion(prompt: prompt, context: aiQuestionContext) }
+    @ViewBuilder
+    private func connectionQualityMetric(title: String, metric: DashboardStateResponse.ConnectionQuality.Metric?, icon: String) -> some View {
+        let label = metric?.label ?? "未测"
+        let value = metric?.value ?? "还没测"
+        let hint = metric?.hint ?? "本机还没有返回这项数据。"
+        let color = metricColor(label)
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("\(label) · \(value)")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(color)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(hint)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
-        } label: {
-            Label(title, systemImage: systemImage)
-                .font(.caption)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .disabled(!backend.isReady)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title)：\(label)，\(value)。\(hint)")
+    }
+
+    private func connectionQualityIcon(_ status: String?) -> String {
+        switch status {
+        case "ok": return "gauge.with.dots.needle.67percent"
+        case "partial": return "gauge.with.dots.needle.33percent"
+        case "warn": return "gauge.with.dots.needle.33percent"
+        case "fail": return "exclamationmark.triangle"
+        default: return "gauge.with.dots.needle.0percent"
+        }
+    }
+
+    private func connectionQualitySourceText(_ quality: DashboardStateResponse.ConnectionQuality?) -> String {
+        switch quality?.collectionState {
+        case "never_run": return "还没有本次数据。"
+        case "unavailable": return "本机未能采样，未使用猜测值。"
+        case "partial": return "来自最近一次检查，缺少的项目保持未测。"
+        case "stale": return "上次数据已过期，请重新检查。"
+        case "complete": return "来自最近一次检查，不会额外测速。"
+        default: return "只显示本机实际返回的数据。"
+        }
+    }
+
+    private func connectionQualityBadge(_ quality: DashboardStateResponse.ConnectionQuality?) -> String {
+        if quality?.collectionState == "stale" { return "已过期" }
+        switch quality?.status {
+        case "ok": return "已测"
+        case "warn": return "需留意"
+        case "fail": return "体感较差"
+        default: return "未测"
+        }
+    }
+
+    private func connectionQualityColor(_ status: String?) -> Color {
+        switch status {
+        case "ok": return .green
+        case "partial": return .blue
+        case "warn": return .blue
+        case "fail": return .orange
+        default: return .secondary
+        }
+    }
+
+    private func metricColor(_ label: String) -> Color {
+        if label.contains("未测") {
+            return .secondary
+        }
+        if label.contains("偏低") || label.contains("较高") || label.contains("不稳") || label.contains("上传") || label.contains("下载") {
+            return .blue
+        }
+        if label.contains("充足") || label.contains("够用") || label == "低" || label.contains("稳定") || label.contains("平稳") {
+            return .green
+        }
+        return .secondary
+    }
+
+    private func isSectionVisible(_ id: String) -> Bool {
+        let visible = viewModel.dashboardState?.visibleSections ?? ["current_status"]
+        if visible.isEmpty { return true }
+        return visible.contains(id)
+    }
+
+    private func isSectionRendered(_ id: String) -> Bool {
+        if isSectionVisible(id) { return true }
+        return viewModel.dashboardState?.collapsedSections.contains(id) == true
+    }
+
+    private func stateReadError(_ message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.clockwise.circle")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                Task { await dashboardStore.refresh() }
+            } label: {
+                Label("重新读取", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            .disabled(dashboardStore.isRefreshing)
+        }
+        .padding(10)
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private var diagnosticEvidenceSection: some View {
+        if isSectionRendered("diagnostic_evidence") {
+            DisclosureGroup("诊断证据") {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let summary = dashboardStore.state?.lastReportSummary,
+                       summary.hasReport == true || summary.checkedAt != nil {
+                        evidenceRow("检查时间", value: summary.checkedAt ?? "尚未完成检查")
+                        evidenceRow("当前线路", value: summary.routeMatchesCurrent == true ? "与检查时一致" : "尚未确认")
+                        evidenceRow("可用证据", value: summary.usableForDashboard == true ? "可用" : "需要重新检查")
+                    }
+                    if let report = viewModel.report {
+                        Divider()
+                        Text(report.summaryHeadline)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        ForEach(report.diagnostics) { item in
+                            HStack(spacing: 8) {
+                                StatusIconView(status: DiagnosticStatus(item.status), label: "")
+                                    .frame(width: 16)
+                                Text(item.displayTitle)
+                                    .font(.caption)
+                                Spacer()
+                                Text(friendlyDiagnosticStatus(item.status))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                    if !hasDashboardReportEvidence && viewModel.report == nil {
+                        Text("还没有诊断证据。点「检查当前网络」后会显示在这里。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.top, 8)
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+            )
+        }
+    }
+
+    private func evidenceRow(_ title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.caption)
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
+        }
+    }
+
+    private var hasDashboardReportEvidence: Bool {
+        guard let summary = dashboardStore.state?.lastReportSummary else { return false }
+        return summary.hasReport == true || summary.checkedAt != nil
+    }
+
+    private func friendlyDiagnosticStatus(_ status: String) -> String {
+        switch status {
+        case "ok": return "正常"
+        case "warn": return "需复查"
+        case "fail": return "未通过"
+        default: return "未采样"
+        }
     }
 
     // MARK: - 结果区
@@ -1060,8 +1268,6 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 12) {
             if let explanation = report.explanation {
                 explanationCard(explanation)
-            } else {
-                legacyResultCard(report)
             }
 
             if let ai = viewModel.llmExplanation {
@@ -1079,7 +1285,7 @@ struct DashboardView: View {
                     aiQuestionContext = .diagnosis
                     showAIQuestionSheet = true
                 } label: {
-                    Label("看不懂结果？让 AI 解释一下", systemImage: "message")
+                    Label("生成简明说明", systemImage: "message")
                 }
                 .buttonStyle(.borderless)
                 .disabled(viewModel.isWorking)
@@ -1199,7 +1405,7 @@ struct DashboardView: View {
             HStack {
                 Image(systemName: result.source == "llm" ? "sparkles" : "checklist.checked")
                     .foregroundStyle(result.source == "llm" ? .purple : .blue)
-                Text(result.source == "llm" ? "AI 给出的解释" : "Netfix 本地解释")
+                Text(result.source == "llm" ? "AI 解释" : "Netfix 本地解释")
                     .font(.headline)
                 Spacer()
             }
@@ -1263,7 +1469,7 @@ struct DashboardView: View {
         case "ok", "ready": return "可用"
         case "failed": return "失败"
         case "skipped": return "已跳过"
-        case "missing_key": return "需要 API Key"
+        case "missing_key": return "需要 AI 密钥"
         default: return status
         }
     }
@@ -1272,7 +1478,7 @@ struct DashboardView: View {
         guard let reason, !reason.isEmpty else { return nil }
         let lower = reason.lowercased()
         if lower.contains("missing_api_key") || lower.contains("missing api key") {
-            return "还没有配置 API Key。"
+            return "还没有配置 AI 密钥。"
         }
         if lower.contains("llm_disabled") || lower.contains("disabled") {
             return "AI 还没有启用。"
@@ -1289,16 +1495,9 @@ struct DashboardView: View {
         return reason
     }
 
-    private func legacyResultCard(_ report: NetfixReport) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(report.overallStatus == .ok ? "网络看起来正常" : report.firstRootCause ?? "检测到问题")
-                .font(.headline)
-            if !report.fixes.isEmpty {
-                Text("可执行修复：\(report.fixes.map { $0.description }.joined(separator: "、"))")
-                    .font(.body)
-            }
-        }
-    }
+    // legacyResultCard was the v1 fallback path. It has been removed: the
+    // home view renders only the verdict-driven currentStatusSection. The
+    // report's explanation (when present) flows through explanationCard.
 
     private func requestAction(_ action: Action) {
         if action.needsConfirm {
@@ -1311,8 +1510,8 @@ struct DashboardView: View {
 
     // MARK: - 事件时间线
 
-    private var eventsSection: some View {
-        DisclosureGroup("最近状态变化") {
+    private var statusHistorySection: some View {
+        DisclosureGroup("历史记录") {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(healthMonitor.events.suffix(5).reversed()) { event in
                     HStack(spacing: 8) {
@@ -1336,39 +1535,7 @@ struct DashboardView: View {
     // MARK: - 底部操作栏
 
     private var actionToolbar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            primaryActionToolbar
-            secondaryActionToolbar
-        }
-    }
-
-    private var primaryActionToolbar: some View {
-        HStack(spacing: 12) {
-            Button("一键诊断") {
-                Task {
-                    await viewModel.diagnose()
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(!backend.isReady || viewModel.isWorking)
-
-            if let recommendedAction = viewModel.recommendedAction {
-                Button("处理建议") {
-                    requestAction(recommendedAction)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!backend.isReady || viewModel.isWorking)
-                .help("按上方报告里的建议处理。")
-            }
-
-            if viewModel.rollbackAvailable {
-                Button("恢复原来的网络设置") {
-                    showRollbackConfirmation = true
-                }
-                .buttonStyle(.borderless)
-                .disabled(!backend.isReady || viewModel.isWorking)
-            }
-        }
+        secondaryActionToolbar
     }
 
     private var secondaryActionToolbar: some View {
@@ -1395,6 +1562,37 @@ struct DashboardView: View {
                 NSApp.sendAction(#selector(AppDelegate.showSettings), to: nil, from: nil)
             }
             .buttonStyle(.borderless)
+            .disabled(!backend.isReady)
+
+            Menu("更多") {
+                if let recommendedAction = viewModel.recommendedAction {
+                    Button("处理建议") {
+                        requestAction(recommendedAction)
+                    }
+                    .disabled(!backend.isReady || viewModel.isWorking)
+                }
+                if viewModel.rollbackAvailable {
+                    Button("恢复原来的网络设置") {
+                        showRollbackConfirmation = true
+                    }
+                    .disabled(!backend.isReady || viewModel.isWorking)
+                }
+                Button("生成简明说明") {
+                    aiQuestionContext = .diagnosis
+                    showAIQuestionSheet = true
+                }
+                .disabled(viewModel.report == nil || viewModel.isWorking)
+                Button("代理说明") {
+                    aiQuestionContext = .proxy
+                    showAIQuestionSheet = true
+                }
+                .disabled(viewModel.isWorking)
+                Button("复制脱敏报告") {
+                    Task { await viewModel.copySupportBundle() }
+                }
+                .disabled(!backend.isReady)
+            }
+            .menuStyle(.borderlessButton)
             .disabled(!backend.isReady)
         }
         .lineLimit(1)
@@ -1555,7 +1753,7 @@ private struct AIQuestionSheet: View {
                 Text("我确认发送脱敏诊断报告\(images.isEmpty ? "" : "和上方图片")给已配置的云端模型")
             }
 
-            Text("AI 只负责看报告和回答问题，不影响一键诊断、代理部署、IPv6 处理和网络设置恢复。没有 API Key 时，主流程照常可用；需要 AI 时再到设置里粘贴 Key。截图问诊仅支持 PNG、JPEG、WebP 或 GIF。")
+            Text("这只影响 AI 看报告，不影响检查网络、使用代理或恢复网络设置。没有 AI 密钥时，主流程照常可用；需要 AI 时再到设置里填写。截图问诊仅支持 PNG、JPEG、WebP 或 GIF。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -1656,25 +1854,154 @@ final class DashboardViewModel: ObservableObject {
     @Published var llmError: String?
     @Published var activeJobID: String?
     @Published private var proxyBridgeState: ProxyBridgeResponse?
-    @Published var dashboardState: DashboardUIStateInfo?
+    @Published var dashboardState: DashboardHomePresentation?
     @Published var insights: DashboardInsightsResponse?
     @Published var hasCloudAI: Bool = false
     @Published var copyFeedback: String?
 
-    struct DashboardUIStateInfo {
+    struct DashboardHomePresentation {
         let uiState: DashboardUIState
         let headline: String
+        let detail: String
         let nextStep: String
         let iconName: String
         let tintColor: Color
+        let severity: String
+        let primaryActionID: String
+        let primaryActionLabel: String
+        let primaryActionTarget: DashboardActionTarget
+        let secondaryActionLabel: String?
+        let secondaryActionTarget: DashboardActionTarget
+        let shouldShowProxyDeployCTA: Bool
+        let routeLabel: String
+        let interfaceLabel: String
+        let localIPLabel: String
+        let systemProxyLabel: String
+        let egressLabel: String
+        let connectionQuality: DashboardStateResponse.ConnectionQuality?
+        let visibleSections: [String]
+        let collapsedSections: [String]
 
         init(_ state: DashboardUIState) {
             self.uiState = state
             self.headline = state.headline
+            self.detail = state.nextStep
             self.nextStep = state.nextStep
             self.iconName = state.iconName
             self.tintColor = state.tintColor
+            self.severity = "info"
+            self.primaryActionID = "diagnose"
+            self.primaryActionLabel = ""
+            self.primaryActionTarget = .none
+            self.secondaryActionLabel = nil
+            self.secondaryActionTarget = .none
+            self.shouldShowProxyDeployCTA = state == .noProxy
+            self.routeLabel = state.headline
+            self.interfaceLabel = "未检测"
+            self.localIPLabel = "未检测"
+            self.systemProxyLabel = "未检测"
+            self.egressLabel = "未检测"
+            self.connectionQuality = nil
+            self.visibleSections = ["current_status"]
+            self.collapsedSections = []
         }
+
+        init(response: DashboardStateResponse) {
+            let state = response.uiState
+            self.uiState = state
+            self.headline = response.headline
+            self.detail = response.narrativeDetail ?? response.nextStep
+            self.nextStep = response.nextStep
+            self.iconName = state.iconName
+            self.severity = response.verdict?.severity ?? response.decision?.severity ?? "info"
+            self.tintColor = Self.tintColor(for: self.severity, fallback: state.tintColor)
+            self.primaryActionID = response.primaryActionID
+            self.primaryActionLabel = response.primaryActionLabel
+            self.primaryActionTarget = response.resolvedPrimaryActionTarget
+            self.secondaryActionLabel = response.secondaryActionLabel
+            self.secondaryActionTarget = response.resolvedSecondaryActionTarget
+            self.shouldShowProxyDeployCTA = response.shouldShowProxyDeployCTA
+            self.routeLabel = Self.routeLabel(for: response.decision?.effectiveRoute, fallback: state.headline)
+            self.interfaceLabel = response.machine?.primaryInterface?.isEmpty == false ? "当前连接" : "未检测"
+            self.localIPLabel = response.machine?.selfIPv4 ?? "未检测"
+            self.systemProxyLabel = Self.systemProxyLabel(response.proxy?.system)
+            self.egressLabel = Self.egressLabel(response.egress)
+            self.connectionQuality = response.connectionQuality
+            self.visibleSections = response.presentation?.visibleSections ?? ["current_status"]
+            self.collapsedSections = response.presentation?.collapsedSections ?? []
+        }
+
+        var primaryActionIcon: String {
+            switch primaryActionTarget {
+            case .proxySetup: return "slider.horizontal.3"
+            case .doctor: return "stethoscope"
+            case .staleBridgeRecovery: return "arrow.uturn.backward.circle"
+            case .none: return "checkmark.circle"
+            case .unsupported: return "questionmark.circle"
+            }
+        }
+
+        private static func tintColor(for severity: String?, fallback: Color) -> Color {
+            switch severity {
+            case "ok": return .green
+            case "warn": return .orange
+            case "fail": return .red
+            case "info": return .blue
+            default: return fallback
+            }
+        }
+
+        private static func routeLabel(for value: String?, fallback: String) -> String {
+            switch value {
+            case "none": return "未使用代理"
+            case "saved_only": return "已保存未启用"
+            case "external_system_proxy": return "其他代理正在使用"
+            case "netfix_applied": return "Netfix 已启用"
+            case "degraded": return "代理待复查"
+            case "recovery_required": return "需要恢复"
+            default: return fallback
+            }
+        }
+
+        private static func systemProxyLabel(_ system: DashboardStateResponse.Proxy.SystemProxy?) -> String {
+            guard let system, system.active == true else { return "未启用" }
+            switch system.kind {
+            case "http_https": return "HTTP/HTTPS"
+            case "socks": return "SOCKS"
+            case "pac": return "PAC"
+            case "mixed": return "多种代理"
+            default: return "已启用"
+            }
+        }
+
+        private static func egressLabel(_ egress: DashboardStateResponse.Egress?) -> String {
+            guard let egress else { return "未检测" }
+            if let ip = egress.publicIPv4, !ip.isEmpty {
+                if let ipType = egress.ipType, !ipType.isEmpty {
+                    return "\(ip) · \(ipType)"
+                }
+                return ip
+            }
+            switch egress.status {
+            case "ok": return "已检测"
+            case "warn": return "需复查"
+            case "fail": return "检测失败"
+            case "stale": return "结果已过期"
+            default: return "未检测"
+            }
+        }
+    }
+
+    var shouldShowProxyDeploySection: Bool {
+        dashboardState?.shouldShowProxyDeployCTA ?? false
+    }
+
+    var dashboardPrimaryActionID: String {
+        dashboardState?.primaryActionID ?? "diagnose"
+    }
+
+    var dashboardPrimaryActionTarget: DashboardActionTarget {
+        dashboardState?.primaryActionTarget ?? .none
     }
 
     var recommendedAction: Action? {
@@ -1718,18 +2045,12 @@ final class DashboardViewModel: ObservableObject {
     }
 
     var rollbackAvailable: Bool {
-        guard let report else { return false }
-        let actions = [report.explanation?.primaryAction].compactMap { $0 } + (report.explanation?.actions ?? [])
-        if actions.contains(where: actionLooksLikeRollback) {
-            return true
-        }
-        return report.fixes.contains { fix in
-            let text = "\(fix.id) \(fix.description)".lowercased()
-            return text.contains("rollback") || text.contains("restore") || text.contains("回滚") || text.contains("恢复")
-        }
+        dashboardState?.secondaryActionTarget == .staleBridgeRecovery
     }
 
     private var client: APIClient?
+    private weak var dashboardStore: DashboardStateStore?
+    private var dashboardStoreCancellable: AnyCancellable?
     private var progressTimer: Timer?
     private var progressIndex = 0
     private var cancellationRequested = false
@@ -1740,7 +2061,7 @@ final class DashboardViewModel: ObservableObject {
         case fix
         case checkServices(String)
         case executeAction(Action)
-        case rollback
+        case recover
     }
 
     private func actionLooksLikeRollback(_ action: Action) -> Bool {
@@ -1748,29 +2069,40 @@ final class DashboardViewModel: ObservableObject {
         return text.contains("rollback") || text.contains("restore") || text.contains("回滚") || text.contains("恢复")
     }
 
-    func bind(backend: Backend) async {
+    func bind(backend: Backend, dashboardStore: DashboardStateStore) async {
+        if self.dashboardStore !== dashboardStore {
+            self.dashboardStore = dashboardStore
+            dashboardStoreCancellable = dashboardStore.$state
+                .compactMap { $0 }
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] response in
+                    guard let self else { return }
+                    self.dashboardState = DashboardHomePresentation(response: response)
+                    if !self.isWorking {
+                        self.headline = response.headline
+                    }
+                }
+            if let response = dashboardStore.state {
+                self.dashboardState = DashboardHomePresentation(response: response)
+                self.headline = response.headline
+            }
+        }
+
         for await _ in backend.$state.values {
             updateHeadline(backend: backend)
             if backend.isReady, let url = backend.apiURL, let token = backend.apiToken, client == nil {
-                client = APIClient(baseURL: url, apiToken: token)
-                Task {
-                    await refreshProxyUsage()
-                    await refreshDashboardState()
-                    await refreshDashboardInsights()
-                    await refreshCloudAIStatus()
-                }
+                let apiClient = APIClient(baseURL: url, apiToken: token)
+                client = apiClient
+                dashboardStore.configure(client: apiClient)
+                await dashboardStore.refresh()
+            } else if !backend.isReady {
+                client = nil
             }
         }
     }
 
     func refreshDashboardState() async {
-        guard let client else { return }
-        do {
-            let response = try await client.dashboardState()
-            dashboardState = DashboardUIStateInfo(response.uiState)
-        } catch {
-            // 静默失败：dashboard state 是装饰性信息，主流程不依赖它。
-        }
+        await dashboardStore?.refresh()
     }
 
     func refreshDashboardInsights() async {
@@ -1870,7 +2202,7 @@ final class DashboardViewModel: ObservableObject {
             }
             stopWork()
         } else {
-            copyFeedback = "已给出本地结论（无需 API Key）。需要更详细的解释时，到「设置 → AI」粘贴 API Key。"
+            copyFeedback = "已给出本地结论（无需 AI 密钥）。需要更详细的解释时，到「设置 → AI」填写 AI 密钥。"
         }
     }
 
@@ -1906,7 +2238,7 @@ final class DashboardViewModel: ObservableObject {
                 let severity = report.overallStatus == .ok ? "ok" : (report.overallStatus == .fail ? "fail" : "warn")
                 return (report.summaryHeadline, detail + extra, severity)
             }
-            return ("还没有诊断结果", "请先点「一键诊断」；结果出来后这里会基于本地规则直接告诉你现在该怎么办，不需要 API Key。", "info")
+            return ("还没有诊断结果", "请先点「检查当前网络」；结果出来后这里会基于本地规则直接告诉你现在该怎么办，不需要 AI 密钥。", "info")
         case .proxy:
             return (
                 "代理部署的常见问题",
@@ -1960,7 +2292,7 @@ final class DashboardViewModel: ObservableObject {
         errorMessage = nil
         guard recommendedAction != nil else {
             headline = "没有可直接处理的建议"
-            errorMessage = "先点“一键诊断”。只有 Netfix 找到明确建议后，才会出现可处理按钮。"
+            errorMessage = "先点“检查当前网络”。只有 Netfix 找到明确建议后，才会出现可处理按钮。"
             return
         }
         headline = "请选择上方的处理建议"
@@ -1968,6 +2300,10 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func executeAction(_ action: Action) async {
+        await executeAction(action, confirmed: false)
+    }
+
+    func executeAction(_ action: Action, confirmed: Bool) async {
         guard let client = client else { return }
         errorMessage = nil
         lastOperation = .executeAction(action)
@@ -1976,9 +2312,14 @@ final class DashboardViewModel: ObservableObject {
             "正在验证修复结果…",
         ])
         do {
-            let result = try await client.executeFix(fixId: action.id, timeout: 60)
+            let result = try await client.executeFix(
+                fixId: action.id,
+                timeout: 60,
+                confirmed: confirmed
+            )
             self.report = result
             headline = result.explanation?.headline ?? result.summaryHeadline
+            await refreshDashboardState()
             await refreshDashboardInsights()
         } catch {
             let message = error.localizedDescription
@@ -1989,47 +2330,31 @@ final class DashboardViewModel: ObservableObject {
         stopWork()
     }
 
-    func rollback() async {
+    func recoverStaleBridge() async {
         guard let client = client else { return }
         errorMessage = nil
-        lastOperation = .rollback
+        lastOperation = .recover
         startWork(steps: [
-            "正在检查是否有代理部署需要恢复…",
-            "正在重新检测…",
+            "正在停止 Netfix 代理…",
+            "正在恢复原来的网络设置…",
         ])
         do {
-            let proxyRollback = try await client.rollbackProxyProfile(confirmed: true)
-            if proxyRollback.ok {
-                headline = "已恢复代理部署前网络"
-                do {
-                    let fresh = try await client.diagnose(timeout: 60)
-                    self.report = fresh
-                    headline = fresh.explanation?.headline ?? fresh.summaryHeadline
-                } catch {
-                    errorMessage = "已恢复代理部署前网络，但重新检测失败：\(error.localizedDescription)"
-                }
-                await refreshProxyUsage()
-                await refreshDashboardInsights()
-                stopWork()
-                return
-            }
-            if proxyRollback.status == "no_journal" {
-                let result = try await client.rollback(timeout: 30)
-                self.report = result
-                headline = "已恢复"
-                await refreshProxyUsage()
-                await refreshDashboardInsights()
-                stopWork()
-                return
+            let response = try await client.recoverProxyBridge(confirmed: true)
+            if response.ok && response.status == "recovered" {
+                headline = "已恢复原来的网络设置"
+                errorMessage = nil
+            } else if response.ok && response.status == "no_recovery_needed" {
+                headline = "当前没有执行恢复"
+                errorMessage = "代理可能仍在使用中。请保持 Netfix 运行，重新读取状态后再试。"
             } else {
-                headline = "恢复代理部署失败"
-                errorMessage = proxyRollback.error ?? "代理回滚没有完成，请查看日志。"
-                stopWork()
-                return
+                headline = "恢复失败"
+                errorMessage = response.error ?? response.status ?? "恢复没有完成。"
             }
+            await refreshDashboardState()
         } catch {
             errorMessage = error.localizedDescription
             headline = "恢复失败"
+            await refreshDashboardState()
         }
         stopWork()
     }
@@ -2103,10 +2428,10 @@ final class DashboardViewModel: ObservableObject {
     private func friendlyAIError(_ message: String) -> String {
         let lower = message.lowercased()
         if lower.contains("missing api key") || lower.contains("没有可用 api key") || lower.contains("api key") && lower.contains("missing") {
-            return "还没配置 AI：这只影响 AI 看报告，不影响诊断和代理部署。需要 AI 时，到设置里选择供应商并粘贴 API Key。"
+            return "还没配置 AI：这只影响 AI 看报告，不影响检查网络和使用代理。需要 AI 时，到设置里选择供应商并填写 AI 密钥。"
         }
         if lower.contains("cloud ai explanation is disabled") || lower.contains("llm_disabled") {
-            return "AI 还没启用：打开设置里的 AI，启用后粘贴 API Key 并保存测试。"
+            return "AI 还没启用：打开设置里的 AI，启用后填写 AI 密钥并保存测试。"
         }
         if lower.contains("upload_consent") || lower.contains("上传") {
             return "AI 没有发送报告：确认发送脱敏诊断报告后再试。"
@@ -2125,8 +2450,8 @@ final class DashboardViewModel: ObservableObject {
             await checkServices(group: group)
         case .executeAction(let action):
             await executeAction(action)
-        case .rollback:
-            await rollback()
+        case .recover:
+            await recoverStaleBridge()
         }
     }
 
@@ -2293,15 +2618,15 @@ final class DashboardViewModel: ObservableObject {
                 detail: "运行一次检查后，这里会显示速度、延迟和稳定性。",
                 icon: "questionmark.circle",
                 color: .secondary,
-                speedLabel: "未知",
-                speedHint: "还没采集速度数据",
+                speedLabel: "未测",
+                speedHint: "本次检查会补上",
                 speedColor: .secondary,
                 showMetrics: false,
-                latencyLabel: "未知",
-                latencyHint: "还没采集网络质量",
+                latencyLabel: "未测",
+                latencyHint: "本次检查会补上",
                 latencyColor: .secondary,
-                stabilityLabel: "未知",
-                stabilityHint: "还没采集丢包数据",
+                stabilityLabel: "未测",
+                stabilityHint: "本次检查会补上",
                 stabilityColor: .secondary,
                 bandwidthHint: nil,
                 responsivenessRPM: nil,
@@ -2336,9 +2661,9 @@ final class DashboardViewModel: ObservableObject {
         let (speedLabel, speedHint, speedColor): (String, String, Color) = {
             if dlKbps == nil && ulKbps == nil {
                 if qualityWarnWithoutNumbers {
-                    return ("待确认", "本次没有拿到速度数据", .blue)
+                    return ("需复查", "本次没有拿到速度数据", .blue)
                 }
-                return ("未知", "没有吞吐数据", .secondary)
+                return ("未测", "本次检查会补上", .secondary)
             }
             let down = dlKbps.map { Double($0) / 1_000.0 }
             let up = ulKbps.map { Double($0) / 1_000.0 }
@@ -2351,7 +2676,7 @@ final class DashboardViewModel: ObservableObject {
                 case let (.none, .some(up)):
                     return String(format: "上传 %.1f Mbps", up)
                 default:
-                    return "没有吞吐数据"
+                    return "还没测"
                 }
             }()
             if let down, down < 5 {
@@ -2367,13 +2692,13 @@ final class DashboardViewModel: ObservableObject {
         }()
 
         let (latencyLabel, latencyHint, latencyColor): (String, String, Color) = {
-            if baseRTT == nil { return ("未知", "没有 base_rtt 数据", .secondary) }
+            if baseRTT == nil { return ("未测", "本次检查会补上", .secondary) }
             if let rtt = baseRTT {
-                if rtt <= 60 { return ("低", "基础延迟 \(rtt)ms 附近", .green) }
-                if rtt <= 150 { return ("中等", "基础延迟 \(rtt)ms，实时应用会有等待感", .blue) }
-                return ("较高", "基础延迟 \(rtt)ms，会有明显等待感", .orange)
+                if rtt <= 60 { return ("低", "延迟 \(rtt)ms，实时输出比较顺", .green) }
+                if rtt <= 150 { return ("中等", "延迟 \(rtt)ms，实时输出会有轻微等待", .blue) }
+                return ("较高", "延迟 \(rtt)ms，实时输出会有明显等待", .orange)
             }
-            return ("未知", "", .secondary)
+            return ("未测", "", .secondary)
         }()
 
         let (stabilityLabel, stabilityHint, stabilityColor): (String, String, Color) = {
@@ -2382,7 +2707,7 @@ final class DashboardViewModel: ObservableObject {
                 if loss <= 5 { return ("轻微波动", "路径上有轻微丢包（\(Int(loss))%）", .blue) }
                 return ("丢包较明显", "路径丢包 \(Int(loss))%，换网络或节点后再试", .orange)
             }
-            return ("未知", "没有路径丢包数据", .secondary)
+            return ("未测", "本次检查会补上", .secondary)
         }()
 
         let (headline, icon, color, detail): (String, String, Color, String) = {
@@ -2408,15 +2733,15 @@ final class DashboardViewModel: ObservableObject {
                 )
             }
             if let rtt = baseRTT, rtt > 200 {
-                return ("响应较慢", "speedometer", Color.blue, "基础延迟较高，实时应用会有明显等待。")
+                return ("响应较慢", "speedometer", Color.blue, "延迟较高，实时应用会有明显等待。")
             }
             if let rtt = baseRTT, rtt > 120 {
-                return ("响应一般", "speedometer", Color.blue, "基础延迟在 \(rtt)ms 附近，实时输出可能会慢一点。")
+                return ("响应一般", "speedometer", Color.blue, "延迟 \(rtt)ms，实时输出可能会慢一点。")
             }
             if let rpm = rpm {
-                if rpm < 50 { return ("响应较慢", "speedometer", Color.blue, "响应性 \(rpm)，实时应用会有明显等待。") }
-                if rpm < 200 { return ("响应一般", "speedometer", Color.blue, "响应性 \(rpm)，实时输出可能会慢一点。") }
-                return ("顺畅", "hare.fill", Color.green, "响应性 \(rpm)，日常使用没问题。")
+                if rpm < 50 { return ("响应较慢", "speedometer", Color.blue, "实时应用会有明显等待。") }
+                if rpm < 200 { return ("响应一般", "speedometer", Color.blue, "实时输出可能会慢一点。") }
+                return ("顺畅", "hare.fill", Color.green, "日常使用没问题。")
             }
             if qualityWarnWithoutNumbers {
                 return ("可用", "checkmark.circle", Color.green, "网络可用；本次没有拿到速度/延迟数据，可重新检测确认。")
@@ -2548,7 +2873,7 @@ private struct LogsSheetView: View {
                 Divider()
 
                 if logs.events.isEmpty {
-                    Text("暂无事件。运行一次诊断后，这里会显示最近状态变化。")
+                    Text("暂无事件。运行一次检查后，这里会显示历史记录。")
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {

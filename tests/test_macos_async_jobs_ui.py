@@ -36,18 +36,20 @@ def test_macos_mutating_fix_paths_still_use_confirmed_synchronous_calls():
     api_client = API_CLIENT.read_text(encoding="utf-8")
 
     assert "func executeAction(_ action: Action) async" in dashboard
-    assert "func rollback() async" in dashboard
+    assert "func recoverStaleBridge() async" in dashboard
     assert "client.fix(timeout: 90)" not in dashboard
     assert 'viewModel.recommendedAction' in dashboard
     assert 'Button("处理建议")' in dashboard
-    assert "client.executeFix(fixId: action.id, timeout: 60)" in dashboard
-    assert "client.rollbackProxyProfile(confirmed: true)" in dashboard
-    assert "client.rollback(timeout: 30)" in dashboard
-    assert "proxyRollback.status == \"no_journal\"" in dashboard
+    assert "confirmed: confirmed" in dashboard
+    assert "client.recoverProxyBridge(confirmed: true)" in dashboard
+    assert "client.rollbackProxyProfile(confirmed: true)" not in dashboard
+    assert "client.rollback(timeout: 30)" not in dashboard
+    assert "no_recovery_needed" in dashboard
     assert 'body: ["command": ["fix", "--all", "--yes", "--report"], "timeout": timeout]' not in api_client
     assert 'path: "fixes/execute"' in api_client
     assert 'path: "proxy/profiles/rollback"' in api_client
-    assert '"confirmation": "APPLY_SYSTEM_FIX"' in api_client
+    assert 'path: "proxy/bridge/recover"' in api_client
+    assert 'body["confirmation"] = "APPLY_SYSTEM_FIX"' in api_client
     assert '"confirmation"] = "ROLLBACK_PROXY_PROFILE"' in api_client
     assert "让 Netfix 处理这个问题？" in dashboard
     assert "你需要做的事" in dashboard
@@ -80,12 +82,12 @@ def test_macos_toolbar_splits_primary_and_secondary_actions():
     dashboard = DASHBOARD.read_text(encoding="utf-8")
 
     assert "private var actionToolbar: some View" in dashboard
-    assert "private var primaryActionToolbar: some View" in dashboard
+    assert "private var primaryActionToolbar: some View" not in dashboard
     assert "private var secondaryActionToolbar: some View" in dashboard
-    assert "VStack(alignment: .leading, spacing: 8)" in dashboard
     assert 'Button("代理")' in dashboard
     assert 'Button("日志")' in dashboard
     assert 'Button("设置")' in dashboard
+    assert 'Menu("更多")' in dashboard
 
 
 def test_health_monitor_auto_fix_uses_explicit_tier1_action_only():

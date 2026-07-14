@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from netfix import api, diagnose, explain, kb, logs, reasoner, residential_proxy, services, settings
+from netfix import api, dashboard_state, diagnose, explain, kb, logs, reasoner, residential_proxy, services, settings
 from netfix.codex import check_codex
 from netfix.constants import CASES_DIR, RULES_DIR, VERSION
 from netfix.detect import detect_environment, get_core
@@ -144,6 +144,9 @@ def _build_report(
     env: Dict[str, Any],
     diagnostics: List[Dict[str, Any]],
     root_causes_raw: List[Dict[str, Any]],
+    *,
+    origin: str = "unknown",
+    coverage: str = "partial",
 ) -> Dict[str, Any]:
     fix_ids: set = set()
     manual_entries: List[Any] = []
@@ -169,6 +172,9 @@ def _build_report(
             "timestamp": human_time(),
             "platform": env.get("platform", {}).get("platform"),
             "hostname": platform.node(),
+            "origin": origin,
+            "coverage": coverage,
+            "route_signature": dashboard_state.build_route_signature(env),
         },
         "environment": env,
         "diagnostics": [_normalize_diagnostic(item) for item in diagnostics],
@@ -193,9 +199,21 @@ def _run_diagnostics(
     names: List[str], env: Dict[str, Any], core: Optional[Any], timeout: int
 ) -> List[Dict[str, Any]]:
     # Cap per-diagnostic timeout so a full doctor run finishes within the UI
-    # HTTP window even on flaky networks.  Individual probes rarely need >10s.
-    per_diag_timeout = max(5, min(timeout, 10))
-    return [diagnose.run_diagnostic(n, env, core, timeout=per_diag_timeout) for n in names]
+    # HTTP window even on flaky networks. Apple's networkQuality normally
+    # needs longer than the small reachability probes, so give that explicit
+    # user-requested measurement up to 30 seconds instead of returning an
+    # empty sample every time.
+    regular_timeout = max(5, min(timeout, 10))
+    quality_timeout = max(regular_timeout, min(timeout, 60))
+    return [
+        diagnose.run_diagnostic(
+            name,
+            env,
+            core,
+            timeout=quality_timeout if name == "network_quality" else regular_timeout,
+        )
+        for name in names
+    ]
 
 
 def _maybe_save_case(report_data: Dict[str, Any], args: argparse.Namespace) -> Optional[Path]:
@@ -269,7 +287,7 @@ def cmd_codex(args: argparse.Namespace) -> int:
         diagnose.run_diagnostic("node_reachability", env, core, timeout=args.timeout)
     )
     root_causes = reasoner.reason(env, diagnostics)
-    report_data = _build_report(env, diagnostics, root_causes)
+    report_data = _build_report(env, diagnostics, root_causes, origin="codex", coverage="target_subset")
     report = Report(report_data)
     report.save()
     case_path = _maybe_save_case(report_data, args)
@@ -298,7 +316,7 @@ def cmd_services(args: argparse.Namespace) -> int:
     )
     root_causes = reasoner.reason(env, diagnostics)
     summary = services.summarize_group(service_results)
-    report_data = _build_report(env, diagnostics, root_causes)
+    report_data = _build_report(env, diagnostics, root_causes, origin="services", coverage="target_subset")
     report_data["service_summary"] = summary
     report = Report(report_data)
     report.save()
@@ -336,7 +354,7 @@ def cmd_layers(args: argparse.Namespace) -> int:
     core = get_core(env)
     diagnostics = _run_diagnostics(_LAYER_DIAGNOSTICS, env, core, args.timeout)
     root_causes = reasoner.reason(env, diagnostics)
-    report_data = _build_report(env, diagnostics, root_causes)
+    report_data = _build_report(env, diagnostics, root_causes, origin="layers", coverage="network_stack")
     report = Report(report_data)
     report.save()
     case_path = _maybe_save_case(report_data, args)
@@ -360,7 +378,7 @@ def cmd_triage(args: argparse.Namespace) -> int:
     ]
     diagnostics = _run_diagnostics(names, env, core, args.timeout)
     root_causes = reasoner.reason(env, diagnostics)
-    report_data = _build_report(env, diagnostics, root_causes)
+    report_data = _build_report(env, diagnostics, root_causes, origin="triage", coverage="partial")
     report = Report(report_data)
     report.save()
     case_path = _maybe_save_case(report_data, args)
@@ -385,7 +403,7 @@ def cmd_proxy(args: argparse.Namespace) -> int:
     ]
     diagnostics = _run_diagnostics(names, env, core, args.timeout)
     root_causes = reasoner.reason(env, diagnostics)
-    report_data = _build_report(env, diagnostics, root_causes)
+    report_data = _build_report(env, diagnostics, root_causes, origin="proxy", coverage="proxy_subset")
     report = Report(report_data)
     report.save()
     case_path = _maybe_save_case(report_data, args)
@@ -410,7 +428,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     ]
     diagnostics = _run_diagnostics(names, env, core, args.timeout)
     root_causes = reasoner.reason(env, diagnostics)
-    report_data = _build_report(env, diagnostics, root_causes)
+    report_data = _build_report(env, diagnostics, root_causes, origin="doctor", coverage="current_mac_full")
     report = Report(report_data)
     report.save()
     case_path = _maybe_save_case(report_data, args)
@@ -427,7 +445,7 @@ def cmd_dns(args: argparse.Namespace) -> int:
     names = ["dns_local", "dns_public", "dns_cache"]
     diagnostics = _run_diagnostics(names, env, core, args.timeout)
     root_causes = reasoner.reason(env, diagnostics)
-    report_data = _build_report(env, diagnostics, root_causes)
+    report_data = _build_report(env, diagnostics, root_causes, origin="dns", coverage="target_subset")
     report = Report(report_data)
     report.save()
     case_path = _maybe_save_case(report_data, args)
@@ -441,7 +459,7 @@ def cmd_wifi(args: argparse.Namespace) -> int:
     env = _enrich_env(detect_environment())
     core = get_core(env)
     diagnostics = [diagnose.run_diagnostic("wifi_signal", env, core, timeout=args.timeout)]
-    report_data = _build_report(env, diagnostics, [])
+    report_data = _build_report(env, diagnostics, [], origin="wifi", coverage="target_subset")
     report = Report(report_data)
     report.save()
     case_path = _maybe_save_case(report_data, args)
@@ -456,7 +474,7 @@ def cmd_ssl(args: argparse.Namespace) -> int:
     core = get_core(env)
     env["ssl_target"] = args.domain
     diagnostics = [diagnose.run_diagnostic("ssl_cert", env, core, timeout=args.timeout)]
-    report_data = _build_report(env, diagnostics, [])
+    report_data = _build_report(env, diagnostics, [], origin="ssl", coverage="target_subset")
     report = Report(report_data)
     report.save()
     case_path = _maybe_save_case(report_data, args)
@@ -471,7 +489,7 @@ def cmd_connectivity(args: argparse.Namespace) -> int:
     core = get_core(env)
     env["connectivity_target"] = args.target
     diagnostics = [diagnose.run_diagnostic("connectivity", env, core, timeout=args.timeout)]
-    report_data = _build_report(env, diagnostics, [])
+    report_data = _build_report(env, diagnostics, [], origin="connectivity", coverage="target_subset")
     report = Report(report_data)
     report.save()
     case_path = _maybe_save_case(report_data, args)
@@ -498,7 +516,13 @@ def cmd_fix(args: argparse.Namespace) -> int:
         ]
         diagnostics = _run_diagnostics(names, env, core, args.timeout)
         root_causes = reasoner.reason(env, diagnostics)
-        report_data = _build_report(env, diagnostics, root_causes)
+        report_data = _build_report(
+            env,
+            diagnostics,
+            root_causes,
+            origin="post_fix_doctor",
+            coverage="current_mac_full",
+        )
         if no_auto_fixes:
             report_data.setdefault("meta", {})["no_auto_fixes"] = True
         report = Report(report_data)
@@ -636,7 +660,7 @@ def _codex_summary(args: argparse.Namespace) -> Dict[str, Any]:
         diagnose.run_diagnostic("node_reachability", env, core, timeout=args.timeout)
     )
     root_causes = reasoner.reason(env, diagnostics)
-    report_data = _build_report(env, diagnostics, root_causes)
+    report_data = _build_report(env, diagnostics, root_causes, origin="codex", coverage="target_subset")
     report = Report(report_data)
     report.save()
     return report_data
@@ -886,10 +910,24 @@ def cmd_server(args: argparse.Namespace) -> int:
     return 0
 
 
+_CLI_START_HERE_EPILOG = """\
+start here:
+
+  普通用户：打开 Netfix.app，主窗口已经自动接入 /dashboard/state。
+  Agent / Codex：用 python3 netfix.py codex --json 一键检查 Codex 链路。
+  开发者：python3 netfix.py server --host 127.0.0.1 --port 0 起本地 HTTP API；
+           浏览器会打开 Web 控制台，token 写入 ~/.netfix/api-token-<pid>.txt。
+
+更多诊断、修复、AI 解释子命令见各子命令的帮助（python3 netfix.py <cmd> --help）。
+"""
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="netfix",
         description="Offline-first network self-rescue agent for macOS.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_CLI_START_HERE_EPILOG,
     )
     parser.add_argument("--version", action="version", version=f"netfix {VERSION}")
 
@@ -913,9 +951,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_services.add_argument("--group", type=str, default=None, help="分组 id，逗号分隔，如 ai,dev,common")
     p_services.add_argument("--proxy", type=str, default=None, help="手动指定代理 URL")
 
-    sub.add_parser("triage", parents=[common], help="快速排查最常见网络问题")
+    p_triage = sub.add_parser("triage", aliases=["check"], parents=[common], help="快速排查最常见网络问题")
+    p_triage.set_defaults(command="triage")
     sub.add_parser("proxy", parents=[common], help="代理核心专项诊断")
-    sub.add_parser("doctor", parents=[common], help="完整检查网络、DNS、代理和目标网站")
+    p_doctor = sub.add_parser("doctor", aliases=["full-check"], parents=[common], help="完整检查网络、DNS、代理和目标网站")
+    p_doctor.set_defaults(command="doctor")
     sub.add_parser("layers", parents=[common], help="全栈分层诊断")
 
     p_dns = sub.add_parser("dns", parents=[common], help="DNS 诊断")
@@ -942,7 +982,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("explain", parents=[common], help="用人话解释上一次报告")
     sub.add_parser("rollback", parents=[common], help="恢复上一次修改前的网络设置")
 
-    p_kb = sub.add_parser("kb", parents=[common], help="按关键词查解决手册")
+    p_kb = sub.add_parser("kb", aliases=["guide"], parents=[common], help="按关键词查解决手册")
+    p_kb.set_defaults(command="kb")
     p_kb.add_argument("--query", type=str, required=True, help="关键词")
 
     p_watch = sub.add_parser("watch", parents=[common], help="持续监控 Codex 连通性")

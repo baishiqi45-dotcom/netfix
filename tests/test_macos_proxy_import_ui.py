@@ -45,7 +45,9 @@ def test_macos_proxy_import_preview_is_visible_and_secret_safe():
     assert "流程：粘贴整行参数" in settings
     assert "await saveProxyProfile(input: selected)" in settings
     assert "proxyStatus = \"正在保存并启动监控...\"" in settings
-    assert "saveProxyProfile(input: String, startMonitor: Bool = true, targetProfile: String = \"baseline\", protocolHint: String = \"auto\")" in api_client
+    assert "validationReceipt: String? = nil" in api_client
+    assert 'body["validation_receipt"] = validationReceipt' in api_client
+    assert "ProxySetupWorkflow(client: client).validateAndSave" in settings
     assert "protocolHint: proxyProtocolHint" in settings
     assert 'body["start_monitor"] = startMonitor' in api_client
     assert "let monitor: ProxyMonitorState?" in models

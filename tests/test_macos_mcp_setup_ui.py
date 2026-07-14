@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SETTINGS = ROOT / "gui" / "macos" / "Sources" / "Views" / "SettingsView.swift"
 README = ROOT / "README.md"
 README_EN = ROOT / "README.en.md"
+DEVELOPER_INTERFACES = ROOT / "docs" / "developer" / "interfaces.md"
 
 
 def test_macos_settings_has_app_bundle_mcp_copy_tab():
@@ -20,15 +21,17 @@ def test_macos_settings_has_app_bundle_mcp_copy_tab():
     assert "复制 Kimi/通用配置" in source
     assert "command: python3" in source
     assert "NSPasteboard.general.setString" in source
-    assert "MCP 不保存 API Key 或代理密码" in source
+    assert "MCP 不保存 AI 密钥或代理密码" in source
 
 
-def test_readmes_explain_app_mcp_copy_path_before_source_script():
+def test_developer_docs_explain_app_mcp_copy_path_and_source_script():
     readme = README.read_text(encoding="utf-8")
     readme_en = README_EN.read_text(encoding="utf-8")
+    interfaces = DEVELOPER_INTERFACES.read_text(encoding="utf-8")
 
-    assert "设置 → AI 编程助手 → 复制给 Codex" in readme
-    assert "复制 Kimi/通用配置" in readme
-    assert readme.index("设置 → AI 编程助手") < readme.index("./scripts/install_mcp.sh --all")
-    assert "Settings -> AI Coding Assistant -> Copy for Codex" in readme_en
-    assert "Copy Kimi / generic config" in readme_en
+    assert "./scripts/install_mcp.sh --all" not in readme
+    assert "./scripts/install_mcp.sh --all" not in readme_en
+    assert "Settings -> Advanced &" in interfaces
+    assert "Copy for Codex" in interfaces
+    assert "Copy Kimi /" in interfaces
+    assert "./scripts/install_mcp.sh --all --dry-run" in interfaces

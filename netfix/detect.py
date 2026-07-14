@@ -105,7 +105,7 @@ def detect_platform() -> dict[str, str | None]:
     return result
 
 
-def detect_system_proxy() -> dict[str, str | None]:
+def detect_system_proxy() -> dict[str, Any]:
     """Parse ``scutil --proxy`` and return enabled proxy endpoints.
 
     Returns:
@@ -117,6 +117,7 @@ def detect_system_proxy() -> dict[str, str | None]:
         "https": None,
         "socks": None,
         "pac": None,
+        "_detection_status": "unknown",
     }
     try:
         output = run_command(["scutil", "--proxy"])
@@ -140,6 +141,7 @@ def detect_system_proxy() -> dict[str, str | None]:
             result["socks"] = _endpoint("SOCKSProxy", "SOCKSPort")
         if proxies.get("ProxyAutoConfigEnable"):
             result["pac"] = proxies.get("ProxyAutoConfigURLString")
+        result["_detection_status"] = "ok"
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("detect_system_proxy failed: %s", exc)
     return result

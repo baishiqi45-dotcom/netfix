@@ -84,7 +84,7 @@ def test_macos_proxy_validation_target_matrix_is_selectable_and_applied():
     assert "await replaceProxyProfile(profile)" in settings
     assert "monitorPersistedCleared" in models
     assert 'case monitorPersistedCleared = "monitor_persisted_cleared"' in models
-    assert "清理重启自动恢复配置" in settings
+    assert "清理重启后继续看护配置" in settings
     assert 'Button("删除", role: .destructive)' in settings
     assert 'Button("更新参数")' in settings
     assert "粘贴新的代理连接参数" in settings
@@ -116,7 +116,7 @@ def test_macos_proxy_tab_prioritizes_plain_one_paste_wizard():
     assert "自动判断" in settings
     assert "如果服务商明确写 SOCKS5" in settings
     assert "保存不会改网络" in settings
-    assert "还没有影响浏览器" in settings
+    assert "暂不影响浏览器" in settings
     assert "开始使用代理" in settings
     assert "不要只复制出口 IP" in settings
     assert 'Label("只检查，不保存", systemImage: "checklist")' in settings
