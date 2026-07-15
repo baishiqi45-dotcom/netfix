@@ -15,6 +15,7 @@ from netfix.utils import secure_append_text, secure_write_text
 
 EVENTS_FILE = JOURNAL_DIR / "events.jsonl"
 LATEST_REPORT = JOURNAL_DIR / "last_report.json"
+CURRENT_MAC_REPORT = JOURNAL_DIR / "current_mac_report.json"
 
 
 def _parse_timestamp(value: Any) -> Optional[datetime]:
@@ -299,7 +300,7 @@ def clear_logs(clear_latest_report: bool = True, clear_events: bool = True) -> D
     errors: Dict[str, str] = {}
     targets = []
     if clear_latest_report:
-        targets.append(LATEST_REPORT)
+        targets.extend([LATEST_REPORT, CURRENT_MAC_REPORT])
     if clear_events:
         targets.append(EVENTS_FILE)
     for path in targets:

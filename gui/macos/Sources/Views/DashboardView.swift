@@ -3,7 +3,7 @@ import Combine
 import AppKit
 import UniformTypeIdentifiers
 
-/// 主仪表盘：状态区、四张状态卡片、诊断 / 修复按钮、进度与结果摘要。
+/// 主仪表盘：一个当前结论、一个主动作和本机实际采到的网络体感。
 struct DashboardView: View {
     @ObservedObject var backend: Backend
     @ObservedObject var healthMonitor: HealthMonitor
@@ -16,18 +16,20 @@ struct DashboardView: View {
     @State private var showAIQuestionSheet = false
     @State private var aiQuestionContext: AIQuestionContext = .diagnosis
     @State private var aiQuestionPrompt: String? = nil
+    @State private var aiRequestTask: Task<Void, Never>?
+    @State private var isEvidenceExpanded = false
 
     var body: some View {
         VStack(spacing: 0) {
             statusHeader
-                .padding()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
 
             Divider()
 
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 12) {
                     currentStatusSection
-                    connectionQualitySection
 
                     if let stateError = dashboardStore.errorMessage {
                         stateReadError(stateError)
@@ -42,6 +44,10 @@ struct DashboardView: View {
                     }
 
                     diagnosticEvidenceSection
+
+                    if canOfferAIExplanation {
+                        aiExplanationEntry
+                    }
                 }
                 .padding()
             }
@@ -51,7 +57,7 @@ struct DashboardView: View {
             actionToolbar
                 .padding()
         }
-        .frame(minWidth: 420, idealWidth: 460, minHeight: 520)
+        .frame(minWidth: 420, idealWidth: 460, minHeight: 440)
         .task {
             await viewModel.bind(backend: backend, dashboardStore: dashboardStore)
         }
@@ -93,16 +99,34 @@ struct DashboardView: View {
         }
         .sheet(isPresented: $showAIQuestionSheet) {
             AIQuestionSheet(
-                isWorking: viewModel.isWorking,
+                isWorking: viewModel.isAIWorking,
+                isAIStatusLoading: viewModel.isAIStatusLoading,
+                hasCurrentReport: canOfferAIExplanation,
+                hasCloudAI: viewModel.hasCloudAI,
+                providerLabels: viewModel.aiProviderLabels,
+                uploadConsent: viewModel.aiUploadConsent,
+                imageQuestionEnabled: viewModel.aiImageQuestionEnabled,
                 context: aiQuestionContext,
                 initialPrompt: aiQuestionPrompt,
+                result: viewModel.llmExplanation,
+                errorMessage: viewModel.llmError,
                 onOpenAISettings: {
+                    showAIQuestionSheet = false
                     NSApp.sendAction(#selector(AppDelegate.showAISettings), to: nil, from: nil)
+                },
+                onRunCheck: {
+                    showAIQuestionSheet = false
+                    Task { await viewModel.diagnose() }
+                },
+                onCancelRequest: {
+                    aiRequestTask?.cancel()
+                    aiRequestTask = nil
+                    viewModel.cancelAIExplanation()
                 }
             ) { question, images in
-                showAIQuestionSheet = false
                 aiQuestionPrompt = nil
-                Task {
+                aiRequestTask?.cancel()
+                aiRequestTask = Task {
                     await viewModel.explainWithAI(
                         question: question,
                         imageDataURLs: images,
@@ -110,6 +134,9 @@ struct DashboardView: View {
                     )
                 }
             }
+        }
+        .onDisappear {
+            aiRequestTask?.cancel()
         }
     }
 
@@ -126,6 +153,21 @@ struct DashboardView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+
+            if dashboardStore.isRefreshing {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("正在重新读取当前状态")
+            } else {
+                Button {
+                    Task { await dashboardStore.refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.plain)
+                .help("重新读取当前状态")
+                .accessibilityLabel("重新读取当前状态")
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Netfix，\(viewModel.dashboardState?.headline ?? subtitle)")
@@ -855,43 +897,6 @@ struct DashboardView: View {
         return out
     }
 
-    private func actionabilityBadge(_ explanation: Explanation) -> some View {
-        let severity = DiagnosticStatus(explanation.severity ?? "ok")
-        if let action = explanation.primaryAction {
-            let text = action.needsConfirm ? "点确认后 Netfix 自动处理" : "一键处理"
-            let color: Color = action.needsConfirm ? .orange : .blue
-            return AnyView(
-                Label(text, systemImage: action.needsConfirm ? "hand.raised" : "bolt.fill")
-                    .font(.caption)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(color.opacity(0.15))
-                    .foregroundStyle(color)
-                    .cornerRadius(6)
-            )
-        }
-        if severity == .ok {
-            return AnyView(
-                Label("网络看起来正常", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.green.opacity(0.15))
-                    .foregroundStyle(.green)
-                    .cornerRadius(6)
-            )
-        }
-        return AnyView(
-            Label("需按下方步骤手动处理", systemImage: "person.fill")
-                .font(.caption)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.orange.opacity(0.15))
-                .foregroundStyle(.orange)
-                .cornerRadius(6)
-        )
-    }
-
     private func structuredErrorCard(for message: String) -> UserFacingMessage {
         UserFacingMessages.classify(message)
     }
@@ -909,6 +914,13 @@ struct DashboardView: View {
 
     private func openProxySettings() {
         NSApp.sendAction(#selector(AppDelegate.showProxySettings), to: nil, from: nil)
+    }
+
+    private func openAIExplanation(context: AIQuestionContext = .diagnosis, prompt: String? = nil) {
+        aiQuestionContext = context
+        aiQuestionPrompt = prompt
+        showAIQuestionSheet = true
+        Task { await viewModel.refreshCloudAIStatus() }
     }
 
     private func performDashboardPrimaryAction() {
@@ -963,24 +975,18 @@ struct DashboardView: View {
 
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 12) {
-                        compactIdentityItem(
-                            "\(state.interfaceLabel) · \(state.localIPLabel)",
-                            icon: "wifi"
-                        )
+                        compactIdentityItem(state.interfaceLabel, icon: "wifi")
                         Divider().frame(height: 16)
-                        compactIdentityItem(state.systemProxyLabel, icon: "switch.2")
+                        compactIdentityItem("代理 · \(state.systemProxyLabel)", icon: "switch.2")
                         Divider().frame(height: 16)
                         compactIdentityItem(state.egressLabel, icon: "globe")
                     }
 
                     VStack(alignment: .leading, spacing: 7) {
                         HStack(spacing: 12) {
-                            compactIdentityItem(
-                                "\(state.interfaceLabel) · \(state.localIPLabel)",
-                                icon: "wifi"
-                            )
+                            compactIdentityItem(state.interfaceLabel, icon: "wifi")
                             Divider().frame(height: 16)
-                            compactIdentityItem(state.systemProxyLabel, icon: "switch.2")
+                            compactIdentityItem("代理 · \(state.systemProxyLabel)", icon: "switch.2")
                         }
                         compactIdentityItem(state.egressLabel, icon: "globe")
                     }
@@ -1011,6 +1017,11 @@ struct DashboardView: View {
                     .disabled(!backend.isReady || viewModel.isWorking)
                     .accessibilityHint("停止使用 Netfix 代理，并恢复之前的网络设置")
                 }
+
+                if isSectionVisible("connection_quality") {
+                    Divider()
+                    connectionQualitySection
+                }
             }
             .padding()
             .background(Color(NSColor.controlBackgroundColor))
@@ -1039,76 +1050,77 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var connectionQualitySection: some View {
-        if isSectionVisible("connection_quality") {
-            let quality = viewModel.dashboardState?.connectionQuality
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: connectionQualityIcon(quality?.status))
-                        .foregroundStyle(connectionQualityColor(quality?.status))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("网络体感")
-                            .font(.headline)
-                        Text(connectionQualitySourceText(quality))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(connectionQualityBadge(quality))
-                        .font(.caption2)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(connectionQualityColor(quality?.status).opacity(0.12))
-                        .foregroundStyle(connectionQualityColor(quality?.status))
-                        .cornerRadius(6)
-                }
-
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 8) {
-                    connectionQualityMetric(title: "速度", metric: quality?.speed, icon: "speedometer")
-                    connectionQualityMetric(title: "延迟", metric: quality?.latency, icon: "timer")
-                    connectionQualityMetric(title: "稳定性", metric: quality?.stability, icon: "waveform.path")
-                    connectionQualityMetric(title: "后台占用", metric: quality?.backgroundActivity, icon: "arrow.up.arrow.down.circle")
-                }
+        let quality = viewModel.dashboardState?.connectionQuality
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: connectionQualityIcon(quality?.status))
+                    .foregroundStyle(connectionQualityColor(quality?.status))
+                Text("网络体感")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer()
+                Text(connectionQualityBadge(quality))
+                    .font(.caption2)
+                    .foregroundStyle(connectionQualityColor(quality?.status))
             }
-            .padding()
-            .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(8)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
-            )
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 8) {
+                connectionQualityMetric(title: "速度", metric: quality?.speed, icon: "speedometer")
+                connectionQualityMetric(title: "延迟", metric: quality?.latency, icon: "timer")
+                connectionQualityMetric(title: "稳定性", metric: quality?.stability, icon: "waveform.path")
+                connectionQualityMetric(title: "后台占用", metric: quality?.backgroundActivity, icon: "arrow.up.arrow.down.circle")
+            }
+
+            Text(connectionQualitySourceText(quality))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     @ViewBuilder
     private func connectionQualityMetric(title: String, metric: DashboardStateResponse.ConnectionQuality.Metric?, icon: String) -> some View {
         let label = metric?.label ?? "未测"
-        let value = metric?.value ?? "还没测"
-        let hint = metric?.hint ?? "本机还没有返回这项数据。"
+        let value = compactMetricValue(metric)
+        let hint = metric?.hint ?? connectionQualitySourceText(viewModel.dashboardState?.connectionQuality)
         let color = metricColor(label)
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: icon)
-                .foregroundStyle(color)
-                .frame(width: 16)
-            VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .foregroundStyle(color)
+                    .frame(width: 14)
                 Text(title)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                Text("\(label) · \(value)")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(color)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(hint)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                Spacer(minLength: 4)
+                if label != "未测" && label != title {
+                    Text(label)
+                        .font(.caption2)
+                        .foregroundStyle(color)
+                        .lineLimit(1)
+                }
             }
+            Text(value)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(value == "—" ? Color.secondary : color)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(title)：\(label)，\(value)。\(hint)")
+    }
+
+    private func compactMetricValue(_ metric: DashboardStateResponse.ConnectionQuality.Metric?) -> String {
+        guard let metric else { return "—" }
+        let label = metric.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = metric.value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if label.isEmpty || label == "未测" || value.isEmpty || value == "未测" || value == "还没测" {
+            return "—"
+        }
+        return value.replacingOccurrences(of: " / ", with: "\n")
     }
 
     private func connectionQualityIcon(_ status: String?) -> String {
@@ -1123,22 +1135,28 @@ struct DashboardView: View {
 
     private func connectionQualitySourceText(_ quality: DashboardStateResponse.ConnectionQuality?) -> String {
         switch quality?.collectionState {
-        case "never_run": return "还没有本次数据。"
-        case "unavailable": return "本机未能采样，未使用猜测值。"
-        case "partial": return "来自最近一次检查，缺少的项目保持未测。"
-        case "stale": return "上次数据已过期，请重新检查。"
-        case "complete": return "来自最近一次检查，不会额外测速。"
-        default: return "只显示本机实际返回的数据。"
+        case "never_run": return "检查后会显示这台 Mac 的速度、延迟与稳定性。"
+        case "unavailable": return "本次没有采到速度、延迟或稳定性数据。"
+        case "partial": return "本次只采到部分数据，空白项没有使用猜测值。"
+        case "stale": return "这些数据已经过期，重新检查后会更新。"
+        case "complete": return "来自最近一次检查。"
+        default: return "尚无可用数据。"
         }
     }
 
     private func connectionQualityBadge(_ quality: DashboardStateResponse.ConnectionQuality?) -> String {
-        if quality?.collectionState == "stale" { return "已过期" }
+        switch quality?.collectionState {
+        case "never_run": return "待检查"
+        case "unavailable": return "未采到"
+        case "partial": return "部分数据"
+        case "stale": return "已过期"
+        default: break
+        }
         switch quality?.status {
         case "ok": return "已测"
         case "warn": return "需留意"
         case "fail": return "体感较差"
-        default: return "未测"
+        default: return "待检查"
         }
     }
 
@@ -1146,8 +1164,8 @@ struct DashboardView: View {
         switch status {
         case "ok": return .green
         case "partial": return .blue
-        case "warn": return .blue
-        case "fail": return .orange
+        case "warn": return .orange
+        case "fail": return .red
         default: return .secondary
         }
     }
@@ -1156,7 +1174,10 @@ struct DashboardView: View {
         if label.contains("未测") {
             return .secondary
         }
-        if label.contains("偏低") || label.contains("较高") || label.contains("不稳") || label.contains("上传") || label.contains("下载") {
+        if label.contains("偏低") || label.contains("较高") || label.contains("不稳") {
+            return .orange
+        }
+        if label.contains("上传") || label.contains("下载") {
             return .blue
         }
         if label.contains("充足") || label.contains("够用") || label == "低" || label.contains("稳定") || label.contains("平稳") {
@@ -1202,13 +1223,13 @@ struct DashboardView: View {
     @ViewBuilder
     private var diagnosticEvidenceSection: some View {
         if isSectionRendered("diagnostic_evidence") {
-            DisclosureGroup("诊断证据") {
+            DisclosureGroup(isExpanded: $isEvidenceExpanded) {
                 VStack(alignment: .leading, spacing: 12) {
                     if let summary = dashboardStore.state?.lastReportSummary,
                        summary.hasReport == true || summary.checkedAt != nil {
-                        evidenceRow("检查时间", value: summary.checkedAt ?? "尚未完成检查")
-                        evidenceRow("当前线路", value: summary.routeMatchesCurrent == true ? "与检查时一致" : "尚未确认")
-                        evidenceRow("可用证据", value: summary.usableForDashboard == true ? "可用" : "需要重新检查")
+                        evidenceRow("检查时间", value: friendlyEvidenceTime(summary.checkedAt))
+                        evidenceRow("与当前网络", value: summary.routeMatchesCurrent == true ? "一致" : "需要重新检查")
+                        evidenceRow("结果状态", value: summary.usableForDashboard == true ? "可用于当前结论" : "仅供历史参考")
                     }
                     if let report = viewModel.report {
                         Divider()
@@ -1230,21 +1251,39 @@ struct DashboardView: View {
                         }
                     }
                     if !hasDashboardReportEvidence && viewModel.report == nil {
-                        Text("还没有诊断证据。点「检查当前网络」后会显示在这里。")
+                        Text("检查后，这里会列出每一步结果。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
                 .padding(.top, 8)
+            } label: {
+                Label("检查详情", systemImage: "doc.text.magnifyingglass")
+                    .font(.subheadline)
             }
-            .padding()
-            .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(8)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
-            )
+            .padding(.horizontal, 4)
+            .padding(.vertical, 6)
         }
+    }
+
+    private func friendlyEvidenceTime(_ raw: String?) -> String {
+        guard let raw, !raw.isEmpty else { return "尚未完成检查" }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var date = formatter.date(from: raw)
+        if date == nil {
+            formatter.formatOptions = [.withInternetDateTime]
+            date = formatter.date(from: raw)
+        }
+        guard let date else { return "最近一次检查" }
+        let age = max(0, Date().timeIntervalSince(date))
+        if age < 60 { return "刚刚" }
+        if age < 3_600 { return "\(Int(age / 60)) 分钟前" }
+        if age < 86_400 { return "\(Int(age / 3_600)) 小时前" }
+        let display = DateFormatter()
+        display.dateStyle = .short
+        display.timeStyle = .short
+        return display.string(from: date)
     }
 
     private func evidenceRow(_ title: String, value: String) -> some View {
@@ -1265,6 +1304,47 @@ struct DashboardView: View {
         return summary.hasReport == true || summary.checkedAt != nil
     }
 
+    private var canOfferAIExplanation: Bool {
+        guard backend.isReady,
+              let summary = dashboardStore.state?.lastReportSummary else {
+            return false
+        }
+        return summary.hasReport == true
+            && summary.usableForDashboard == true
+            && summary.routeMatchesCurrent == true
+            && summary.stale != true
+    }
+
+    private var aiExplanationEntry: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.purple)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Button {
+                    openAIExplanation()
+                } label: {
+                    Label("问 AI 解释这次检查", systemImage: "sparkles")
+                }
+                .labelStyle(.titleOnly)
+                .buttonStyle(.borderless)
+                .disabled(viewModel.isAIWorking)
+
+                Text("对当前检查结果追问，不会更改网络设置。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("问 AI 解释这次检查。只解释当前结果，不会更改网络设置。")
+    }
+
     private func friendlyDiagnosticStatus(_ status: String) -> String {
         switch status {
         case "ok": return "正常"
@@ -1273,243 +1353,6 @@ struct DashboardView: View {
         default: return "未采样"
         }
     }
-
-    // MARK: - 结果区
-
-    private func resultSection(report: NetfixReport) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let explanation = report.explanation {
-                explanationCard(explanation)
-            }
-
-            if let ai = viewModel.llmExplanation {
-                aiExplanationCard(ai)
-            }
-
-            if let error = viewModel.llmError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
-
-            if viewModel.llmExplanation == nil {
-                Button {
-                    aiQuestionContext = .diagnosis
-                    showAIQuestionSheet = true
-                } label: {
-                    Label("生成简明说明", systemImage: "message")
-                }
-                .buttonStyle(.borderless)
-                .disabled(viewModel.isWorking)
-            }
-
-            DisclosureGroup("查看技术详情") {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(report.diagnostics) { item in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(item.displayTitle)
-                                    .font(.body)
-                                if item.displayTitle != item.name {
-                                    Text(item.name)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            let status = DiagnosticStatus(item.status)
-                            StatusIconView(status: status, label: statusLabel(status))
-                        }
-                    }
-                }
-                .padding(.top, 6)
-            }
-        }
-        .padding()
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(10)
-    }
-
-    private func explanationCard(_ explanation: Explanation) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                StatusIconView(status: DiagnosticStatus(explanation.severity ?? "ok"), label: "")
-                Text(explanation.headline ?? "诊断完成")
-                    .font(.headline)
-                Spacer()
-            }
-
-            HStack(spacing: 6) {
-                actionabilityBadge(explanation)
-                Spacer()
-            }
-
-            if let text = explanation.explanation, !text.isEmpty {
-                Text(text)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let primary = explanation.primaryAction {
-                Button(action: { requestAction(primary) }) {
-                    HStack {
-                        Image(systemName: primary.needsConfirm ? "exclamationmark.triangle" : "bolt.fill")
-                        Text(primary.label)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(primary.needsConfirm ? .orange : .blue)
-                .disabled(viewModel.isWorking)
-            }
-
-            let otherActions = explanation.actions.filter { $0.id != explanation.primaryAction?.id }
-            if !otherActions.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("还能做")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    ForEach(otherActions) { action in
-                        Button(action: { requestAction(action) }) {
-                            HStack {
-                                Text("• \(action.label)")
-                                Spacer()
-                                if action.needsConfirm {
-                                    Text("会改设置")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.isWorking)
-                    }
-                }
-            }
-
-            if !explanation.manualSteps.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("你需要做的事")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    ForEach(explanation.manualSteps) { step in
-                        VStack(alignment: .leading, spacing: 2) {
-                            if let desc = step.description, !desc.isEmpty {
-                                Text("• \(desc)")
-                                    .font(.body)
-                            }
-                            if let substeps = step.steps {
-                                ForEach(substeps, id: \.self) { s in
-                                    Text("  ◦ \(s)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func aiExplanationCard(_ result: LLMExplainResult) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: result.source == "llm" ? "sparkles" : "checklist.checked")
-                    .foregroundStyle(result.source == "llm" ? .purple : .blue)
-                Text(result.source == "llm" ? "AI 解释" : "Netfix 本地解释")
-                    .font(.headline)
-                Spacer()
-            }
-            if let headline = result.headline, !headline.isEmpty {
-                Text(headline)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-            }
-            if let explanation = result.explanation, !explanation.isEmpty {
-                Text(explanation)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-            }
-            if result.providerUsed != nil || result.fallbackReason != nil || result.redactedReportHash != nil || result.fallbackChain?.isEmpty == false {
-                DisclosureGroup("技术详情") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if let provider = providerDisplayName(result.providerUsed) {
-                            Text("使用模型：\(provider)")
-                        }
-                        if let reason = friendlyLLMReason(result.fallbackReasonLabel ?? result.fallbackReason) {
-                            Text("说明：\(reason)")
-                        }
-                        if let hash = result.redactedReportHash {
-                            Text("脱敏报告指纹：\(hash)")
-                                .lineLimit(1)
-                        }
-                        if let chain = result.fallbackChain, !chain.isEmpty {
-                            Text("模型尝试记录：" + chain.compactMap { step in
-                                guard let provider = providerDisplayName(step.provider), let status = step.status else { return nil }
-                                return "\(provider) \(friendlyProviderStatus(status))"
-                            }.joined(separator: " -> "))
-                        }
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                }
-                .font(.caption)
-            }
-        }
-        .padding()
-        .background(Color.purple.opacity(0.08))
-        .cornerRadius(10)
-    }
-
-    private func providerDisplayName(_ provider: String?) -> String? {
-        guard let provider, !provider.isEmpty else { return nil }
-        switch provider {
-        case "deepseek": return "DeepSeek"
-        case "moonshot_kimi": return "Kimi"
-        case "minimax": return "MiniMax"
-        case "qwen": return "Qwen"
-        case "custom_openai_compatible": return "自定义模型"
-        case "openai": return "OpenAI"
-        default: return provider
-        }
-    }
-
-    private func friendlyProviderStatus(_ status: String) -> String {
-        switch status {
-        case "ok", "ready": return "可用"
-        case "failed": return "失败"
-        case "skipped": return "已跳过"
-        case "missing_key": return "需要 AI 密钥"
-        default: return status
-        }
-    }
-
-    private func friendlyLLMReason(_ reason: String?) -> String? {
-        guard let reason, !reason.isEmpty else { return nil }
-        let lower = reason.lowercased()
-        if lower.contains("missing_api_key") || lower.contains("missing api key") {
-            return "还没有配置 AI 密钥。"
-        }
-        if lower.contains("llm_disabled") || lower.contains("disabled") {
-            return "AI 还没有启用。"
-        }
-        if lower.contains("upload_consent") {
-            return "需要你确认发送脱敏诊断报告。"
-        }
-        if lower.contains("rate_limited") || lower.contains("rate limit") {
-            return "供应商暂时限流，稍后再试。"
-        }
-        if lower.contains("quota") || lower.contains("billing") || lower.contains("balance") {
-            return "供应商额度或账单不可用。"
-        }
-        return reason
-    }
-
-    // legacyResultCard was the v1 fallback path. It has been removed: the
-    // home view renders only the verdict-driven currentStatusSection. The
-    // report's explanation (when present) flows through explanationCard.
 
     private func requestAction(_ action: Action) {
         if action.needsConfirm {
@@ -1561,14 +1404,14 @@ struct DashboardView: View {
             .disabled(!backend.isReady)
             .help("粘贴代理参数并确认是否让这台 Mac 使用")
 
-            Button("日志") {
-                showLogsSheet = true
-                Task {
-                    await viewModel.loadLogs()
-                }
+            Button {
+                openAIExplanation()
+            } label: {
+                Label("问 AI", systemImage: "sparkles")
             }
             .buttonStyle(.borderless)
-            .disabled(!backend.isReady)
+            .disabled(!canOfferAIExplanation || viewModel.isAIWorking)
+            .help(canOfferAIExplanation ? "让 AI 解释当前检查结果" : "先检查当前网络")
 
             Button("设置") {
                 NSApp.sendAction(#selector(AppDelegate.showSettings), to: nil, from: nil)
@@ -1589,16 +1432,13 @@ struct DashboardView: View {
                     }
                     .disabled(!backend.isReady || viewModel.isWorking)
                 }
-                Button("生成简明说明") {
-                    aiQuestionContext = .diagnosis
-                    showAIQuestionSheet = true
+                Button("查看日志") {
+                    showLogsSheet = true
+                    Task {
+                        await viewModel.loadLogs()
+                    }
                 }
-                .disabled(viewModel.report == nil || viewModel.isWorking)
-                Button("代理说明") {
-                    aiQuestionContext = .proxy
-                    showAIQuestionSheet = true
-                }
-                .disabled(viewModel.isWorking)
+                .disabled(!backend.isReady)
                 Button("复制脱敏报告") {
                     Task { await viewModel.copySupportBundle() }
                 }
@@ -1627,7 +1467,7 @@ fileprivate enum AIQuestionContext: Equatable {
         case .diagnosis:
             return ["下一步怎么处理？", "怎么看出来的？", "是不是代理没生效？"]
         case .proxy:
-            return ["这个代理能用吗？", "粘贴格式对吗？", "为什么 SOCKS5 失败？"]
+            return ["这个代理能用吗？", "粘贴格式对吗？", "为什么代理检查失败？"]
         }
     }
 
@@ -1636,42 +1476,74 @@ fileprivate enum AIQuestionContext: Equatable {
         case .diagnosis:
             return "留空也可以，Netfix 会直接解释当前诊断报告；也可以补一句你现在遇到什么。"
         case .proxy:
-            return "可以问代理怎么粘贴、HTTP 和 SOCKS5 怎么选、部署失败下一步怎么办。"
+            return "可以问代理怎么粘贴、该选哪种类型、开始使用失败后怎么办。"
         }
     }
 }
 
 private struct AIQuestionSheet: View {
     let isWorking: Bool
+    let isAIStatusLoading: Bool
+    let hasCurrentReport: Bool
+    let hasCloudAI: Bool
+    let providerLabels: [String]
+    let uploadConsent: String
+    let imageQuestionEnabled: Bool
     let context: AIQuestionContext
     let initialPrompt: String?
+    let result: LLMExplainResult?
+    let errorMessage: String?
     let onOpenAISettings: () -> Void
+    let onRunCheck: () -> Void
+    let onCancelRequest: () -> Void
     let onSend: (String, [String]) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var question: String
     @State private var images: [AIQuestionImage] = []
     @State private var uploadConfirmed = false
-    @State private var errorMessage: String?
+    @State private var attachmentError: String?
+    @FocusState private var questionFocused: Bool
 
     init(
         isWorking: Bool,
+        isAIStatusLoading: Bool,
+        hasCurrentReport: Bool,
+        hasCloudAI: Bool,
+        providerLabels: [String],
+        uploadConsent: String,
+        imageQuestionEnabled: Bool,
         context: AIQuestionContext,
         initialPrompt: String? = nil,
+        result: LLMExplainResult?,
+        errorMessage: String?,
         onOpenAISettings: @escaping () -> Void,
+        onRunCheck: @escaping () -> Void,
+        onCancelRequest: @escaping () -> Void,
         onSend: @escaping (String, [String]) -> Void
     ) {
         self.isWorking = isWorking
+        self.isAIStatusLoading = isAIStatusLoading
+        self.hasCurrentReport = hasCurrentReport
+        self.hasCloudAI = hasCloudAI
+        self.providerLabels = providerLabels
+        self.uploadConsent = uploadConsent
+        self.imageQuestionEnabled = imageQuestionEnabled
         self.context = context
         self.initialPrompt = initialPrompt
+        self.result = result
+        self.errorMessage = errorMessage
         self.onOpenAISettings = onOpenAISettings
+        self.onRunCheck = onRunCheck
+        self.onCancelRequest = onCancelRequest
         self.onSend = onSend
         self._question = State(initialValue: initialPrompt ?? "")
+        self._uploadConfirmed = State(initialValue: uploadConsent == "always")
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
                 Label("问 AI", systemImage: "sparkles")
                     .font(.headline)
                 Spacer()
@@ -1688,15 +1560,118 @@ private struct AIQuestionSheet: View {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("关闭 AI 解释")
+            }
+            .padding()
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    aiAvailability
+
+                    if hasCurrentReport {
+                        questionComposer
+                        promptGrid
+                        attachmentPicker
+                        privacyNotice
+                        answerSection
+                    } else {
+                        VStack(spacing: 12) {
+                            Image(systemName: "doc.text.magnifyingglass")
+                                .font(.largeTitle)
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                            Text("还没有可解释的当前检查")
+                                .font(.headline)
+                            Text("先检查当前网络，AI 才能根据这台 Mac 的最新结果回答。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                            Button("检查当前网络", action: onRunCheck)
+                                .buttonStyle(.borderedProminent)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 36)
+                    }
+                }
+                .padding()
             }
 
+            if hasCurrentReport {
+                Divider()
+                HStack {
+                    if isWorking {
+                        Button("停止这次解释", role: .cancel, action: onCancelRequest)
+                    }
+                    Spacer()
+                    Button("取消") {
+                        dismiss()
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    Button(result == nil ? "发送并解释" : "继续追问") {
+                        onSend(question.trimmingCharacters(in: .whitespacesAndNewlines), images.map(\.dataURL))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(isWorking || sendDisabled)
+                }
+                .padding()
+            }
+        }
+        .frame(minWidth: 380, idealWidth: 480, maxWidth: 520, minHeight: 420, idealHeight: 620, maxHeight: 700)
+        .onChange(of: uploadConsent) { value in
+            if value == "always" && images.isEmpty {
+                uploadConfirmed = true
+            }
+        }
+    }
+
+    private var aiAvailability: some View {
+        HStack(alignment: .top, spacing: 8) {
+            if isAIStatusLoading {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: hasCloudAI ? "checkmark.circle.fill" : "info.circle")
+                    .foregroundStyle(hasCloudAI ? Color.green : Color.secondary)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(hasCloudAI ? "AI 已就绪" : "当前使用 Netfix 本地解释")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Text(availabilityDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+    }
+
+    private var availabilityDetail: String {
+        if isAIStatusLoading { return "正在读取本机 AI 设置…" }
+        if hasCloudAI {
+            let providers = providerLabels.isEmpty ? "已配置的 AI" : providerLabels.joined(separator: "、")
+            return "将由\(providers)解释脱敏后的当前检查。"
+        }
+        return "没有云端 AI 也能看本地解释；需要更自然的回答时，到 AI 设置里选择供应商并填写 AI 密钥。"
+    }
+
+    private var questionComposer: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("你想问什么？")
+                .font(.subheadline)
+                .fontWeight(.semibold)
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $question)
+                    .focused($questionFocused)
                     .frame(minHeight: 88)
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
                             .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
                     )
+                    .accessibilityLabel("还想问什么")
                 if question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(context.placeholder)
                         .foregroundStyle(.secondary)
@@ -1705,101 +1680,205 @@ private struct AIQuestionSheet: View {
                         .allowsHitTesting(false)
                 }
             }
-            .help("可以描述你遇到的问题；留空时 Netfix 会只解释当前诊断报告。")
-
             HStack {
-                Button {
-                    pickImages()
-                } label: {
-                    Label("添加图片", systemImage: "photo")
+                Text("留空会直接解释当前检查。")
+                Spacer()
+                Text("\(question.count)/2000")
+                    .foregroundStyle(question.count > 2_000 ? Color.red : Color.secondary)
+            }
+            .font(.caption2)
+        }
+    }
+
+    private var promptGrid: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 136), spacing: 8)], alignment: .leading, spacing: 8) {
+            ForEach(context.prompts, id: \.self) { prompt in
+                Button(prompt) {
+                    question = prompt
+                    questionFocused = true
                 }
-                .disabled(isWorking || images.count >= 3)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isWorking)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var attachmentPicker: some View {
+        if hasCloudAI && imageQuestionEnabled {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Button {
+                        pickImages()
+                    } label: {
+                        Label("添加截图", systemImage: "photo")
+                    }
+                    .disabled(isWorking || images.count >= 3)
+
+                    if !images.isEmpty {
+                        Button("清空") {
+                            images.removeAll()
+                            if uploadConsent == "always" { uploadConfirmed = true }
+                        }
+                        .disabled(isWorking)
+                    }
+
+                    Spacer()
+                    Text("\(images.count)/3")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 if !images.isEmpty {
-                    Button("清空") {
-                        images.removeAll()
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 10) {
+                            ForEach(images) { item in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    if let preview = item.preview {
+                                        Image(nsImage: preview)
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 96, height: 64)
+                                            .clipped()
+                                            .cornerRadius(6)
+                                    }
+                                    Text(item.name)
+                                        .font(.caption2)
+                                        .lineLimit(1)
+                                        .frame(width: 96, alignment: .leading)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
                     }
-                    .disabled(isWorking)
                 }
+            }
+        }
+    }
 
-                Spacer()
+    private var privacyNotice: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            if requiresUploadConfirmation {
+                Toggle(isOn: $uploadConfirmed) {
+                    Text("我确认发送脱敏检查报告\(images.isEmpty ? "" : "和上方截图")给\(providerSummary)")
+                }
+            }
+            Text(privacyDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
 
-                Text("\(images.count)/3")
+    private var privacyDetail: String {
+        if !hasCloudAI || uploadConsent == "never" {
+            return "这只影响 AI 看报告，不影响检查网络、使用代理或恢复网络设置。当前不会把报告发到云端。"
+        }
+        if images.isEmpty {
+            return "问题和检查报告会先脱敏，代理密码不会发送。AI 只负责解释，不能更改网络设置。"
+        }
+        return "问题和检查报告会先脱敏。截图只移除文件元数据，图中可见文字和内容仍会发送给\(providerSummary)。"
+    }
+
+    private var requiresUploadConfirmation: Bool {
+        hasCloudAI && uploadConsent != "never" && (uploadConsent == "ask_each_time" || !images.isEmpty)
+    }
+
+    private var providerSummary: String {
+        providerLabels.isEmpty ? "已配置的 AI" : providerLabels.joined(separator: "、")
+    }
+
+    private var sendDisabled: Bool {
+        question.count > 2_000 || (requiresUploadConfirmation && !uploadConfirmed)
+    }
+
+    @ViewBuilder
+    private var answerSection: some View {
+        if isWorking {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("正在解释这次检查…")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
 
-            if !images.isEmpty {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 10) {
-                        ForEach(images) { item in
-                            VStack(alignment: .leading, spacing: 6) {
-                                if let preview = item.preview {
-                                    Image(nsImage: preview)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 96, height: 64)
-                                        .clipped()
-                                        .cornerRadius(6)
-                                } else {
-                                    ZStack {
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .fill(Color.secondary.opacity(0.12))
-                                        Image(systemName: "photo")
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .frame(width: 96, height: 64)
-                                }
-                                Text(item.name)
-                                    .font(.caption2)
-                                    .lineLimit(1)
-                                    .frame(width: 96, alignment: .leading)
-                            }
+        if let result {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(result.source == "llm" ? "AI 解释" : "Netfix 本地解释", systemImage: result.source == "llm" ? "sparkles" : "checklist.checked")
+                    .font(.headline)
+                if let headline = result.headline, !headline.isEmpty {
+                    Text(headline)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                }
+                if let explanation = result.explanation, !explanation.isEmpty {
+                    Text(explanation)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                DisclosureGroup("技术详情") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let provider = providerDisplayName(result.providerUsed) {
+                            Text("使用模型：\(provider)")
+                        }
+                        if let reason = friendlyLLMReason(result.fallbackReasonLabel ?? result.fallbackReason) {
+                            Text("说明：\(reason)")
+                        }
+                        if let hash = result.redactedReportHash {
+                            Text("脱敏报告指纹：\(hash)")
+                                .lineLimit(1)
                         }
                     }
-                    .padding(.vertical, 2)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .padding(.top, 4)
                 }
-            }
-
-            Toggle(isOn: $uploadConfirmed) {
-                Text("我确认发送脱敏诊断报告\(images.isEmpty ? "" : "和上方图片")给已配置的云端模型")
-            }
-
-            Text("这只影响 AI 看报告，不影响检查网络、使用代理或恢复网络设置。没有 AI 密钥时，主流程照常可用；需要 AI 时再到设置里填写。截图问诊仅支持 PNG、JPEG、WebP 或 GIF。")
                 .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                ForEach(context.prompts, id: \.self) { prompt in
-                    Button(prompt) {
-                        question = prompt
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(isWorking)
-                }
             }
-            .font(.caption)
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            HStack {
-                Spacer()
-                Button("取消") {
-                    dismiss()
-                }
-                Button("发送并解释") {
-                    onSend(question.trimmingCharacters(in: .whitespacesAndNewlines), images.map(\.dataURL))
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isWorking || !uploadConfirmed)
-            }
+            .padding(12)
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(8)
         }
-        .padding()
-        .frame(width: 440)
+
+        if let errorMessage, !errorMessage.isEmpty {
+            Label(errorMessage, systemImage: "exclamationmark.circle")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        if let attachmentError, !attachmentError.isEmpty {
+            Label(attachmentError, systemImage: "photo.badge.exclamationmark")
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func providerDisplayName(_ provider: String?) -> String? {
+        switch provider {
+        case "deepseek": return "DeepSeek"
+        case "moonshot_kimi": return "Kimi"
+        case "minimax": return "MiniMax"
+        case "qwen": return "Qwen"
+        case "openai": return "OpenAI"
+        case "anthropic": return "Anthropic"
+        case let value?: return value
+        case nil: return nil
+        }
+    }
+
+    private func friendlyLLMReason(_ reason: String?) -> String? {
+        guard let reason, !reason.isEmpty else { return nil }
+        switch reason {
+        case "llm_disabled": return "云端 AI 未启用，已使用本地解释。"
+        case "missing_api_key", "no_provider_available": return "没有可用的 AI 密钥，已使用本地解释。"
+        case "upload_consent_required": return "未获得发送确认，已使用本地解释。"
+        default: return reason
+        }
     }
 
     private func pickImages() {
@@ -1815,22 +1894,25 @@ private struct AIQuestionSheet: View {
                 do {
                     let data = try Data(contentsOf: url)
                     if data.count > 4_500_000 {
-                        errorMessage = "\(url.lastPathComponent) 太大，请选择 4.5MB 以内的图片。"
+                        attachmentError = "\(url.lastPathComponent) 太大，请选择 4.5MB 以内的图片。"
                         continue
                     }
                     let mime = mimeType(for: url)
                     guard allowedImageMimeTypes.contains(mime) else {
-                        errorMessage = "\(url.lastPathComponent) 只支持 PNG、JPEG、WebP 或 GIF。"
+                        attachmentError = "\(url.lastPathComponent) 只支持 PNG、JPEG、WebP 或 GIF。"
                         continue
                     }
                     let dataURL = "data:\(mime);base64,\(data.base64EncodedString())"
                     next.append(AIQuestionImage(name: url.lastPathComponent, dataURL: dataURL, preview: NSImage(contentsOf: url)))
-                    errorMessage = nil
+                    attachmentError = nil
                 } catch {
-                    errorMessage = "无法读取 \(url.lastPathComponent)：\(error.localizedDescription)"
+                    attachmentError = "无法读取 \(url.lastPathComponent)：\(error.localizedDescription)"
                 }
             }
             images = next
+            if !images.isEmpty {
+                uploadConfirmed = false
+            }
         }
     }
 
@@ -1869,6 +1951,11 @@ final class DashboardViewModel: ObservableObject {
     @Published var dashboardState: DashboardHomePresentation?
     @Published var insights: DashboardInsightsResponse?
     @Published var hasCloudAI: Bool = false
+    @Published var isAIWorking = false
+    @Published var isAIStatusLoading = false
+    @Published var aiProviderLabels: [String] = []
+    @Published var aiUploadConsent = "ask_each_time"
+    @Published var aiImageQuestionEnabled = false
     @Published var copyFeedback: String?
 
     struct DashboardHomePresentation {
@@ -1887,7 +1974,6 @@ final class DashboardViewModel: ObservableObject {
         let shouldShowProxyDeployCTA: Bool
         let routeLabel: String
         let interfaceLabel: String
-        let localIPLabel: String
         let systemProxyLabel: String
         let egressLabel: String
         let connectionQuality: DashboardStateResponse.ConnectionQuality?
@@ -1910,7 +1996,6 @@ final class DashboardViewModel: ObservableObject {
             self.shouldShowProxyDeployCTA = state == .noProxy
             self.routeLabel = state.headline
             self.interfaceLabel = "未检测"
-            self.localIPLabel = "未检测"
             self.systemProxyLabel = "未检测"
             self.egressLabel = "未检测"
             self.connectionQuality = nil
@@ -1934,8 +2019,7 @@ final class DashboardViewModel: ObservableObject {
             self.secondaryActionTarget = response.resolvedSecondaryActionTarget
             self.shouldShowProxyDeployCTA = response.shouldShowProxyDeployCTA
             self.routeLabel = Self.routeLabel(for: response.decision?.effectiveRoute, fallback: state.headline)
-            self.interfaceLabel = response.machine?.primaryInterface?.isEmpty == false ? "当前连接" : "未检测"
-            self.localIPLabel = response.machine?.selfIPv4 ?? "未检测"
+            self.interfaceLabel = response.machine?.primaryInterface?.isEmpty == false ? "当前网络" : "网络未识别"
             self.systemProxyLabel = Self.systemProxyLabel(response.proxy?.system)
             self.egressLabel = Self.egressLabel(response.egress)
             self.connectionQuality = response.connectionQuality
@@ -1967,7 +2051,7 @@ final class DashboardViewModel: ObservableObject {
             switch value {
             case "none": return "未使用代理"
             case "saved_only": return "已保存未启用"
-            case "external_system_proxy": return "其他代理正在使用"
+            case "external_system_proxy": return "由其他 App 管理"
             case "netfix_applied": return "Netfix 已启用"
             case "degraded": return "代理待复查"
             case "recovery_required": return "需要恢复"
@@ -1977,13 +2061,7 @@ final class DashboardViewModel: ObservableObject {
 
         private static func systemProxyLabel(_ system: DashboardStateResponse.Proxy.SystemProxy?) -> String {
             guard let system, system.active == true else { return "未启用" }
-            switch system.kind {
-            case "http_https": return "HTTP/HTTPS"
-            case "socks": return "SOCKS"
-            case "pac": return "PAC"
-            case "mixed": return "多种代理"
-            default: return "已启用"
-            }
+            return "已启用"
         }
 
         private static func egressLabel(_ egress: DashboardStateResponse.Egress?) -> String {
@@ -1998,20 +2076,20 @@ final class DashboardViewModel: ObservableObject {
                 default: return nil
                 }
             }()
-            if let publicIP, !publicIP.isEmpty, !isOpaqueIP {
-                return typeLabel.map { "\(publicIP) · \($0)" } ?? publicIP
-            }
             if let isp = egress.isp?.trimmingCharacters(in: .whitespacesAndNewlines),
                !isp.isEmpty,
                isp.lowercased() != "unknown" {
-                return "出口 · \(isp)"
+                return isp
             }
             switch egress.status {
-            case "ok": return typeLabel ?? "出口已检测"
-            case "warn": return "出口需复查"
-            case "fail": return "出口检测失败"
-            case "stale": return "出口结果已过期"
-            default: return "出口未检测"
+            case "ok":
+                if let typeLabel { return "网络类型 · \(typeLabel)" }
+                if let publicIP, !publicIP.isEmpty, !isOpaqueIP { return "联网身份已确认" }
+                return "网络来源已确认"
+            case "warn": return "网络来源需复查"
+            case "fail": return "网络来源未确认"
+            case "stale": return "网络来源已过期"
+            default: return "网络来源未检测"
             }
         }
     }
@@ -2078,6 +2156,7 @@ final class DashboardViewModel: ObservableObject {
     private var progressTimer: Timer?
     private var progressIndex = 0
     private var cancellationRequested = false
+    private var activeAIRequestID: UUID?
     fileprivate(set) var lastOperation: LastOperation?
 
     enum LastOperation {
@@ -2167,11 +2246,29 @@ final class DashboardViewModel: ObservableObject {
 
     func refreshCloudAIStatus() async {
         guard let client else { return }
+        isAIStatusLoading = true
+        defer { isAIStatusLoading = false }
         do {
-            let response = try await client.llmProviders()
-            hasCloudAI = response.providers.contains { $0.apiKeySet == true }
+            async let providersRequest = client.llmProviders()
+            async let settingsRequest = client.llmSettings()
+            let (providersResponse, settingsResponse) = try await (providersRequest, settingsRequest)
+            let settings = settingsResponse.settings
+            let configuredProviders = providersResponse.providers.filter { $0.apiKeySet == true }
+            hasCloudAI = settings.enabled && (settings.apiKeySet || !configuredProviders.isEmpty)
+            aiUploadConsent = settings.uploadConsent ?? "ask_each_time"
+            aiImageQuestionEnabled = settings.features?.imageQuestion == true
+            aiProviderLabels = configuredProviders
+                .sorted { left, right in
+                    if left.id == settings.provider { return true }
+                    if right.id == settings.provider { return false }
+                    return left.label.localizedCaseInsensitiveCompare(right.label) == .orderedAscending
+                }
+                .map(\.label)
         } catch {
             hasCloudAI = false
+            aiProviderLabels = []
+            aiUploadConsent = "ask_each_time"
+            aiImageQuestionEnabled = false
         }
     }
 
@@ -2186,89 +2283,6 @@ final class DashboardViewModel: ObservableObject {
             copyFeedback = "已复制支持包到剪贴板。"
         } catch {
             copyFeedback = UserFacingMessages.classify(error.localizedDescription).headline
-        }
-    }
-
-    /// 让普通用户点 AI 按钮时不再依赖 API Key：先按本地规则给出结论，
-    /// 只有当云端 AI 已启用时再让云端覆盖本地结论。
-    fileprivate func answerQuickQuestion(prompt: String, context: AIQuestionContext) async {
-        guard let client else { return }
-        llmError = nil
-        copyFeedback = nil
-        let localAnswer = buildLocalAnswer(prompt: prompt, context: context)
-        llmExplanation = LLMExplainResult(
-            source: "local_rule",
-            fallbackReason: nil,
-            fallbackReasonLabel: nil,
-            failureReasonCode: nil,
-            providerUsed: nil,
-            fallbackChain: nil,
-            needsUploadConfirmation: false,
-            headline: localAnswer.headline,
-            severity: localAnswer.severity,
-            explanation: localAnswer.body,
-            redactedReportHash: nil
-        )
-        headline = localAnswer.headline
-        if hasCloudAI {
-            startWork(steps: ["本地已给出结论，正在请云端 AI 再确认…"])
-            do {
-                let response = try await client.explainWithLLM(
-                    question: prompt,
-                    mode: "explain",
-                    uploadConfirmed: false,
-                    images: []
-                )
-                llmExplanation = response.result
-                headline = response.result.headline ?? headline
-            } catch {
-                llmError = "云端 AI 没回：\(friendlyAIError(error.localizedDescription))。先按上方本地结论处理即可。"
-            }
-            stopWork()
-        } else {
-            copyFeedback = "已给出本地结论（无需 AI 密钥）。需要更详细的解释时，到「设置 → AI」填写 AI 密钥。"
-        }
-    }
-
-    /// 「检查我的代理参数格式」专用：基于本地规则给出清楚提示。
-    func checkProxyInputFormat() async {
-        let headline = "代理参数格式参考"
-        let body = "支持的格式：\n• host:port:user:pass（最常见）\n• http://user:pass@host:port\n• socks5h://user:pass@host:port\n• 多行带表头的列表\n不支持：ss://、vmess://、Clash 订阅链接。\n保存时密码只写入本机密码库。"
-        llmExplanation = LLMExplainResult(
-            source: "local_rule",
-            fallbackReason: nil,
-            fallbackReasonLabel: nil,
-            failureReasonCode: nil,
-            providerUsed: nil,
-            fallbackChain: nil,
-            needsUploadConfirmation: false,
-            headline: headline,
-            severity: "info",
-            explanation: body,
-            redactedReportHash: nil
-        )
-        self.headline = headline
-        copyFeedback = "格式参考已显示。"
-    }
-
-    private func buildLocalAnswer(prompt: String, context: AIQuestionContext) -> (headline: String, body: String, severity: String) {
-        switch context {
-        case .diagnosis:
-            if let report = report {
-                let detail = report.explanation?.explanation ?? report.firstRootCause ?? "当前没有可解释的诊断条目。"
-                let action = report.explanation?.primaryAction?.label
-                let next = report.explanation?.actions.first?.label
-                let extra = (action ?? next).map { "\n建议先点：\($0)。" } ?? ""
-                let severity = report.overallStatus == .ok ? "ok" : (report.overallStatus == .fail ? "fail" : "warn")
-                return (report.summaryHeadline, detail + extra, severity)
-            }
-            return ("还没有诊断结果", "请先点「检查当前网络」；结果出来后这里会基于本地规则直接告诉你现在该怎么办，不需要 AI 密钥。", "info")
-        case .proxy:
-            return (
-                "代理部署的常见问题",
-                "一般流程：1) 粘贴 host:port:user:pass；2) 点「检查并保存」；3) 点「开始使用代理」。\n中间会备份你现在的网络设置；不用时点「恢复原来的网络设置」即可。\n需要账号密码的代理会由 Netfix 在本机安全代管。",
-                "info"
-            )
         }
     }
 
@@ -2423,13 +2437,22 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func explainWithAI(question: String = "", imageDataURLs: [String] = [], uploadConfirmed: Bool = false) async {
-        guard let client = client else { return }
+        guard let client else {
+            llmError = "Netfix 还没准备好，请稍后再试。"
+            return
+        }
+        guard !isAIWorking else { return }
+        let requestID = UUID()
+        activeAIRequestID = requestID
+        isAIWorking = true
         llmError = nil
-        startWork(steps: [
-            "正在生成脱敏报告…",
-            "正在请求 AI 解释…",
-            "正在校验可执行动作…",
-        ])
+        llmExplanation = nil
+        defer {
+            if activeAIRequestID == requestID {
+                activeAIRequestID = nil
+                isAIWorking = false
+            }
+        }
         do {
             let response = try await client.explainWithLLM(
                 question: question,
@@ -2437,12 +2460,18 @@ final class DashboardViewModel: ObservableObject {
                 uploadConfirmed: uploadConfirmed,
                 images: imageDataURLs
             )
+            guard activeAIRequestID == requestID, !Task.isCancelled else { return }
             llmExplanation = response.result
-            headline = response.result.headline ?? headline
         } catch {
+            guard activeAIRequestID == requestID, !Task.isCancelled else { return }
             llmError = friendlyAIError(error.localizedDescription)
         }
-        stopWork()
+    }
+
+    func cancelAIExplanation() {
+        activeAIRequestID = nil
+        isAIWorking = false
+        llmError = "已停止这次 AI 解释。"
     }
 
     private func friendlyAIError(_ message: String) -> String {

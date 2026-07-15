@@ -69,7 +69,12 @@ def test_macos_proxy_validation_target_matrix_is_selectable_and_applied():
     assert "func applyProxyProfile(profileID: String, mode: String, confirmed: Bool = false, targetProfile: String = \"baseline\")" in api_client
     assert "func startProxyMonitor(profileID: String, interval: Int = 60, timeout: Int = 10, targetProfile: String = \"baseline\")" in api_client
     assert "func deleteProxyProfile(profileID: String)" in api_client
-    assert "func replaceProxyProfile(profileID: String, input: String, startMonitor: Bool = true" in api_client
+    assert (
+        "func replaceProxyProfile(\n"
+        "        profileID: String,\n"
+        "        input: String,\n"
+        "        validationReceipt: String? = nil,"
+    ) in api_client
     assert '"proxy/validation-targets"' in api_client
     assert '"proxy/profiles/\\(profileID)/delete"' in api_client
     assert '"proxy/profiles/\\(profileID)/replace"' in api_client

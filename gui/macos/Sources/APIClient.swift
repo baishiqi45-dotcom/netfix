@@ -415,8 +415,18 @@ actor APIClient {
         )
     }
 
-    func replaceProxyProfile(profileID: String, input: String, startMonitor: Bool = true, targetProfile: String = "baseline", protocolHint: String = "auto") async throws -> ProxyProfileResponse {
+    func replaceProxyProfile(
+        profileID: String,
+        input: String,
+        validationReceipt: String? = nil,
+        startMonitor: Bool = true,
+        targetProfile: String = "baseline",
+        protocolHint: String = "auto"
+    ) async throws -> ProxyProfileResponse {
         var body = proxyProtocolBody(input: input, protocolHint: protocolHint)
+        if let validationReceipt, !validationReceipt.isEmpty {
+            body["validation_receipt"] = validationReceipt
+        }
         body["start_monitor"] = startMonitor
         body["monitor_interval"] = 60
         body["timeout"] = 10

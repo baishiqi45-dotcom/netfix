@@ -8,7 +8,7 @@ and research reports can cite it, but they do not replace it.
 | Layer | Primary owner | Read-only entry | Mutating entry | Confirmation rule | Contract / tests |
 |---|---|---|---|---|---|
 | App | macOS UI | Dashboard state, reports, logs | Proxy apply, rollback, key save | Any system proxy change must show App confirmation | `DashboardStateResponse`, Swift tests |
-| CLI | `netfix.py` | `codex`, `triage`, `doctor`, `kb`, `report`, `logs` | `fix`, `rollback`, `proxy-switch` | Tier 2 ignores `--yes`; user confirmation required | CLI parser/docs tests |
+| CLI | `netfix.py` | `codex`, `triage`, `doctor`, `kb`, `report`, `logs` | `fix`, `rollback`, `proxy-switch` | Tier 2 ignores `--yes`; confirmation plus verified transactional rollback required | CLI parser/docs tests |
 | HTTP | local server | `GET /health`, `/dashboard/state`, `/report/latest`, `/llm/providers` | `POST /run`, `/fixes/execute`, `/settings/llm`, `/proxy/*` | Non-public GET and all POST require token; system fixes require magic phrase | API tests |
 | MCP | `netfix.mcp_server` | report, services, evidence, sanitized report | fix/apply/rollback/proxy switch tools | Mutating tools must expose destructive annotations and confirmation schema | MCP tests |
 | Web | local dashboard | current Mac state, report, logs | Calls authenticated HTTP endpoints only | Web must not bypass HTTP confirmation | Web UI tests |

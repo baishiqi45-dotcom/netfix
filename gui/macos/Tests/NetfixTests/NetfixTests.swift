@@ -135,7 +135,7 @@ final class NetfixTests: XCTestCase {
                 "headline": "体感顺畅",
                 "detail": "速度、延迟和稳定性都有数据。",
                 "speed": { "label": "充足", "value": "下载 28.4 Mbps / 上传 5.2 Mbps", "hint": "日常使用够用" },
-                "latency": { "label": "中等", "value": "延迟 62ms", "hint": "实时输出会有轻微等待" },
+                "latency": { "label": "中等", "value": "延迟 62ms", "hint": "打开网页时可能稍等一下" },
                 "stability": { "label": "稳定", "value": "丢包 0%", "hint": "路径稳定" },
                 "background_activity": { "label": "平稳", "value": "后台占用不高", "hint": "没有看到明显上传或下载占用" },
                 "checked_at": "2026-07-09T06:00:00+00:00",
@@ -919,7 +919,7 @@ final class NetfixTests: XCTestCase {
         XCTAssertEqual(response.resolvedSecondaryActionTarget, .none)
         XCTAssertFalse(response.canOfferNetfixRestore)
         XCTAssertNil(response.secondaryActionLabel)
-        XCTAssertEqual(presentation.egressLabel, "出口 · Example Network")
+        XCTAssertEqual(presentation.egressLabel, "Example Network")
         XCTAssertFalse(presentation.egressLabel.contains("public_ipv4_hash"))
         XCTAssertFalse(presentation.egressLabel.contains("unknown"))
     }

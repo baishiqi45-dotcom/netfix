@@ -18,6 +18,7 @@ def _make_engine(tmpdir: Path, target: Path, tier: int = 1) -> FixEngine:
         "fixes": {
             "test-append": {
                 "tier": tier,
+                "transactional_rollback": tier == 2,
                 "description": "append marker",
                 "commands": [
                     f"python3 -c \"open('{target}', 'a').write('modified')\""
@@ -126,7 +127,7 @@ class TestFixEngine(unittest.TestCase):
         self.assertIn(str(REPO_ROOT / "bin" / "disable_ipv6.sh"), resolved)
         self.assertNotIn(" bin/disable_ipv6.sh", resolved)
 
-    def test_tier2_networksetup_runs_directly_after_confirmation(self):
+    def test_tier2_without_transactional_rollback_is_blocked_after_confirmation(self):
         engine = _make_engine_with_command(
             self.root,
             "networksetup -setproxyautodiscovery Wi-Fi off",
@@ -143,13 +144,10 @@ class TestFixEngine(unittest.TestCase):
                 }) as mock_run:
             result = engine.execute("test-command")
 
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(mock_run.call_args.args[0], [
-            "networksetup",
-            "-setproxyautodiscovery",
-            "Wi-Fi",
-            "off",
-        ])
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason_code"], "transactional_rollback_unavailable")
+        mock_run.assert_not_called()
 
     def test_verify_diagnostic_is_run(self):
         target = self.root / "dns.txt"

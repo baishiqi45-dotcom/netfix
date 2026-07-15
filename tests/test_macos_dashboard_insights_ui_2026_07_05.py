@@ -26,13 +26,18 @@ def test_dashboard_exposes_plain_language_network_insights():
     assert "currentStatusSection" in dashboard
     assert "connectionQualitySection" in dashboard
     assert "diagnosticEvidenceSection" in dashboard
-    assert dashboard.index("connectionQualitySection") < dashboard.index("diagnosticEvidenceSection")
+    current_status = dashboard[
+        dashboard.index("private var currentStatusSection") : dashboard.index("private func compactIdentityItem")
+    ]
+    assert "connectionQualitySection" in current_status
+    assert dashboard.index("private var connectionQualitySection") < dashboard.index("private var diagnosticEvidenceSection")
     assert 'Text("网络体感")' in dashboard
     assert 'connectionQualityMetric(title: "速度"' in dashboard
     assert 'connectionQualityMetric(title: "延迟"' in dashboard
     assert 'connectionQualityMetric(title: "稳定性"' in dashboard
     assert 'connectionQualityMetric(title: "后台占用"' in dashboard
-    assert 'DisclosureGroup("诊断证据")' in dashboard
+    assert 'DisclosureGroup(isExpanded: $isEvidenceExpanded)' in dashboard
+    assert 'Label("检查详情", systemImage: "doc.text.magnifyingglass")' in dashboard
     assert 'responsivenessMetric(label: "速度"' in dashboard
     assert 'Label("后台网络活动", systemImage: "arrow.up.arrow.down.circle")' not in dashboard
     assert 'Label("近期网络事件", systemImage: "clock.arrow.circlepath")' not in dashboard
@@ -72,19 +77,25 @@ def test_dashboard_and_menu_do_not_guess_green_or_expose_route_jargon():
         dashboard.index("private var currentStatusSection") : dashboard.index("private func compactIdentityItem")
     ]
 
-    assert 'case "external_system_proxy": return "其他代理正在使用"' in dashboard
+    assert 'case "external_system_proxy": return "由其他 App 管理"' in dashboard
+    assert 'contentSize = NSSize(width: 460, height: 500)' in app_delegate
+    assert '.frame(minWidth: 420, idealWidth: 460, minHeight: 440)' in dashboard
     assert 'case .unknown:\n            color = .systemGray' in app_delegate
     assert "backend.isReady ? .systemGreen : .systemYellow" not in app_delegate
     assert 'label == "低"' in dashboard
     assert 'label.contains("低")' not in dashboard
     assert 'hasPrefix("public_ipv4_hash:")' in dashboard
-    assert 'return typeLabel ?? "出口已检测"' in dashboard
+    assert 'return "联网身份已确认"' in dashboard
     assert 'ScrollView(.horizontal, showsIndicators: false)' not in current_status
     assert 'return "刚刚更新"' in dashboard
     diagnose = dashboard[dashboard.index("func diagnose() async"):dashboard.index("func fix() async")]
     assert "refreshProxyUsage" not in diagnose
     assert "refreshDashboardInsights" not in diagnose
     assert 'if isSectionVisible("connection_quality")' in dashboard
+    assert '"\\(state.interfaceLabel) · \\(state.localIPLabel)"' not in current_status
+    assert 'case "unavailable": return "本次没有采到速度、延迟或稳定性数据。"' in dashboard
+    assert 'return "网络提供方 · \\(isp)"' not in dashboard
+    assert 'label.contains("较高") || label.contains("不稳") {\n            return .orange' in dashboard
 
 
 def test_settings_exposes_privacy_safe_activity_monitor_controls():

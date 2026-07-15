@@ -13,7 +13,7 @@ def test_macos_dashboard_has_consent_gated_ai_question_sheet_with_image_picker()
     models = MODELS.read_text(encoding="utf-8")
 
     assert "AIQuestionSheet" in source
-    assert "生成简明说明" in source
+    assert "问 AI 解释这次检查" in source
     assert "看不懂结果？让 AI 解释一下" not in source
     assert "aiAssistantSection" not in source
     assert ".buttonStyle(.borderless)" in source
@@ -22,7 +22,7 @@ def test_macos_dashboard_has_consent_gated_ai_question_sheet_with_image_picker()
     assert "是不是代理没生效？" in source
     assert "这个代理能用吗？" in source
     assert "粘贴格式对吗？" in source
-    assert "为什么 SOCKS5 失败？" in source
+    assert "为什么代理检查失败？" in source
     assert "AIQuestionContext" in source
     assert "为什么是这个根因？" not in source
     assert "NSOpenPanel()" in source
@@ -38,7 +38,8 @@ def test_macos_dashboard_has_consent_gated_ai_question_sheet_with_image_picker()
     assert "4_500_000" in source
     assert "data:\\(mime);base64" in source
     assert "Toggle(isOn: $uploadConfirmed)" in source
-    assert ".disabled(isWorking || !uploadConfirmed)" in source
+    assert "requiresUploadConfirmation" in source
+    assert ".disabled(isWorking || sendDisabled)" in source
     assert "imageDataURLs.isEmpty ? \"explain\" : \"image_question\"" in source
     assert "fallbackReasonLabel ?? result.fallbackReason" in source
     assert "fallbackReasonLabel" in models
@@ -47,6 +48,23 @@ def test_macos_dashboard_has_consent_gated_ai_question_sheet_with_image_picker()
     assert "技术详情" in source
     assert "脱敏报告指纹" in source
     assert "备用链路：" not in source
+
+
+def test_macos_dashboard_ai_flow_is_visible_contextual_and_keeps_answer_in_sheet():
+    source = DASHBOARD.read_text(encoding="utf-8")
+
+    assert "canOfferAIExplanation" in source
+    assert 'Label("问 AI 解释这次检查", systemImage: "sparkles")' in source
+    assert "result: viewModel.llmExplanation" in source
+    assert "errorMessage: viewModel.llmError" in source
+    assert "isAIWorking" in source
+    assert "onCancelRequest" in source
+    assert 'Button("生成简明说明")' not in source
+    assert 'Button("代理说明")' not in source
+    assert "headline = response.result.headline ?? headline" not in source
+    assert '.accessibilityLabel("还想问什么")' in source
+    assert '.accessibilityLabel("关闭 AI 解释")' in source
+    assert "LazyVGrid" in source
 
 
 def test_macos_dashboard_surfaces_proxy_deployment_without_ai_api_requirement():
@@ -61,7 +79,7 @@ def test_macos_dashboard_surfaces_proxy_deployment_without_ai_api_requirement():
     assert "不需要 API Key 也能用" not in source
     assert "外部系统代理" not in source
     assert "从服务商后台复制一整行" not in source
-    assert "aiQuestionContext = .proxy" in source
+    assert "openAIExplanation()" in source
     assert 'Button("我该复制什么？")' not in source
     assert "openProxySettings()" in source
 
@@ -89,6 +107,16 @@ def test_macos_settings_can_enable_image_question_feature_flag():
     assert 'Toggle("允许带截图问 AI", isOn: $llmImageQuestionEnabled)' in settings
     assert "PNG、JPEG、WebP 或 GIF 截图" in settings
     assert "provider.imageQuestionProviderSupported == true && provider.imageQuestionAdapterReady != true" in settings
+
+
+def test_macos_ai_settings_are_a_first_class_settings_layer_not_mcp_or_advanced():
+    settings = SETTINGS.read_text(encoding="utf-8")
+
+    assert 'case "ai":' in settings
+    assert 'Text("AI").tag("ai")' in settings
+    assert "private var aiLayerView: some View" in settings
+    assert "advancedIntroSection\n            agentTab" in settings
+    assert "advancedIntroSection\n            aiLayerView" not in settings
 
 
 def test_macos_privacy_settings_can_disable_persisted_proxy_identity_reports():

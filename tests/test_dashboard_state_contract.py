@@ -4,6 +4,27 @@ from unittest.mock import patch
 from netfix import cli, dashboard_state
 
 
+def _fresh_report_summary(**overrides):
+    summary = {
+        "has_report": True,
+        "origin": "doctor",
+        "coverage": "current_mac_full",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "stale": False,
+        "usable_for_dashboard": True,
+        "route_matches_current": True,
+        "valid_sample_count": 2,
+        "status": "ok",
+        "severity": "ok",
+        "diagnostic_counts": {"ok": 2, "warn": 0, "fail": 0},
+        "issue_count": 0,
+        "blocking_issue_count": 0,
+        "advisory_count": 0,
+    }
+    summary.update(overrides)
+    return summary
+
+
 def test_external_system_proxy_is_not_no_proxy():
     payload = dashboard_state.resolve(
         saved_profile_count=0,
@@ -173,24 +194,20 @@ def test_route_ok_with_high_latency_has_one_connected_attention_verdict():
     )
     verdict = dashboard_state.build_dashboard_verdict(
         state=state,
-        last_report_summary={
-            "checked_at": checked_at,
-            "stale": False,
-            "usable_for_dashboard": True,
-            "route_matches_current": True,
-            "coverage": "current_mac_full",
-            "valid_sample_count": 4,
-            "status": "ok",
-            "severity": "ok",
-            "diagnostic_counts": {"ok": 4, "warn": 1},
-            "issue_count": 0,
-            "advisory_count": 1,
-            "connection_quality": {
+        last_report_summary=_fresh_report_summary(
+            checked_at=checked_at,
+            valid_sample_count=4,
+            status="ok",
+            severity="ok",
+            diagnostic_counts={"ok": 4, "warn": 1},
+            issue_count=0,
+            advisory_count=1,
+            connection_quality={
                 "status": "warn",
                 "headline": "延迟偏高，操作会有等待",
-                "detail": "实时输出会有明显等待。",
+                "detail": "打开网页或加载内容时会明显等待。",
             },
-        },
+        ),
     )
 
     assert verdict["route_health"] == "ok"
@@ -198,7 +215,7 @@ def test_route_ok_with_high_latency_has_one_connected_attention_verdict():
     assert verdict["severity"] == "warn"
     assert verdict["usability"] == "degraded"
     assert verdict["headline"] == "延迟偏高，操作会有等待"
-    assert "线路可用" in verdict["detail"]
+    assert "网络能用" in verdict["detail"]
 
 
 def test_external_proxy_with_latest_warn_report_does_not_show_clean_ready_verdict():
@@ -236,7 +253,6 @@ def test_external_proxy_with_latest_warn_report_does_not_show_clean_ready_verdic
     assert "无需处理" not in payload["verdict"]["next_step"]
     # Verdict headline must NOT inherit the stale journal headline.
     assert payload["verdict"]["headline"] != "目标服务需要处理"
-    assert payload["verdict"]["live_status"] in (None, "warn") if False else True  # noqa
 
 
 def test_unknown_unchecked_and_not_sampled_are_neutral_in_verdict():
@@ -293,6 +309,8 @@ def test_external_system_proxy_with_no_fresh_signal_is_not_ok():
     # is no fresh report and no live monitor data.
     assert payload["verdict"]["severity"] != "ok"
     assert payload["verdict"]["status"] in {"unknown", "attention"}
+    assert payload["verdict"]["headline"] == "其他代理正在使用，尚未检查"
+    assert "系统代理" not in payload["verdict"]["detail"]
 
 
 def test_external_system_proxy_with_live_monitor_failure_routes_to_degraded():
@@ -437,28 +455,22 @@ def test_connection_quality_contract_is_visible_on_home_screen():
         saved_profile_count=1,
         bridge_status={"lifecycle": {"status": "running_system"}, "stale_check": {}},
         environment={"ok": True, "system_proxy": {}},
-        last_report_summary={
-            "checked_at": "2026-07-09T06:00:00+00:00",
-            "status": "ok",
-            "severity": "ok",
-            "issue_count": 0,
-            "blocking_issue_count": 0,
-            "advisory_count": 0,
-            "diagnostic_counts": {"ok": 4, "warn": 0, "fail": 0},
-            "stale": False,
-            "connection_quality": {
+        last_report_summary=_fresh_report_summary(
+            valid_sample_count=4,
+            diagnostic_counts={"ok": 4, "warn": 0, "fail": 0},
+            connection_quality={
                 "status": "ok",
                 "headline": "体感顺畅",
                 "detail": "速度、延迟和稳定性都有数据。",
                 "speed": {"label": "充足", "value": "下载 28.4 Mbps / 上传 5.2 Mbps", "hint": "日常使用够用"},
-                "latency": {"label": "中等", "value": "延迟 62ms", "hint": "实时输出会有轻微等待"},
+                "latency": {"label": "中等", "value": "延迟 62ms", "hint": "打开网页时可能稍等一下"},
                 "stability": {"label": "稳定", "value": "丢包 0%", "hint": "路径稳定"},
                 "background_activity": {"label": "平稳", "value": "后台占用不高", "hint": "没有看到明显上传或下载占用"},
-                "checked_at": "2026-07-09T06:00:00+00:00",
+                "checked_at": datetime.now(timezone.utc).isoformat(),
                 "stale": False,
                 "source": "last_report",
             },
-        },
+        ),
         last_diagnostic_status="ok",
     )
 
@@ -481,15 +493,7 @@ def test_system_proxy_read_failure_is_unknown_not_no_proxy():
 
 
 def test_proxy_verified_ok_requires_fresh_full_route_matched_samples():
-    base = {
-        "checked_at": "2026-07-09T07:00:00Z",
-        "stale": False,
-        "usable_for_dashboard": True,
-        "route_matches_current": True,
-        "coverage": "current_mac_full",
-        "valid_sample_count": 2,
-        "status": "ok",
-    }
+    base = _fresh_report_summary()
     payload = dashboard_state.build_current_mac_state(
         saved_profile_count=1,
         bridge_status={"lifecycle": {"status": "running_system"}, "stale_check": {}},
@@ -519,17 +523,13 @@ def test_proxy_verified_ok_requires_fresh_full_route_matched_samples():
 
 
 def test_connection_quality_reports_unavailable_after_completed_check_without_samples():
-    quality = dashboard_state.build_connection_quality({
-        "has_report": True,
-        "checked_at": "2026-07-09T07:00:00Z",
-        "stale": False,
-        "usable_for_dashboard": True,
-        "connection_quality": {
+    quality = dashboard_state.build_connection_quality(_fresh_report_summary(
+        connection_quality={
             "collection_state": "unavailable",
             "status": "unchecked",
-            "checked_at": "2026-07-09T07:00:00Z",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
         },
-    })
+    ))
 
     assert quality["collection_state"] == "unavailable"
     assert quality["headline"] == "本机未能采样"
@@ -615,17 +615,10 @@ def test_external_system_proxy_with_fresh_ok_report_is_not_verified_ok():
         bridge_status={"lifecycle": {"status": "stopped"}, "stale_check": {}},
         system_proxy_active_for_user=True,
     )
-    fresh_report = {
-        "checked_at": "2026-07-09T07:00:00Z",
-        "stale": False,
-        "usable_for_dashboard": True,
-        "status": "ok",
-        "severity": "ok",
-        "diagnostic_counts": {"ok": 3, "warn": 0, "fail": 0, "unknown": 0, "unchecked": 0, "notSampled": 0},
-        "issue_count": 0,
-        "blocking_issue_count": 0,
-        "advisory_count": 0,
-    }
+    fresh_report = _fresh_report_summary(
+        valid_sample_count=3,
+        diagnostic_counts={"ok": 3, "warn": 0, "fail": 0, "unknown": 0, "unchecked": 0, "notSampled": 0},
+    )
     verdict = dashboard_state.build_dashboard_verdict(state=state, last_report_summary=fresh_report)
     # severity must NOT be "ok" for external proxy even with fresh ok report
     assert verdict["severity"] != "ok", (
@@ -684,20 +677,14 @@ def test_fresh_failed_report_with_netfix_applied_routes_to_proxy_degraded():
     )
     verdict = dashboard_state.build_dashboard_verdict(
         state=state,
-        last_report_summary={
-            "checked_at": "2026-07-09T07:00:00Z",
-            "stale": False,
-            "usable_for_dashboard": True,
-            "route_matches_current": True,
-            "coverage": "current_mac_full",
-            "valid_sample_count": 2,
-            "status": "fail",
-            "severity": "fail",
-            "diagnostic_counts": {"ok": 0, "warn": 0, "fail": 2, "unknown": 0, "unchecked": 0, "notSampled": 0},
-            "issue_count": 2,
-            "blocking_issue_count": 2,
-            "advisory_count": 0,
-        },
+        last_report_summary=_fresh_report_summary(
+            status="fail",
+            severity="fail",
+            diagnostic_counts={"ok": 0, "warn": 0, "fail": 2, "unknown": 0, "unchecked": 0, "notSampled": 0},
+            issue_count=2,
+            blocking_issue_count=2,
+            advisory_count=0,
+        ),
     )
     assert verdict["status"] == "degraded"
     assert verdict["severity"] == "fail"

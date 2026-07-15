@@ -72,6 +72,8 @@ class TestReportSummary(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             report_path = root / "last_report.json"
+            current_mac_report = root / "current_mac_report.json"
+            current_mac_report.write_text("{}", encoding="utf-8")
             with patch("netfix.report.JOURNAL_DIR", root), \
                     patch("netfix.settings.get_privacy_settings", return_value={"save_latest_report": False}), \
                     patch("netfix.logs.EVENTS_FILE", root / "events.jsonl"), \
@@ -80,7 +82,52 @@ class TestReportSummary(unittest.TestCase):
                 saved = Report(data).save()
             self.assertEqual(saved, report_path)
             self.assertFalse(report_path.exists())
+            self.assertFalse(current_mac_report.exists())
             self.assertTrue((root / "events.jsonl").exists())
+
+    def test_full_current_mac_report_survives_later_subset_report(self):
+        full = {
+            "meta": {
+                "version": "0.2.0",
+                "timestamp": "2026-07-15T09:00:00+00:00",
+                "origin": "doctor",
+                "coverage": "current_mac_full",
+                "route_signature": "route:v1:test",
+            },
+            "environment": {},
+            "diagnostics": [{"name": "network_quality", "status": "ok", "details": {"base_rtt_ms": 42}}],
+            "root_causes": [],
+            "fixes": [],
+            "manual_steps": [],
+        }
+        subset = {
+            "meta": {
+                "version": "0.2.0",
+                "timestamp": "2026-07-15T09:05:00+00:00",
+                "origin": "codex",
+                "coverage": "target_subset",
+                "route_signature": "route:v1:test",
+            },
+            "environment": {},
+            "diagnostics": [{"name": "openai_api", "status": "warn"}],
+            "root_causes": [],
+            "fixes": [],
+            "manual_steps": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events = root / "events.jsonl"
+            with patch("netfix.report.JOURNAL_DIR", root), \
+                    patch("netfix.logs.EVENTS_FILE", events), \
+                    patch("netfix.settings.get_privacy_settings", return_value={"save_latest_report": True}):
+                Report(full).save()
+                Report(subset).save()
+
+            latest = json.loads((root / "last_report.json").read_text(encoding="utf-8"))
+            current = json.loads((root / "current_mac_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(latest["meta"]["origin"], "codex")
+            self.assertEqual(current["meta"]["origin"], "doctor")
+            self.assertEqual(current["diagnostics"][0]["name"], "network_quality")
 
     def test_save_redacts_proxy_credentials_and_uses_private_permissions(self):
         data = {

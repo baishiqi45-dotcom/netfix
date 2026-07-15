@@ -108,6 +108,9 @@ class TestMCPServer(unittest.TestCase):
         apply_tool = next(t for t in tools if t["name"] == "netfix_apply_fix")
         self.assertIn("confirmation", apply_tool["inputSchema"]["properties"])
         self.assertIn("magic_word", apply_tool["inputSchema"]["properties"])
+        rollback_tool = next(t for t in tools if t["name"] == "netfix_rollback")
+        self.assertIn("confirmed", rollback_tool["inputSchema"]["properties"])
+        self.assertIn("confirmation", rollback_tool["inputSchema"]["properties"])
 
     def test_mcp_script_bootstraps_repo_root_when_started_from_other_cwd(self):
         script = ROOT / "netfix" / "mcp_server.py"
@@ -218,6 +221,8 @@ class TestMCPServer(unittest.TestCase):
         self.assertTrue(data["fixes"])
         self.assertTrue(all(item["tier"] == 2 for item in data["fixes"]))
         self.assertTrue(any(item["requires_confirmation"] for item in data["fixes"]))
+        self.assertTrue(all(item["execution_available"] is False for item in data["fixes"]))
+        self.assertTrue(all(item["blocked_reason"] == "transactional_rollback_unavailable" for item in data["fixes"]))
 
     def test_mcp_dry_run_fix_uses_confirmed_api_without_mutating(self):
         with patch("netfix.api.detect_environment", return_value={"ok": True}), \
@@ -256,6 +261,26 @@ class TestMCPServer(unittest.TestCase):
         body = execute.call_args.args[0]
         self.assertTrue(body["confirmed"])
         self.assertEqual(body["confirmation"], "APPLY_SYSTEM_FIX")
+
+    def test_mcp_rollback_requires_confirmation_and_does_not_execute(self):
+        for args in ({}, {"confirmed": True, "confirmation": "WRONG"}):
+            with self.subTest(args=args), patch("netfix.mcp_server.run_cli") as run:
+                result = mcp_server._call_tool("netfix_rollback", args)
+            self.assertTrue(result.get("isError"))
+            data = json.loads(result["content"][0]["text"])
+            self.assertEqual(data["http_status"], 409)
+            self.assertEqual(data["confirmation"], "APPLY_SYSTEM_FIX")
+            run.assert_not_called()
+
+    def test_mcp_rollback_executes_only_after_explicit_confirmation(self):
+        with patch("netfix.mcp_server.run_cli", return_value={"ok": True, "status": "rolled_back"}) as run:
+            result = mcp_server._call_tool(
+                "netfix_rollback",
+                {"confirmed": True, "confirmation": "APPLY_SYSTEM_FIX", "timeout": 7},
+            )
+
+        self.assertFalse(result.get("isError"))
+        run.assert_called_once_with(["rollback", "--json", "--timeout", "7"], timeout=7)
 
     def test_mcp_sanitized_report_redacts_latest_report(self):
         report = Mock()

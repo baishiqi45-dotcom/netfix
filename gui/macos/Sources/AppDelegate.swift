@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildPopover() {
         let popover = NSPopover()
-        popover.contentSize = NSSize(width: 460, height: 620)
+        popover.contentSize = NSSize(width: 460, height: 500)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(
             rootView: RootView(
@@ -115,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showAISettings() {
-        UserDefaults.standard.set("advanced", forKey: "netfix.settings.selectedTab")
+        UserDefaults.standard.set("ai", forKey: "netfix.settings.selectedTab")
         showSettings()
     }
 

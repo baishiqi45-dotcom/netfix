@@ -263,14 +263,12 @@ def _freshness(checked_at: Any, stale: Any = None) -> Dict[str, Any]:
         signed_age = int((datetime.now(timezone.utc) - parsed).total_seconds())
         future_timestamp = signed_age < -300
         age_seconds = max(0, signed_age)
-    if stale is None:
-        stale = bool(
-            parsed is None
-            or future_timestamp
-            or (age_seconds is not None and age_seconds > 3600)
-        )
-    elif future_timestamp:
-        stale = True
+    computed_stale = bool(
+        parsed is None
+        or future_timestamp
+        or (age_seconds is not None and age_seconds > 3600)
+    )
+    stale = bool(stale) or computed_stale
     return {
         "checked_at": checked_at,
         "age_seconds": age_seconds,
@@ -283,8 +281,10 @@ def is_current_dashboard_evidence(summary: Optional[Dict[str, Any]]) -> bool:
     if not isinstance(summary, dict):
         return False
     freshness = _freshness(summary.get("checked_at"), summary.get("stale"))
+    if summary.get("has_report") is not True:
+        return False
     origin = summary.get("origin")
-    if origin is not None and origin not in {"doctor", "post_fix_doctor"}:
+    if origin not in {"doctor", "post_fix_doctor"}:
         return False
     valid_sample_count = _safe_int(summary.get("valid_sample_count"))
     if "valid_sample_count" not in summary:
@@ -293,7 +293,7 @@ def is_current_dashboard_evidence(summary: Optional[Dict[str, Any]]) -> bool:
     return bool(
         freshness["checked_at"]
         and not freshness["stale"]
-        and summary.get("usable_for_dashboard") is not False
+        and summary.get("usable_for_dashboard") is True
         and summary.get("route_matches_current") is True
         and summary.get("coverage") == "current_mac_full"
         and valid_sample_count > 0
@@ -301,21 +301,7 @@ def is_current_dashboard_evidence(summary: Optional[Dict[str, Any]]) -> bool:
 
 
 def _allows_current_quality_summary(summary: Dict[str, Any]) -> bool:
-    if not isinstance(summary, dict):
-        return False
-    freshness = _freshness(summary.get("checked_at"), summary.get("stale"))
-    if not freshness["checked_at"] or freshness["stale"]:
-        return False
-    if summary.get("usable_for_dashboard") is False:
-        return False
-    if "route_matches_current" in summary and summary.get("route_matches_current") is not True:
-        return False
-    if "coverage" in summary and summary.get("coverage") != "current_mac_full":
-        return False
-    origin = summary.get("origin")
-    if origin is not None and origin not in {"doctor", "post_fix_doctor"}:
-        return False
-    return True
+    return is_current_dashboard_evidence(summary)
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -365,10 +351,19 @@ def build_connection_quality(last_report_summary: Optional[Dict[str, Any]] = Non
     parsing diagnostics or silently hiding speed / latency when no sample exists.
     """
     summary = last_report_summary if isinstance(last_report_summary, dict) else {}
+    report_exists = summary.get("has_report") is True
+    invalid_reason = str(summary.get("invalid_reason") or "")
     if not _allows_current_quality_summary(summary):
         # Keep historical or route-mismatched metrics in last_report_summary;
         # the current-route strip must not render them as current evidence.
-        summary = {}
+        if invalid_reason in {"stale", "future_timestamp", "route_changed"}:
+            summary = {
+                "has_report": report_exists,
+                "checked_at": summary.get("checked_at"),
+                "stale": True,
+            }
+        else:
+            summary = {}
     raw = summary.get("connection_quality") if isinstance(summary.get("connection_quality"), dict) else {}
     checked_at = raw.get("checked_at") or summary.get("checked_at")
     stale = bool(raw.get("stale") if "stale" in raw else summary.get("stale"))
@@ -510,7 +505,7 @@ def build_dashboard_verdict(
         usability = "degraded"
         headline = str(connection_quality.get("headline") or "网络可用，但体感需要留意")
         quality_detail = str(connection_quality.get("detail") or "当前速度、延迟或稳定性需要留意。")
-        detail = f"当前线路可用；{quality_detail}"
+        detail = f"当前网络能用；{quality_detail}"
         prefix = "线路可用但体感需要留意"
     elif fresh_report:
         # Only emit a green ok status when the report actually has diagnostics
@@ -537,12 +532,12 @@ def build_dashboard_verdict(
         severity = "info"
         usability = "unknown"
         if effective_route == "external_system_proxy":
-            headline = "检测到系统代理，尚未确认可用"
+            headline = "其他代理正在使用，尚未检查"
         if not detail:
             detail = (
-                "这台 Mac 正在使用系统代理；点「检查当前网络」确认速度、延迟和目标网站连通性。"
+                "Netfix 不会改动它；检查后会显示速度、延迟和网站是否可用。"
                 if effective_route == "external_system_proxy"
-                else "还没有本轮检查证据；当前只显示系统代理和本机网络身份。"
+                else "还没有本轮检查结果；当前只显示这台 Mac 的连接信息。"
             )
 
     if effective_route == "external_system_proxy" and fresh_report:
@@ -550,7 +545,7 @@ def build_dashboard_verdict(
             severity = "info"
         if status == "ok":
             headline = "当前网络已完成检查"
-            detail = "当前线路可用；代理由其他工具管理，Netfix 只检查，不会替它恢复设置。"
+            detail = "当前网络可用；代理由其他 App 管理，Netfix 只负责检查。"
 
     verdict = {
         "status": status,

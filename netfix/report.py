@@ -10,6 +10,17 @@ from .i18n import fmt, t
 from .utils import human_time, secure_write_json, to_json
 
 
+CURRENT_MAC_REPORT_NAME = "current_mac_report.json"
+
+
+def _is_current_mac_report(data: Dict[str, Any]) -> bool:
+    meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    return (
+        meta.get("origin") in {"doctor", "post_fix_doctor"}
+        and meta.get("coverage") == "current_mac_full"
+    )
+
+
 class Report:
     """A netfix diagnostic/fix report."""
 
@@ -201,17 +212,22 @@ class Report:
 
     def save(self, path: Optional[Path] = None) -> Path:
         target = Path(path) if path else JOURNAL_DIR / "last_report.json"
+        current_mac_target = JOURNAL_DIR / CURRENT_MAC_REPORT_NAME
         if path is None:
             try:
                 from netfix.settings import get_privacy_settings
                 if not get_privacy_settings().get("save_latest_report", True):
-                    if target.exists():
-                        target.unlink()
+                    for private_report in (target, current_mac_target):
+                        if private_report.exists():
+                            private_report.unlink()
                     self._append_event(target)
                     return target
             except Exception:
                 pass
-        secure_write_json(target, self._persistent_data())
+        persistent_data = self._persistent_data()
+        secure_write_json(target, persistent_data)
+        if path is None and _is_current_mac_report(self.data):
+            secure_write_json(current_mac_target, persistent_data)
         self._append_event(target)
         return target
 

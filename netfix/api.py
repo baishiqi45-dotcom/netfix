@@ -152,10 +152,26 @@ def _connection_quality_from_report(
     path = by_name.get("path_trace") or {}
     hog = by_name.get("bandwidth_hog") or {}
     gateway = by_name.get("gateway") or {}
+    network_status = str(network.get("status") or "")
+    path_status = str(path.get("status") or "")
+    hog_status = str(hog.get("status") or "")
+    gateway_status = str(gateway.get("status") or "")
     network_details = network.get("details") if isinstance(network.get("details"), dict) else {}
     path_details = path.get("details") if isinstance(path.get("details"), dict) else {}
     hog_details = hog.get("details") if isinstance(hog.get("details"), dict) else {}
     gateway_details = gateway.get("details") if isinstance(gateway.get("details"), dict) else {}
+
+    # A diagnostic object is not a sample by itself. Placeholder diagnostics
+    # commonly carry unknown/notSampled status and must not make the home view
+    # claim that speed, stability or background activity was measured.
+    if network_status not in _SIGNAL_STATUSES:
+        network_details = {}
+    if path_status not in _SIGNAL_STATUSES:
+        path_details = {}
+    if hog_status not in _SIGNAL_STATUSES:
+        hog_details = {}
+    if gateway_status not in _SIGNAL_STATUSES:
+        gateway_details = {}
 
     dl_kbps = _number(network_details.get("dl_throughput_kbps"))
     ul_kbps = _number(network_details.get("ul_throughput_kbps"))
@@ -176,9 +192,9 @@ def _connection_quality_from_report(
     if dl_kbps is None and ul_kbps is None:
         speed = _metric("未测", speed_value, "本机没有返回速度数据。")
     elif (dl_kbps is not None and dl_kbps < 5_000) or (ul_kbps is not None and ul_kbps < 1_000):
-        speed = _metric("偏低", speed_value, "当前速度可能影响视频、下载或实时工具。")
+        speed = _metric("偏低", speed_value, "视频或大文件加载可能变慢。")
     elif (dl_kbps or 0) >= 25_000 and (ul_kbps or 3_000) >= 3_000:
-        speed = _metric("充足", speed_value, "日常浏览、开发工具和实时输出都够用。")
+        speed = _metric("充足", speed_value, "打开网页、看视频和下载文件都够用。")
     else:
         speed = _metric("够用", speed_value, "日常使用够用；大文件下载可能需要等待。")
 
@@ -187,11 +203,11 @@ def _connection_quality_from_report(
     else:
         rtt_int = int(round(rtt_ms))
         if rtt_int <= 60:
-            latency = _metric("低", f"延迟 {rtt_int}ms", "实时输出比较顺。")
+            latency = _metric("低", f"延迟 {rtt_int}ms", "打开网页和加载内容比较顺。")
         elif rtt_int <= 150:
-            latency = _metric("中等", f"延迟 {rtt_int}ms", "实时输出会有轻微等待。")
+            latency = _metric("中等", f"延迟 {rtt_int}ms", "打开网页或加载内容时可能稍等一下。")
         else:
-            latency = _metric("较高", f"延迟 {rtt_int}ms", "实时输出会有明显等待。")
+            latency = _metric("较高", f"延迟 {rtt_int}ms", "打开网页或加载内容时会明显等待。")
     destination_loss: Optional[float] = None
     hops = path_details.get("hops")
     if isinstance(hops, list):
@@ -218,7 +234,6 @@ def _connection_quality_from_report(
     else:
         stability = _metric("不稳", f"丢包 {stability_loss:.0f}%", "换网络或代理节点后再检查。")
 
-    hog_status = str(hog.get("status") or "")
     hog_reason = str(hog_details.get("reason") or "")
     top_names: List[str] = []
     for item in hog_details.get("top_processes") or []:
@@ -228,16 +243,16 @@ def _connection_quality_from_report(
                 top_names.append(label)
     if hog_status in {"warn", "fail"} and hog_reason == "upload_saturated":
         value = f"{'、'.join(top_names[:3])} 上传较高" if top_names else "后台上传较高"
-        background = _metric("上传较高", value, "需要实时使用时，可以暂停同步或上传后再检查。")
+        background = _metric("上传较高", value, "需要更流畅时，可以暂停同步或上传后再检查。")
     elif hog_status in {"warn", "fail"} and hog_reason == "download_saturated":
         value = f"{'、'.join(top_names[:3])} 下载较高" if top_names else "后台下载较高"
-        background = _metric("下载较高", value, "需要实时使用时，可以暂停下载或系统更新后再检查。")
-    elif by_name.get("bandwidth_hog"):
+        background = _metric("下载较高", value, "需要更流畅时，可以暂停下载或系统更新后再检查。")
+    elif hog_status == "ok":
         background = _metric("平稳", "后台占用不高", "没有看到明显上传或下载占用。")
     else:
         background = _metric("未测", "未采到", "本机没有返回后台占用数据；只看占用，不看内容。")
 
-    background_sampled = bool(by_name.get("bandwidth_hog"))
+    background_sampled = hog_status in _SIGNAL_STATUSES
     sampled_count = sum((speed_sampled, latency_sampled, stability_sampled, background_sampled))
     if stale:
         collection_state = "stale"
@@ -260,7 +275,7 @@ def _connection_quality_from_report(
         or (rtt_ms is not None and rtt_ms > 150)
         or (stability_loss is not None and stability_loss > 0)
         or hog_status in {"warn", "fail"}
-        or str(network.get("status") or "") in {"warn", "fail"}
+        or network_status in {"warn", "fail"}
     )
     if stale:
         status = "stale"
@@ -301,7 +316,7 @@ def _connection_quality_from_report(
         headline = "已采到部分网络体感"
         detail = "已显示本机实际返回的数据；缺少的项目不会用猜测补齐。"
     elif collection_state == "stale":
-        detail = "线路或时间已经变化，请重新检查后再参考。"
+        detail = "网络或时间已经变化，请重新检查后再参考。"
     else:
         detail = "来自最近一次检查，不会额外测速。"
     return {
@@ -405,7 +420,8 @@ def _latest_dashboard_report_summary(
     *,
     current_environment: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[str], Dict[str, Any], Dict[str, Any]]:
-    latest_path = JOURNAL_DIR / "last_report.json"
+    current_mac_path = JOURNAL_DIR / "current_mac_report.json"
+    latest_path = current_mac_path if current_mac_path.exists() else JOURNAL_DIR / "last_report.json"
     last_status: Optional[str] = None
     summary: Dict[str, Any] = {}
     egress: Dict[str, Any] = {"status": "unchecked"}
@@ -418,7 +434,7 @@ def _latest_dashboard_report_summary(
     if not isinstance(last_report, dict):
         return last_status, summary, egress
     meta = last_report.get("meta") if isinstance(last_report.get("meta"), dict) else {}
-    origin = str(meta.get("origin") or meta.get("scope") or "unknown")
+    origin = str(meta.get("origin") or "unknown")
     coverage = str(meta.get("coverage") or "unknown")
     report_route_signature = meta.get("route_signature")
     current_route_signature = dashboard_state.build_route_signature(current_environment)
@@ -474,7 +490,8 @@ def _latest_dashboard_report_summary(
         for channel_id in ("connection_quality", "target_service", "advisory")
     )
     age = _age_seconds(checked_at)
-    stale = bool(age is None or age > 3600)
+    future_timestamp = bool(age is not None and age < -300)
+    stale = bool(age is None or future_timestamp or age > 3600)
     route_matches_current = bool(
         isinstance(report_route_signature, str)
         and report_route_signature
@@ -482,7 +499,9 @@ def _latest_dashboard_report_summary(
         and report_route_signature == current_route_signature
     )
     invalid_reason: Optional[str] = None
-    if stale:
+    if future_timestamp:
+        invalid_reason = "future_timestamp"
+    elif stale:
         invalid_reason = "stale"
     elif origin not in {"doctor", "post_fix_doctor"}:
         invalid_reason = "unsupported_origin"
@@ -504,7 +523,7 @@ def _latest_dashboard_report_summary(
         "origin": origin,
         "coverage": coverage,
         "checked_at": checked_at,
-        "age_seconds": int(age) if age is not None else None,
+        "age_seconds": max(0, int(age)) if age is not None else None,
         "status": route_status,
         "diagnostic_count": len(diagnostics) if isinstance(diagnostics, list) else 0,
         "diagnostic_counts": diagnostic_counts,
@@ -528,6 +547,10 @@ def _latest_dashboard_report_summary(
         summary["headline"] = explanation.get("headline")
         summary["historical_severity"] = explanation.get("severity")
     summary["severity"] = route_status or "info"
+    if not usable_for_dashboard:
+        # The historical report remains available in last_report_summary, but
+        # its public IP/ISP must not be mirrored as the current Mac egress.
+        egress = {"status": "unchecked"}
     return last_status, summary, egress
 
 
@@ -557,17 +580,16 @@ def _live_dashboard_signals(ttl_seconds: int = 10) -> Dict[str, Any]:
         if isinstance(monitor, dict):
             last_check = monitor.get("last_check")
             if isinstance(last_check, dict):
-                proxy_status = str(last_check.get("status") or "") or None
+                candidate_status = str(last_check.get("status") or "")
                 checked_at = last_check.get("checked_at")
                 if checked_at:
                     proxy_fresh_age = _age_seconds(checked_at)
-            if not proxy_status:
-                running = monitor.get("running")
-                last_error = monitor.get("last_error")
-                if running and last_error:
-                    proxy_status = "fail"
-                elif running:
-                    proxy_status = "ok"
+                if (
+                    candidate_status in _SIGNAL_STATUSES
+                    and proxy_fresh_age is not None
+                    and 0 <= proxy_fresh_age <= 180
+                ):
+                    proxy_status = candidate_status
     except Exception:
         proxy_status = None
 
@@ -579,15 +601,15 @@ def _live_dashboard_signals(ttl_seconds: int = 10) -> Dict[str, Any]:
             running = monitor.get("running")
             last_sample = monitor.get("last_sample")
             if isinstance(last_sample, dict):
+                sample_age = _age_seconds(last_sample.get("sampled_at"))
                 state = str(last_sample.get("state") or "")
-                if state in {"busyUpload", "busyDownload", "slow", "recentLag"}:
-                    network_status = "warn"
-                elif state in {"authFailing", "failing"}:
-                    network_status = "fail"
-                elif state == "ok":
-                    network_status = "ok"
-            if network_status is None and running:
-                network_status = "ok"
+                if sample_age is not None and 0 <= sample_age <= 180:
+                    if state in {"busyUpload", "busyDownload", "slow", "recentLag"}:
+                        network_status = "warn"
+                    elif state in {"authFailing", "failing"}:
+                        network_status = "fail"
+                    elif state == "ok":
+                        network_status = "ok"
     except Exception:
         network_status = None
 
@@ -623,7 +645,7 @@ def _age_seconds(value: Any) -> Optional[float]:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     delta = datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)
-    return max(0.0, delta.total_seconds())
+    return delta.total_seconds()
 
 
 def _record_startup_bridge_check() -> Dict[str, Any]:
@@ -1066,6 +1088,17 @@ def _load_latest_report() -> Tuple[int, Any]:
         return 500, {"ok": False, "error": f"failed to read report: {exc}"}
 
 
+def _load_current_mac_report() -> Tuple[int, Any]:
+    """Load the report that represents the current Mac, not a later subset check."""
+    current_mac_path = JOURNAL_DIR / "current_mac_report.json"
+    if not current_mac_path.exists():
+        return _load_latest_report()
+    try:
+        return 200, json.loads(current_mac_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return 500, {"ok": False, "error": f"failed to read current Mac report: {exc}"}
+
+
 def _support_bundle() -> Dict[str, Any]:
     """Return a redacted local support bundle for user-approved sharing."""
     generated_at = _utc_now()
@@ -1249,6 +1282,16 @@ def _known_fix_tiers() -> Dict[str, FixTier]:
     return out
 
 
+def _tier2_fix_transactional(fix_id: str) -> bool:
+    path = RULES_DIR / "symptoms.json"
+    try:
+        rules = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    definition = (rules.get("fixes") or {}).get(fix_id)
+    return isinstance(definition, dict) and definition.get("transactional_rollback") is True
+
+
 def _strip_transport_flags(command: List[str]) -> List[str]:
     cleaned: List[str] = []
     skip_next = False
@@ -1316,9 +1359,7 @@ def _validate_run_command(command: List[str]) -> Tuple[bool, str]:
         return _validate_fix_command(cleaned)
 
     if root == "rollback":
-        if len(cleaned) == 1:
-            return True, ""
-        return False, "rollback does not accept extra arguments through /run"
+        return False, "rollback changes system state and is not allowed through /run"
 
     return False, f"command not allowed through /run: {root}"
 
@@ -1490,6 +1531,15 @@ def _execute_confirmed_fix(body: Dict[str, Any]) -> Tuple[int, Any]:
             "requires_confirmation": True,
             "confirmation": SYSTEM_FIX_CONFIRMATION,
             "fix_id": fix_id,
+        }
+    if tier == FixTier.CONFIRM and not dry_run and not _tier2_fix_transactional(fix_id):
+        return 409, {
+            "ok": False,
+            "status": "blocked",
+            "reason_code": "transactional_rollback_unavailable",
+            "error": "This system fix is preview-only until a verified snapshot and rollback path is available.",
+            "fix_id": fix_id,
+            "requires_manual_action": True,
         }
 
     env = detect_environment()
@@ -1901,15 +1951,42 @@ class APIRequestHandler(BaseHTTPRequestHandler):
             return (200 if result.get("ok") else 400), result
 
         if path == "/explain_llm":
-            status, loaded = _load_latest_report()
+            mode = body.get("mode", "explain")
+            if not isinstance(mode, str) or mode not in {"explain", "image_question"}:
+                return 400, {
+                    "ok": False,
+                    "error": "mode must be explain or image_question",
+                    "reason_code": "invalid_llm_mode",
+                }
+            question = body.get("question", "")
+            if not isinstance(question, str):
+                return 400, {
+                    "ok": False,
+                    "error": "question must be a string",
+                    "reason_code": "invalid_llm_question",
+                }
+            if len(question) > llm_explain.MAX_QUESTION_CHARS:
+                return 400, {
+                    "ok": False,
+                    "error": f"question must be at most {llm_explain.MAX_QUESTION_CHARS} characters",
+                    "reason_code": "llm_question_too_long",
+                }
+            requested_redaction_level = body.get("redaction_level", "balanced")
+            if requested_redaction_level not in {"balanced", "strict"}:
+                return 400, {
+                    "ok": False,
+                    "error": "redaction_level must be balanced or strict",
+                    "reason_code": "invalid_redaction_level",
+                }
+            status, loaded = _load_current_mac_report()
             if status != 200:
                 return status, loaded
             report = loaded
             result = llm_explain.explain_with_llm(
                 report=report,
-                question=str(body.get("question") or ""),
-                mode=str(body.get("mode") or "explain"),
-                redaction_level=str(body.get("redaction_level") or "balanced"),
+                question=question,
+                mode=mode,
+                redaction_level=requested_redaction_level,
                 upload_confirmed=bool(body.get("upload_confirmed") or body.get("upload_consent_confirmed")),
                 allow_fallback=body.get("allow_fallback") if isinstance(body.get("allow_fallback"), bool) else None,
                 image_inputs=body.get("images") if isinstance(body.get("images"), list) else None,
@@ -2035,7 +2112,11 @@ class APIRequestHandler(BaseHTTPRequestHandler):
             monitor_state = proxy_monitor_service.status().get("monitor", {})
             result = residential_proxy.replace_proxy_profile(profile_id, body)
             if not result.get("ok"):
-                return (404 if result.get("error") == "profile not found" else 400), result
+                if result.get("error") == "profile not found":
+                    return 404, result
+                if str(result.get("reason_code") or "").startswith("validation_receipt_"):
+                    return 409, result
+                return 400, result
             should_start_monitor = bool(body.get("start_monitor") or body.get("auto_start_monitor"))
             monitor_matches = str(monitor_state.get("profile_id") or "") == profile_id
             if should_start_monitor or (monitor_state.get("running") and monitor_matches):

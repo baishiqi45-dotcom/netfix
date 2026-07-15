@@ -137,6 +137,74 @@ class TestLLMExplain(unittest.TestCase):
         self.assertEqual(result["fallback_reason"], "upload_consent_never")
         complete.assert_not_called()
 
+    def test_saved_strict_redaction_cannot_be_downgraded_by_request(self):
+        settings = {
+            "llm": {
+                "enabled": True,
+                "provider": "deepseek",
+                "base_url": "https://api.deepseek.com",
+                "model": "deepseek-v4-flash",
+                "api_key_account": "deepseek",
+                "upload_consent": "always",
+                "redaction_level": "strict",
+                "fallback": {"enabled": False},
+            }
+        }
+        report = dict(SAMPLE_REPORT)
+        report["environment"] = {
+            "profiles": [{"id": "private-profile", "host": "proxy.example.com"}],
+            "active_profile": {"id": "private-profile"},
+        }
+        seen = {}
+
+        def fake_complete(_self, messages, max_tokens=900, temperature=0.2):
+            seen["messages"] = messages
+            return {"headline": "ok", "severity": "ok", "explanation": "done", "actions": []}
+
+        with patch("netfix.llm_explain.load_settings", return_value=settings), \
+                patch("netfix.llm_explain.keychain.get_secret", return_value="k"), \
+                patch.object(OpenAICompatibleProvider, "complete_json", fake_complete):
+            explain_with_llm(
+                report,
+                redaction_level="balanced",
+                upload_confirmed=True,
+            )
+
+        payload = seen["messages"][1]["content"]
+        self.assertIn('"profiles": []', payload)
+        self.assertIn('"active_profile": null', payload)
+        self.assertNotIn("private-profile", payload)
+
+    def test_question_text_is_redacted_before_provider_call(self):
+        settings = {
+            "llm": {
+                "enabled": True,
+                "provider": "deepseek",
+                "base_url": "https://api.deepseek.com",
+                "model": "deepseek-v4-flash",
+                "api_key_account": "deepseek",
+                "upload_consent": "always",
+                "fallback": {"enabled": False},
+            }
+        }
+        seen = {}
+
+        def fake_complete(_self, messages, max_tokens=900, temperature=0.2):
+            seen["messages"] = messages
+            return {"headline": "ok", "severity": "ok", "explanation": "done", "actions": []}
+
+        question = "联系 alice@example.com，目标 203.0.113.10，token sk-live-secret-token-1234567890"
+        with patch("netfix.llm_explain.load_settings", return_value=settings), \
+                patch("netfix.llm_explain.keychain.get_secret", return_value="k"), \
+                patch.object(OpenAICompatibleProvider, "complete_json", fake_complete):
+            explain_with_llm(SAMPLE_REPORT, question=question, upload_confirmed=True)
+
+        payload = seen["messages"][1]["content"]
+        self.assertNotIn("alice@example.com", payload)
+        self.assertNotIn("203.0.113.10", payload)
+        self.assertNotIn("sk-live-secret-token", payload)
+        self.assertIn("[redacted_email]", payload)
+
     def test_provider_candidates_use_text_and_vision_priority(self):
         text_ids = [item["id"] for item in provider_candidates(mode="explain")]
         vision_ids = [item["id"] for item in provider_candidates(mode="image_question")]

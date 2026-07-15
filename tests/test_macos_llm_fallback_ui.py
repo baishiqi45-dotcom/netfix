@@ -100,22 +100,23 @@ def test_macos_ai_settings_has_plain_minimax_setup_path():
     dashboard = MENTIONED_DASHBOARD.read_text(encoding="utf-8")
 
     assert '@AppStorage("netfix.settings.selectedTab")' in view
-    # 新版 settings 顶层用 segmented picker 把「普通 / 诊断与日志 / 高级与开发者」分了层
-    assert 'Text("普通设置")' in view
-    assert 'Text("诊断与日志")' in view
-    assert 'Text("高级与开发者")' in view
+    # AI 解释是普通用户能力，不再和 MCP、底层系统设置混在高级层。
+    assert 'Text("常规")' in view
+    assert 'Text("检查")' in view
+    assert 'Text("AI").tag("ai")' in view
+    assert 'Text("高级")' in view
     assert "让 AI 帮我看诊断报告" in view
     assert "这是可选的 AI 看报告功能" in view
-    assert "没有 AI 密钥也能检查网络、使用代理和处理 IPv6" in view
+    assert "没有 AI 密钥也能检查网络、使用代理和恢复网络" in view
     assert "用 MiniMax 配置" in view
     assert "prepareRecommendedLLMProvider(\"minimax\")" in view
     assert "可选：AI 密钥（只用于 AI 看报告）" in view
     assert "密钥只保存在本机密码库" in view
     assert "保存并测试" in view
     assert "saveAndTestLLMSettings" in view
-    assert "高级：模型地址、备用模型和预算" in view
+    assert "高级：模型、备用链路和用量" in view
     assert "showAISettings" in delegate
-    assert 'UserDefaults.standard.set("advanced", forKey: "netfix.settings.selectedTab")' in delegate
+    assert 'UserDefaults.standard.set("ai", forKey: "netfix.settings.selectedTab")' in delegate
     assert "#selector(AppDelegate.showAISettings)" in dashboard
     assert "showProxySettings" in delegate
     assert 'UserDefaults.standard.set("proxy", forKey: "netfix.settings.selectedTab")' in delegate

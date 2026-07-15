@@ -75,6 +75,6 @@ def test_dashboard_header_shows_plain_proxy_usage_state():
 
     assert "currentStatusSection" in dashboard
     assert "state.routeLabel" in dashboard
-    assert "其他代理正在使用" in dashboard
+    assert "由其他 App 管理" in dashboard
     assert "viewModel.proxyUsageLabel" not in dashboard
     assert "dashboardStore.refresh()" in dashboard

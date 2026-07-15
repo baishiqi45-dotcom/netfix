@@ -1586,6 +1586,9 @@ extension ProxyApplyResponse {
             return "\(entry.headline)\n\(entry.nextStep)"
         }
         let code = (reasonCode ?? error ?? status ?? "").lowercased()
+        if code.contains("rollback_failed") || code.contains("restore_failed") {
+            return "代理没有通过验证，而且原网络设置没有完整恢复。\n请保持 Netfix 运行，打开「代理」后点「停止使用并恢复」；不要先退出 App。"
+        }
         if code.contains("verify_failed") || status == "rolled_back_after_verify_failure" {
             return "这组代理没通过上网验证，Netfix 已恢复部署前的网络设置。\n请换一组代理参数，或先点「预检这行参数」看地址、端口、用户名、密码是否完整。"
         }

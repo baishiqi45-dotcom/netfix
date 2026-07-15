@@ -491,6 +491,22 @@ class TestAPI(unittest.TestCase):
         self.assertTrue(engine.execute.call_args.kwargs["dry_run"])
         self.assertFalse(engine.execute.call_args.kwargs["confirmed"])
 
+    def test_confirmed_fix_endpoint_blocks_tier2_without_transactional_rollback(self):
+        with patch("netfix.api.FixEngine") as engine_cls:
+            data = self._post_json_error(
+                "/fixes/execute",
+                {
+                    "fix_id": "reset-system-proxy",
+                    "confirmed": True,
+                    "confirmation": api.SYSTEM_FIX_CONFIRMATION,
+                },
+                409,
+            )
+
+        self.assertEqual(data["reason_code"], "transactional_rollback_unavailable")
+        self.assertTrue(data["requires_manual_action"])
+        engine_cls.assert_not_called()
+
     def test_confirmed_fix_endpoint_executes_tier2_after_app_confirmation(self):
         report = {
             "diagnostics": [],
@@ -501,6 +517,7 @@ class TestAPI(unittest.TestCase):
         }
         with patch("netfix.api.detect_environment", return_value={"ok": True}) as detect, \
                 patch("netfix.api.get_core", return_value=None) as get_core, \
+                patch("netfix.api._tier2_fix_transactional", return_value=True), \
                 patch("netfix.api.FixEngine") as engine_cls, \
                 patch("netfix.api.run_cli", return_value={"ok": True, "result": report}) as run:
             engine = engine_cls.return_value
@@ -647,6 +664,60 @@ class TestAPI(unittest.TestCase):
         self.assertFalse(summary["usable_for_dashboard"])
         self.assertFalse(summary["route_matches_current"])
         self.assertEqual(summary["invalid_reason"], "incomplete_coverage")
+
+    def test_dashboard_report_does_not_accept_legacy_scope_as_origin(self):
+        checked_at = datetime.now(timezone.utc).isoformat()
+        current_env = {"ok": True, "system_proxy": {}}
+        report = {
+            "meta": {
+                "timestamp": checked_at,
+                "scope": "doctor",
+                "coverage": "current_mac_full",
+                "route_signature": dashboard_state.build_route_signature(current_env),
+            },
+            "diagnostics": [{"name": "gateway", "status": "ok"}],
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch("netfix.api.JOURNAL_DIR", Path(tempdir)):
+            Path(tempdir, "last_report.json").write_text(json.dumps(report), encoding="utf-8")
+            status, summary, _egress = api._latest_dashboard_report_summary(
+                current_environment=current_env,
+            )
+
+        self.assertIsNone(status)
+        self.assertEqual(summary["origin"], "unknown")
+        self.assertEqual(summary["invalid_reason"], "unsupported_origin")
+        self.assertFalse(summary["usable_for_dashboard"])
+
+    def test_future_dashboard_report_is_invalid_and_does_not_expose_old_egress(self):
+        checked_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+        current_env = {"ok": True, "system_proxy": {}}
+        report = {
+            "meta": {
+                "timestamp": checked_at,
+                "origin": "doctor",
+                "coverage": "current_mac_full",
+                "route_signature": dashboard_state.build_route_signature(current_env),
+            },
+            "diagnostics": [
+                {"name": "gateway", "status": "ok"},
+                {
+                    "name": "egress_identity",
+                    "status": "ok",
+                    "details": {"public_ipv4": "203.0.113.42", "isp": "Old ISP"},
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch("netfix.api.JOURNAL_DIR", Path(tempdir)):
+            Path(tempdir, "last_report.json").write_text(json.dumps(report), encoding="utf-8")
+            status, summary, egress = api._latest_dashboard_report_summary(
+                current_environment=current_env,
+            )
+
+        self.assertIsNone(status)
+        self.assertEqual(summary["invalid_reason"], "future_timestamp")
+        self.assertTrue(summary["stale"])
+        self.assertEqual(summary["age_seconds"], 0)
+        self.assertEqual(egress, {"status": "unchecked"})
 
     def test_dashboard_report_uses_route_channel_not_api_key_advisory(self):
         checked_at = datetime.now(timezone.utc).isoformat()
@@ -806,6 +877,54 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(quality["background_activity"]["label"], "上传较高")
         self.assertIn("iCloud", quality["background_activity"]["value"])
 
+    def test_dashboard_uses_saved_current_mac_report_after_newer_subset_check(self):
+        checked_at = datetime.now(timezone.utc).isoformat()
+        current_env = {"ok": True, "system_proxy": {"http": "127.0.0.1:7890"}}
+        current_report = {
+            "meta": {
+                "timestamp": checked_at,
+                "origin": "doctor",
+                "coverage": "current_mac_full",
+                "route_signature": dashboard_state.build_route_signature(current_env),
+            },
+            "diagnostics": [
+                {"name": "system_proxy_state", "status": "ok"},
+                {
+                    "name": "network_quality",
+                    "status": "ok",
+                    "details": {
+                        "dl_throughput_kbps": 15800,
+                        "ul_throughput_kbps": 19500,
+                        "base_rtt_ms": 490,
+                    },
+                },
+                {"name": "gateway", "status": "ok", "details": {"packet_loss": 0}},
+                {"name": "bandwidth_hog", "status": "ok", "details": {}},
+            ],
+        }
+        subset_report = {
+            "meta": {
+                "timestamp": checked_at,
+                "origin": "codex",
+                "coverage": "target_subset",
+                "route_signature": dashboard_state.build_route_signature(current_env),
+            },
+            "diagnostics": [{"name": "openai_api", "status": "warn", "http_code": 401}],
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch("netfix.api.JOURNAL_DIR", Path(tempdir)):
+            Path(tempdir, "current_mac_report.json").write_text(json.dumps(current_report), encoding="utf-8")
+            Path(tempdir, "last_report.json").write_text(json.dumps(subset_report), encoding="utf-8")
+
+            status, summary, _egress = api._latest_dashboard_report_summary(
+                current_environment=current_env,
+            )
+
+        self.assertEqual(status, "ok")
+        self.assertEqual(summary["origin"], "doctor")
+        self.assertEqual(summary["coverage"], "current_mac_full")
+        self.assertEqual(summary["connection_quality"]["speed"]["value"], "下载 15.8 Mbps / 上传 19.5 Mbps")
+        self.assertEqual(summary["connection_quality"]["latency"]["value"], "延迟 490ms")
+
     def test_connection_quality_uses_gateway_loss_as_honest_local_stability_fallback(self):
         quality = api._connection_quality_from_report(
             [
@@ -849,6 +968,31 @@ class TestAPI(unittest.TestCase):
         self.assertNotIn("顺畅", quality["headline"])
         self.assertIn("等待", quality["headline"])
 
+    def test_unknown_bandwidth_hog_is_not_presented_as_sampled_or_calm(self):
+        quality = api._connection_quality_from_report(
+            [
+                {
+                    "name": "bandwidth_hog",
+                    "status": "unknown",
+                    "details": {"reason": "none", "top_processes": []},
+                }
+            ],
+            checked_at=datetime.now(timezone.utc).isoformat(),
+            stale=False,
+        )
+
+        self.assertEqual(quality["background_activity"]["label"], "未测")
+        self.assertEqual(quality["collection_state"], "unavailable")
+        self.assertNotIn("平稳", json.dumps(quality, ensure_ascii=False))
+
+    def test_running_monitors_without_samples_do_not_emit_ok_live_signals(self):
+        api._LIVE_SIGNALS_CACHE.update({"value": None, "ts": 0.0})
+        with patch("netfix.api.proxy_monitor_service.status", return_value={"monitor": {"running": True, "last_check": None}}), \
+                patch("netfix.api.network_monitor_service.status", return_value={"monitor": {"running": True, "last_sample": None}}):
+            signals = api._live_dashboard_signals(ttl_seconds=0)
+
+        self.assertEqual(signals, {"fresh_seconds": 0})
+
     def test_confirmed_fix_endpoint_accepts_ipv6_fallback_warning(self):
         report = {
             "diagnostics": [
@@ -884,6 +1028,7 @@ class TestAPI(unittest.TestCase):
         }
         with patch("netfix.api.detect_environment", return_value={"ok": True}), \
                 patch("netfix.api.get_core", return_value=None), \
+                patch("netfix.api._tier2_fix_transactional", return_value=True), \
                 patch("netfix.api.FixEngine") as engine_cls, \
                 patch("netfix.api.run_cli", return_value={"ok": True, "result": report}) as run:
             engine = engine_cls.return_value
@@ -945,6 +1090,7 @@ class TestAPI(unittest.TestCase):
         }
         with patch("netfix.api.detect_environment", return_value={"ok": True}), \
                 patch("netfix.api.get_core", return_value=None), \
+                patch("netfix.api._tier2_fix_transactional", return_value=True), \
                 patch("netfix.api.FixEngine") as engine_cls, \
                 patch("netfix.api.run_cli", return_value={"ok": True, "result": report}) as run:
             engine = engine_cls.return_value
@@ -980,6 +1126,7 @@ class TestAPI(unittest.TestCase):
         }
         with patch("netfix.api.detect_environment", return_value={"ok": True}), \
                 patch("netfix.api.get_core", return_value=None), \
+                patch("netfix.api._tier2_fix_transactional", return_value=True), \
                 patch("netfix.api.FixEngine") as engine_cls:
             engine = engine_cls.return_value
             engine.execute.return_value = failed_result
@@ -1002,11 +1149,12 @@ class TestAPI(unittest.TestCase):
         self.assertIn("IPv6 泄漏检查", data["error"])
         self.assertNotEqual(data["error"], "failed")
 
-    def test_run_allows_plain_rollback(self):
-        with patch("netfix.api.run_cli", return_value={"ok": True, "result": {"diagnostics": [], "root_causes": [], "fixes": [], "manual_steps": []}}) as run:
-            data = self._post_json("/run", {"command": ["rollback"], "timeout": 5})
-        self.assertTrue(data["ok"])
-        run.assert_called_once()
+    def test_run_rejects_plain_rollback_without_invoking_executor(self):
+        with patch("netfix.api.run_cli") as run:
+            data = self._post_json_error("/run", {"command": ["rollback"], "timeout": 5}, 403)
+        self.assertFalse(data["ok"])
+        self.assertIn("not allowed", data["error"])
+        run.assert_not_called()
 
     def test_explain_llm_falls_back_without_cloud_call(self):
         report = {
@@ -1014,11 +1162,57 @@ class TestAPI(unittest.TestCase):
             "root_causes": [{"id": "proxy-auth", "description": "代理认证失败"}],
             "explanation": {"headline": "代理认证失败", "explanation": "本地解释"},
         }
-        with patch("netfix.api._load_latest_report", return_value=(200, report)), \
+        with patch("netfix.api._load_current_mac_report", return_value=(200, report)), \
                 patch("netfix.llm_explain.load_settings", return_value={"llm": {"enabled": False}}):
             data = self._post_json("/explain_llm", {})
         self.assertTrue(data["ok"])
         self.assertEqual(data["result"]["source"], "fallback")
+
+    def test_explain_llm_rejects_unknown_mode_and_oversized_question_before_provider(self):
+        with patch("netfix.api.llm_explain.explain_with_llm") as explain:
+            invalid_mode = self._post_json_error(
+                "/explain_llm",
+                {"mode": "surprise"},
+                400,
+            )
+            oversized = self._post_json_error(
+                "/explain_llm",
+                {"question": "x" * 2001},
+                400,
+            )
+        self.assertEqual(invalid_mode["reason_code"], "invalid_llm_mode")
+        self.assertEqual(oversized["reason_code"], "llm_question_too_long")
+        explain.assert_not_called()
+
+    def test_explain_llm_prefers_saved_current_mac_report_over_newer_subset_report(self):
+        current = {
+            "meta": {"origin": "doctor", "coverage": "current_mac_full"},
+            "diagnostics": [{"name": "current", "status": "warn"}],
+            "explanation": {"headline": "当前 Mac 完整体检", "explanation": "完整报告"},
+        }
+        subset = {
+            "meta": {"origin": "codex", "coverage": "target_subset"},
+            "diagnostics": [{"name": "subset", "status": "ok"}],
+            "explanation": {"headline": "局部服务检查", "explanation": "不应发送"},
+        }
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            (root / "current_mac_report.json").write_text(json.dumps(current), encoding="utf-8")
+            (root / "last_report.json").write_text(json.dumps(subset), encoding="utf-8")
+            with patch("netfix.api.JOURNAL_DIR", root):
+                status, loaded = api._load_current_mac_report()
+            self.assertEqual(status, 200)
+            self.assertEqual(loaded, current)
+
+            def fake_explain(**kwargs):
+                self.assertEqual(kwargs["report"], current)
+                return {"source": "fallback", "headline": "captured"}
+
+            with patch("netfix.api._load_current_mac_report", return_value=(200, current)), \
+                    patch("netfix.api.llm_explain.explain_with_llm", side_effect=fake_explain):
+                data = self._post_json("/explain_llm", {})
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["result"]["headline"], "captured")
 
     def test_explain_llm_requires_upload_confirmation_when_ask_each_time(self):
         report = {
@@ -1029,7 +1223,7 @@ class TestAPI(unittest.TestCase):
         with patch(
             "netfix.llm_explain.load_settings",
             return_value={"llm": {"enabled": True, "provider": "deepseek", "upload_consent": "ask_each_time"}},
-        ), patch("netfix.api._load_latest_report", return_value=(200, report)), \
+        ), patch("netfix.api._load_current_mac_report", return_value=(200, report)), \
                 patch("netfix.llm_explain.OpenAICompatibleProvider.complete_json") as complete:
             data = self._post_json("/explain_llm", {})
         self.assertTrue(data["ok"])
@@ -1047,7 +1241,7 @@ class TestAPI(unittest.TestCase):
             "root_causes": [],
             "explanation": {"headline": "客户端传入", "explanation": "不应使用"},
         }
-        with patch("netfix.api._load_latest_report", return_value=(200, latest)), \
+        with patch("netfix.api._load_current_mac_report", return_value=(200, latest)), \
                 patch("netfix.llm_explain.load_settings", return_value={"llm": {"enabled": False}}):
             data = self._post_json("/explain_llm", {"report": client_supplied})
         self.assertTrue(data["ok"])
@@ -1067,7 +1261,7 @@ class TestAPI(unittest.TestCase):
             self.assertEqual(kwargs["image_inputs"], ["data:image/png;base64,AAAA"])
             return {"source": "fallback", "fallback_reason": "image_question_disabled"}
 
-        with patch("netfix.api._load_latest_report", return_value=(200, latest)), \
+        with patch("netfix.api._load_current_mac_report", return_value=(200, latest)), \
                 patch("netfix.api.llm_explain.explain_with_llm", side_effect=fake_explain) as explain:
             data = self._post_json(
                 "/explain_llm",
@@ -1962,15 +2156,19 @@ class TestAPI(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             report = root / "last_report.json"
+            current_mac_report = root / "current_mac_report.json"
             events = root / "events.jsonl"
             report.write_text("{}", encoding="utf-8")
+            current_mac_report.write_text("{}", encoding="utf-8")
             events.write_text('{"timestamp":"2026-06-24T00:00:00+00:00"}\n', encoding="utf-8")
             with patch("netfix.logs.JOURNAL_DIR", root), \
                     patch("netfix.logs.LATEST_REPORT", report), \
+                    patch("netfix.logs.CURRENT_MAC_REPORT", current_mac_report), \
                     patch("netfix.logs.EVENTS_FILE", events):
                 data = self._post_json("/logs/clear", {"latest_report": True, "events": True})
             self.assertTrue(data["ok"])
             self.assertFalse(report.exists())
+            self.assertFalse(current_mac_report.exists())
             self.assertFalse(events.exists())
 
     def test_logs_endpoint_returns_renderable_empty_state_without_report_or_events(self):

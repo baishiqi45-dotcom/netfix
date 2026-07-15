@@ -700,6 +700,7 @@
     let operationInProgress = false;
     let activeOperationPromise = null;
     let currentPrimaryAction = { id: 'none', label: '正在读取状态', enabled: false, target: 'none', requires_confirmation: false };
+    let currentSecondaryAction = { id: 'none', label: '', enabled: false, target: 'none', requires_confirmation: false };
     const panelLoadPromises = { ai: null, proxy: null, logs: null };
     const runtimeLogBuffer = [];
     const allowedImageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
@@ -832,7 +833,7 @@
       if (!lastFailedJob) return;
       const job = lastFailedJob;
       hideJobRecovery();
-      await runJob(job.command, job.timeout, job.label, job.onDone);
+      return runExclusiveOperation(() => runJob(job.command, job.timeout, job.label, job.onDone));
     }
 
     async function copyRecoveryDetail() {
@@ -915,6 +916,26 @@
       return normalized;
     }
 
+    function secondaryActionFromVerdict(state) {
+      const verdict = state.verdict || {};
+      const action = verdict.secondary_action || {};
+      const applied = (state.proxy || {}).applied || {};
+      if (applied.owner !== 'netfix' || action.enabled === false || !action.id) {
+        return { id: 'none', label: '', enabled: false, target: 'none', requires_confirmation: false };
+      }
+      const normalized = {
+        id: action.id,
+        label: action.label || '停止使用并恢复原设置',
+        enabled: true,
+        target: normalizePrimaryTarget(action),
+        requires_confirmation: action.requires_confirmation !== false,
+      };
+      if (normalized.target !== 'recover:stale_bridge') {
+        return { id: 'none', label: '', enabled: false, target: 'none', requires_confirmation: false };
+      }
+      return normalized;
+    }
+
     function dashboardRouteLabel(route) {
       if (route === 'none') return '未使用代理';
       if (route === 'saved_only') return '已保存未启用';
@@ -938,6 +959,33 @@
       button.disabled = busy || !currentPrimaryAction.enabled || currentPrimaryAction.target === 'none';
       button.setAttribute('aria-busy', busy ? 'true' : 'false');
       button.textContent = busy ? '处理中...' : currentPrimaryAction.label;
+    }
+
+    function setSecondaryActionBusy(busy) {
+      const button = document.getElementById('dashboard-secondary-button');
+      if (!button) return;
+      button.disabled = busy || !currentSecondaryAction.enabled || currentSecondaryAction.target === 'none';
+      button.setAttribute('aria-busy', busy ? 'true' : 'false');
+      button.textContent = currentSecondaryAction.label || '停止使用并恢复原设置';
+    }
+
+    function runExclusiveOperation(task) {
+      if (operationInProgress && activeOperationPromise) return activeOperationPromise;
+      operationInProgress = true;
+      setPrimaryActionBusy(true);
+      setSecondaryActionBusy(true);
+      const retry = document.getElementById('btn-retry-job');
+      if (retry) retry.disabled = true;
+      activeOperationPromise = Promise.resolve()
+        .then(task)
+        .finally(() => {
+          operationInProgress = false;
+          activeOperationPromise = null;
+          setPrimaryActionBusy(false);
+          setSecondaryActionBusy(false);
+          if (retry) retry.disabled = !lastFailedJob;
+        });
+      return activeOperationPromise;
     }
 
     async function recoverStaleBridgeFromDashboard() {
@@ -971,36 +1019,35 @@
         log('primary_action.target unknown: ' + (target || action.id || ''));
         return Promise.resolve();
       }
-      if (operationInProgress && activeOperationPromise) return activeOperationPromise;
       if (target === 'run:doctor') return runDiagnose();
-
-      operationInProgress = true;
-      setPrimaryActionBusy(true);
-      const task = target === 'flow:proxy_setup'
-        ? openProxyPanel()
-        : recoverStaleBridgeFromDashboard();
-      activeOperationPromise = Promise.resolve(task)
+      return runExclusiveOperation(() => {
+        const task = target === 'flow:proxy_setup'
+          ? openProxyPanel()
+          : recoverStaleBridgeFromDashboard();
+        return Promise.resolve(task)
         .catch(error => {
           setStatus('fail', '操作没有完成');
           log('主操作失败: ' + (error.message || error));
-        })
-        .finally(() => {
-          operationInProgress = false;
-          activeOperationPromise = null;
-          setPrimaryActionBusy(false);
         });
-      return activeOperationPromise;
+      });
+    }
+
+    function runDashboardSecondaryAction() {
+      if (!currentSecondaryAction.enabled || currentSecondaryAction.target !== 'recover:stale_bridge') {
+        return Promise.resolve();
+      }
+      return runExclusiveOperation(() => recoverStaleBridgeFromDashboard());
     }
 
     function verdictStateCopy(severity) {
       if (severity === 'ok') return { label: '状态：可用', className: 'ok' };
       if (severity === 'warn') return { label: '状态：需要留意', className: 'warn' };
       if (severity === 'fail') return { label: '状态：需要处理', className: 'fail' };
-      return { label: '状态：待确认', className: '' };
+      return { label: '状态：尚未检查', className: '' };
     }
 
     function systemPathLabel(system, saved, applied = {}) {
-      if (system.detection_status === 'unknown') return '状态待确认';
+      if (system.detection_status === 'unknown') return '暂时读不到';
       if (applied.owner === 'netfix') return 'Netfix 代理使用中';
       if (system.active) return '其他代理正在使用';
       if ((saved.count || 0) > 0) return '已保存，尚未启用';
@@ -1091,9 +1138,10 @@
       const saved = proxy.saved || {};
       const applied = proxy.applied || {};
       const primaryAction = primaryActionFromVerdict(state);
+      const secondaryAction = secondaryActionFromVerdict(state);
       const connectionQualityVisible = visibleSections.has('connection_quality');
       const firstAidVisible = visibleSections.has('first_aid');
-      const headline = verdict.headline || state.headline || decision.headline || '当前状态待确认';
+      const headline = verdict.headline || state.headline || decision.headline || '还没有当前检查结果';
       const impact = verdict.detail || state.detail || '当前没有足够信息判断网络是否可用。';
       const severity = verdict.severity || decision.severity || 'info';
       const stateCopy = verdictStateCopy(severity);
@@ -1126,6 +1174,15 @@
       primaryButton.textContent = primaryAction.label;
       primaryButton.disabled = operationInProgress || !primaryAction.enabled || primaryAction.target === 'none';
       primaryButton.setAttribute('aria-busy', operationInProgress ? 'true' : 'false');
+      currentSecondaryAction = secondaryAction;
+      const secondaryButton = document.getElementById('dashboard-secondary-button');
+      secondaryButton.dataset.dashboardSecondaryAction = secondaryAction.id;
+      secondaryButton.dataset.dashboardSecondaryTarget = secondaryAction.target;
+      secondaryButton.textContent = secondaryAction.label || '停止使用并恢复原设置';
+      secondaryButton.hidden = !secondaryAction.enabled;
+      secondaryButton.classList.toggle('hidden', !secondaryAction.enabled);
+      secondaryButton.disabled = operationInProgress || !secondaryAction.enabled;
+      secondaryButton.setAttribute('aria-busy', operationInProgress ? 'true' : 'false');
 
       renderConnectionQuality(state.connection_quality || {});
       document.querySelectorAll('[data-section]').forEach((el) => {
@@ -1134,10 +1191,11 @@
         renderSectionByPresentation(id, el, visibleSections, collapsedSections, suppressedSections);
       });
 
-      const aiState = sectionPresentationState('ai', visibleSections, collapsedSections, suppressedSections);
-      const logsState = sectionPresentationState('logs', visibleSections, collapsedSections, suppressedSections);
-      document.getElementById('btn-open-ai')?.classList.toggle('hidden', aiState === 'suppressed');
-      document.getElementById('btn-open-logs')?.classList.toggle('hidden', logsState === 'suppressed');
+      // Suppressed means "not part of the home narrative", not unreachable.
+      // AI and logs remain explicit auxiliary destinations in the toolbar and
+      // still load lazily only after the user opens them.
+      document.getElementById('btn-open-ai')?.classList.remove('hidden');
+      document.getElementById('btn-open-logs')?.classList.remove('hidden');
       if (visibleSections.has('latest_result') && !document.getElementById('summary').textContent.trim()) {
         document.getElementById('summary').innerHTML = `<div class="headline">${escapeHtml(headline)}</div><div class="muted">${escapeHtml(verdict.next_step || state.next_step || '')}</div>`;
       }
@@ -1150,6 +1208,7 @@
         const state = await api('GET', '/dashboard/state');
         if (state.ok === false) throw new Error(state.error || 'dashboard state unavailable');
         renderDashboardState(state);
+        return { ok: true, state };
       } catch (e) {
         document.getElementById('home-panel').setAttribute('aria-busy', 'false');
         document.getElementById('dashboard-headline').textContent = '暂时读不到当前网络状态';
@@ -1167,10 +1226,16 @@
         primaryButton.disabled = false;
         primaryButton.dataset.dashboardPrimaryAction = 'reload_dashboard';
         primaryButton.dataset.dashboardPrimaryTarget = 'none';
+        currentSecondaryAction = { id: 'none', label: '', enabled: false, target: 'none', requires_confirmation: false };
+        const secondaryButton = document.getElementById('dashboard-secondary-button');
+        secondaryButton.hidden = true;
+        secondaryButton.classList.add('hidden');
+        secondaryButton.disabled = true;
         document.getElementById('btn-open-proxy')?.classList.remove('hidden');
         document.getElementById('btn-open-logs')?.classList.remove('hidden');
         setStatus('fail', '当前状态读取失败');
         log('读取当前状态失败: ' + (e.message || e));
+        return { ok: false, error: e.message || String(e) };
       }
     }
 
@@ -1780,46 +1845,41 @@
     async function runDiagnose() {
       if (operationInProgress && activeOperationPromise) return activeOperationPromise;
       const btn = document.getElementById('btn-diagnose');
-      operationInProgress = true;
       btn.disabled = true;
       btn.textContent = '检查中...';
       btn.setAttribute('aria-busy', 'true');
       setPrimaryActionBusy(true);
       setStatus('warn', '正在检查...');
       renderRunningState('正在检查连接路径', 'Netfix 正在检查 Wi-Fi、DNS、线路、节点和目标服务。');
-      activeOperationPromise = (async () => {
+      return runExclusiveOperation(async () => {
         try {
           await runJob(['doctor'], 60, '检查', renderReport);
         } finally {
           btn.disabled = false;
           btn.textContent = '检查当前网络';
           btn.removeAttribute('aria-busy');
-          operationInProgress = false;
-          activeOperationPromise = null;
-          setPrimaryActionBusy(false);
         }
-      })();
-      return activeOperationPromise;
+      });
     }
 
     async function runFix() {
-      if (operationInProgress) return;
+      if (operationInProgress && activeOperationPromise) return activeOperationPromise;
       if (!confirm('只会处理低风险问题；凡是要改系统设置的操作，都会另外让你先看预览并确认。继续？')) return;
       const btn = document.getElementById('btn-fix');
-      operationInProgress = true;
       btn.disabled = true;
       btn.textContent = '处理中...';
       btn.setAttribute('aria-busy', 'true');
       setStatus('warn', '正在处理...');
       renderRunningState('正在处理可自动修的问题', '这里只处理低风险问题；需要改配置的操作仍会要求你单独确认。');
-      try {
-        await runJob(['fix', '--all', '--yes', '--report'], 40, '自动处理', renderReport);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = '一键处理可自动修的问题';
-        btn.removeAttribute('aria-busy');
-        operationInProgress = false;
-      }
+      return runExclusiveOperation(async () => {
+        try {
+          await runJob(['fix', '--all', '--yes', '--report'], 40, '自动处理', renderReport);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '处理可自动修的问题';
+          btn.removeAttribute('aria-busy');
+        }
+      });
     }
 
     async function previewAction(actionId) {
@@ -1831,9 +1891,9 @@
     }
 
     async function runAction(actionId) {
-      if (operationInProgress) return;
+      if (operationInProgress && activeOperationPromise) return activeOperationPromise;
       if (!confirm('将处理这个低风险问题，并在处理后重新检查。继续？')) return;
-      await runJob(['fix', '--issue', actionId, '--yes', '--report'], 40, '处理问题', renderReport);
+      return runExclusiveOperation(() => runJob(['fix', '--issue', actionId, '--yes', '--report'], 40, '处理问题', renderReport));
     }
 
     async function loadLogs() {
@@ -2907,8 +2967,8 @@
       const next = data.new_endpoint || {};
       const warnings = (data.warnings || []).map(escapeHtml).join('<br>');
       return `
-        <strong>线路凭据已更新</strong>
-        <div class="muted">不会修改系统网络设置；新密码已写入系统钥匙串，旧健康检查快照已清理。</div>
+        <strong>新参数已检查并更新</strong>
+        <div class="muted">还没有改变系统网络；密码只保存在这台 Mac 的密码库。</div>
         <div>旧入口：${escapeHtml(previous.protocol || 'proxy')}://${escapeHtml(previous.host || '-')}:${escapeHtml(previous.port || 0)}</div>
         <div>新入口：${escapeHtml(next.protocol || 'proxy')}://${escapeHtml(next.host || '-')}:${escapeHtml(next.port || 0)}</div>
         ${data.monitor ? `<div class="muted">看护：${escapeHtml(data.monitor.ok ? '已按当前设置启动/重启' : (data.monitor.error || '启动失败'))}</div>` : ''}
@@ -2925,15 +2985,35 @@
         document.getElementById('proxy-input').focus();
         return;
       }
-      const ok = confirm('将用输入框里粘贴的新 host/port/user/pass 更新这条网络线路，并写入系统钥匙串；不会修改系统网络设置。继续？');
-      if (!ok) {
-        target.textContent = '已取消更新凭据。';
+      target.textContent = '正在检查新参数；通过前不会覆盖原配置...';
+      const target_profile = document.getElementById('proxy-target-profile').value || 'baseline';
+      const protocol = selectedProxyProtocol();
+      const parsed = await api('POST', '/proxy/parse', { input, protocol });
+      if (!parsed.ok) {
+        target.textContent = (parsed.errors || [parsed.error || '这行参数无法识别。']).join('、');
         return;
       }
-      target.textContent = '正在更新线路凭据并刷新看护状态...';
-      const target_profile = document.getElementById('proxy-target-profile').value || 'baseline';
+      const validation = await api('POST', '/proxy/validate', {
+        input,
+        protocol,
+        timeout: 10,
+        include_identity: true,
+        target_profile,
+      });
+      if (!validation.ok || !validation.validation_receipt) {
+        target.innerHTML = renderProxyValidation(validation);
+        return;
+      }
+      const ok = confirm('新参数已通过检查。现在更新这条配置？这一步还不会改变系统网络。');
+      if (!ok) {
+        target.textContent = '已取消更新。原配置没有变化。';
+        return;
+      }
+      target.textContent = '正在更新...';
       const res = await api('POST', `/proxy/profiles/${profileId}/replace`, {
         input,
+        protocol,
+        validation_receipt: validation.validation_receipt,
         start_monitor: document.getElementById('proxy-start-monitor-on-save').checked,
         monitor_interval: 60,
         timeout: 10,
@@ -3155,8 +3235,8 @@
       // /health and /dashboard/state are the only two requests allowed on
       // first paint. Issue them in parallel so the home contract is rendered
       // after a single network round-trip instead of two serialised ones.
-      const [health] = await Promise.all([checkApi(false), loadDashboardState()]);
-      renderApiHealth(health);
+      const [health, dashboard] = await Promise.all([checkApi(false), loadDashboardState()]);
+      if (dashboard.ok) renderApiHealth(health);
       // Only the home contract loads on first paint. The AI / proxy / privacy
       // panels load their data the first time the user actually opens them —
       // this is the only honest way to honour "one conclusion, one action"

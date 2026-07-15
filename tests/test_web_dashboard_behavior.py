@@ -43,6 +43,7 @@ const detailsIds = new Set([
 ]);
 const buttonIds = new Set([
   'dashboard-primary-button',
+  'dashboard-secondary-button',
   'btn-diagnose',
   'btn-open-proxy',
   'btn-open-ai',
@@ -299,7 +300,9 @@ globalThis.__dashboardTest = {
   renderSectionByPresentation,
   primaryActionFromVerdict,
   runDashboardPrimaryAction,
+  runDashboardSecondaryAction,
   runDiagnose,
+  retryFailedJob,
   openProxyPanel,
   openAIPanel,
   openLogs,
@@ -409,6 +412,46 @@ async function runScenario() {
     return { runCalls: count('/run') };
   }
 
+  if (scenario === 'cross-entry-lock') {
+    holdRun = true;
+    const failed = api.runDiagnose();
+    await flush();
+    runRelease();
+    await failed;
+    holdRun = true;
+    const before = count('/run');
+    const retry = api.retryFailedJob();
+    const diagnose = api.runDiagnose();
+    await flush();
+    assert(count('/run') === before + 1, `retry/diagnose lock allowed ${count('/run') - before} new jobs`);
+    runRelease();
+    await Promise.all([retry, diagnose]);
+    return { runCalls: count('/run') };
+  }
+
+  if (scenario === 'secondary-ownership') {
+    const owned = JSON.parse(JSON.stringify(dashboardState));
+    owned.proxy.applied = { owner: 'netfix', active: true };
+    owned.verdict.secondary_action = {
+      id: 'stop_and_restore',
+      label: '停止使用并恢复原设置',
+      enabled: true,
+      target: 'recover:stale_bridge',
+      requires_confirmation: true,
+    };
+    api.renderDashboardState(owned);
+    const secondary = getElement('dashboard-secondary-button');
+    assert(secondary.hidden === false && !secondary.classList.contains('hidden'), 'Netfix-owned restore action is hidden');
+    await api.runDashboardSecondaryAction();
+    assert(count('/proxy/bridge/recover') === 1, 'secondary restore did not call recovery endpoint');
+
+    const external = JSON.parse(JSON.stringify(owned));
+    external.proxy.applied.owner = 'external';
+    api.renderDashboardState(external);
+    assert(secondary.hidden === true && secondary.classList.contains('hidden'), 'external proxy exposed Netfix restore action');
+    return { recoverCalls: count('/proxy/bridge/recover') };
+  }
+
   if (scenario === 'lazy') {
     await api.boot();
     api.openAIPanel();
@@ -494,6 +537,14 @@ async function runScenario() {
     await api.runDashboardPrimaryAction();
     assert(count('/dashboard/state') === before + 1, 'retry CTA did not reread dashboard state');
     return { calls };
+  }
+
+  if (scenario === 'boot-dashboard-error') {
+    failDashboard = true;
+    await api.boot();
+    assert(getElement('status-dot').classList.contains('fail'), `health overwrote dashboard failure: ${getElement('status-dot').className}`);
+    assert(getElement('status-text').textContent === '当前状态读取失败', `wrong status text: ${getElement('status-text').textContent}`);
+    return { status: getElement('status-dot').className };
   }
 
   if (scenario === 'proxy-receipt') {
@@ -594,6 +645,12 @@ class TestWebDashboardBehavior(unittest.TestCase):
     def test_primary_action_has_single_job_lock(self):
         self.run_scenario("lock")
 
+    def test_retry_and_primary_action_share_one_job_lock(self):
+        self.run_scenario("cross-entry-lock")
+
+    def test_secondary_restore_is_visible_only_for_netfix_owned_route(self):
+        self.run_scenario("secondary-ownership")
+
     def test_optional_panels_are_lazy_and_deduplicated(self):
         self.run_scenario("lazy")
 
@@ -611,6 +668,9 @@ class TestWebDashboardBehavior(unittest.TestCase):
 
     def test_dashboard_error_keeps_tools_and_exposes_retry_action(self):
         self.run_scenario("dashboard-error")
+
+    def test_health_success_cannot_overwrite_dashboard_failure(self):
+        self.run_scenario("boot-dashboard-error")
 
     def test_proxy_save_requires_matching_preflight_receipt(self):
         self.run_scenario("proxy-receipt")

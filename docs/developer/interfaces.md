@@ -13,7 +13,7 @@ python3 netfix.py doctor --json
 python3 netfix.py kb --query MTU
 ```
 
-Compatibility aliases are `check` for `triage`, `full-check` for `doctor`, and `guide` for `kb`. `fix` and `rollback` are mutating surfaces; Tier 2 actions still require explicit user confirmation as defined in [AGENTS.md](../../AGENTS.md).
+Compatibility aliases are `check` for `triage`, `full-check` for `doctor`, and `guide` for `kb`. `fix` and `rollback` are mutating surfaces; Tier 2 actions require explicit user confirmation as defined in [AGENTS.md](../../AGENTS.md). Generic Tier 2 fixes without `transactional_rollback=true` are preview-only and return `transactional_rollback_unavailable` instead of leaving partially changed system state.
 
 For a source checkout:
 
@@ -91,7 +91,7 @@ Start the stdio server with:
 python3 -m netfix.mcp_server
 ```
 
-Primary tools include `netfix_codex`, `netfix_services`, `netfix_triage`, `netfix_doctor`, `netfix_report`, `netfix_kb_query`, `netfix_list_fixes`, `netfix_dry_run_fix`, `netfix_apply_fix`, `netfix_evidence_chain`, and `netfix_sanitized_report`. Compatibility tools such as `netfix_fix_issue`, `netfix_rollback`, and `netfix_proxy_switch` remain available while their contracts are tested.
+Primary tools include `netfix_codex`, `netfix_services`, `netfix_triage`, `netfix_doctor`, `netfix_report`, `netfix_kb_query`, `netfix_list_fixes`, `netfix_dry_run_fix`, `netfix_apply_fix`, `netfix_evidence_chain`, and `netfix_sanitized_report`. Compatibility tools such as `netfix_fix_issue`, `netfix_rollback`, and `netfix_proxy_switch` remain available while their contracts are tested. `netfix_rollback` requires `confirmed=true` with `confirmation=APPLY_SYSTEM_FIX`; `/run` rejects `rollback` because that endpoint has no action-time confirmation channel.
 
 Registration helpers:
 

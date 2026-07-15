@@ -258,6 +258,17 @@ class FixEngine:
                 result["preview"] = commands
                 return result
 
+            if fix.get("transactional_rollback") is not True:
+                result.update({
+                    "ok": False,
+                    "status": "blocked",
+                    "reason_code": "transactional_rollback_unavailable",
+                    "error": "this Tier 2 fix has no verified snapshot and rollback implementation",
+                    "requires_manual_action": True,
+                    "manual_steps": manual_steps,
+                })
+                return result
+
             backups = self._backup_paths(backup_paths)
             result["backups"] = backups
             preview = "\n".join(f"  {c}" for c in commands)

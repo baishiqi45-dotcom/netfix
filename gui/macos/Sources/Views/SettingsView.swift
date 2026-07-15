@@ -94,6 +94,8 @@ struct SettingsView: View {
                     proxyLayerView
                 case "diagnostics":
                     diagnosticsLayerView
+                case "ai":
+                    aiLayerView
                 case "advanced":
                     advancedLayerView
                 default:
@@ -209,14 +211,15 @@ struct SettingsView: View {
 
     private var settingsLayerPicker: some View {
         Picker("设置分组", selection: $selectedSettingsTab) {
-            Text("普通设置").tag("general")
-            Text("代理线路").tag("proxy")
-            Text("诊断与日志").tag("diagnostics")
-            Text("高级与开发者").tag("advanced")
+            Text("常规").tag("general")
+            Text("代理").tag("proxy")
+            Text("检查").tag("diagnostics")
+            Text("AI").tag("ai")
+            Text("高级").tag("advanced")
         }
         .pickerStyle(.segmented)
         .padding(12)
-        .help("普通设置 = 开机启动、通知、权限、本地数据；代理线路 = 粘贴、预检、保存和开始使用；诊断与日志 = 服务分组、本地报告和日志清理；高级与开发者 = AI、MCP、底层系统设置。")
+        .help("常规 = 启动、通知和本地数据；代理 = 粘贴、预检、保存和开始使用；检查 = 网络检查和日志；AI = 报告解释；高级 = MCP 和底层系统设置。")
     }
 
     private var settingsStatusStrip: some View {
@@ -310,20 +313,16 @@ struct SettingsView: View {
     private var advancedLayerView: some View {
         Form {
             advancedIntroSection
-            aiLayerView
+            agentTab
             advancedProxyControlsSection
         }
         .padding(.top, 4)
     }
 
-    // MARK: - AI 与 MCP（合并到高级与开发者）
+    // MARK: - AI
 
     private var aiLayerView: some View {
-        Form {
-            aiTab
-            agentTab
-        }
-        .padding(.top, 4)
+        aiTab
     }
 
     private var advancedProxyControlsSection: some View {
@@ -499,7 +498,7 @@ struct SettingsView: View {
     // MARK: - AI 编程助手 / MCP
 
     private var agentTab: some View {
-        Form {
+        Group {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -573,7 +572,6 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding()
     }
 
     // MARK: - AI
@@ -592,7 +590,7 @@ struct SettingsView: View {
                             .labelsHidden()
                     }
 
-                    Text("这是可选的 AI 看报告功能。没有 AI 密钥也能检查网络、使用代理和处理 IPv6；需要 AI 帮你解释报告时再填写。密钥只保存在本机密码库。")
+                    Text("这是可选的 AI 看报告功能。没有 AI 密钥也能检查网络、使用代理和恢复网络；需要 AI 帮你解释报告时再填写。密钥只保存在本机密码库。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -644,11 +642,11 @@ struct SettingsView: View {
                 }
 
                 Toggle("允许带截图问 AI", isOn: $llmImageQuestionEnabled)
-                Text("开启后，主界面的问 AI 可以在你确认后发送选中的 PNG、JPEG、WebP 或 GIF 截图；MiniMax/Kimi/Qwen 可处理图片，DeepSeek 只处理文字报告。")
+                Text("开启后，主界面的问 AI 可以在你确认后发送 PNG、JPEG、WebP 或 GIF 截图。截图只移除文件元数据，图中可见文字和内容仍会发送给你选择的 AI 供应商。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                DisclosureGroup("高级：模型地址、备用模型和预算", isExpanded: $showAdvancedAISettings) {
+                DisclosureGroup("高级：模型、备用链路和用量", isExpanded: $showAdvancedAISettings) {
                     VStack(alignment: .leading, spacing: 8) {
                         TextField("Base URL", text: $llmBaseURL)
                             .textFieldStyle(.roundedBorder)
@@ -946,7 +944,8 @@ struct SettingsView: View {
                 } else {
                     let deployedID = proxyBridgeState?.lifecycle?.profileId
                     let activeProfile = proxyProfiles.first(where: { $0.id == deployedID })
-                        ?? proxyProfiles.first(where: { $0.passwordSet == true })
+                        ?? proxyProfiles.first(where: { proxyProfileCanStart($0) })
+                        ?? proxyProfiles.first
                     let recentCandidates = proxyProfiles
                         .filter { $0.id != activeProfile?.id }
                         .sorted { lhs, rhs in
@@ -1045,6 +1044,7 @@ struct SettingsView: View {
 
 @ViewBuilder
 private func proxyActiveCard(profile: ProxyProfile, isDeployed: Bool) -> some View {
+    let canStart = proxyProfileCanStart(profile)
     VStack(alignment: .leading, spacing: 8) {
         HStack(spacing: 8) {
             Image(systemName: isDeployed ? "checkmark.shield.fill" : "tray.full.fill")
@@ -1069,14 +1069,25 @@ private func proxyActiveCard(profile: ProxyProfile, isDeployed: Bool) -> some Vi
                 .foregroundStyle(.secondary)
         }
         HStack(spacing: 8) {
-            Button {
-                Task { await prepareProxyDeployment(profile) }
-            } label: {
-                Label("使用这条", systemImage: "play.circle.fill")
+            if canStart {
+                Button {
+                    Task { await prepareProxyDeployment(profile) }
+                } label: {
+                    Label("使用这条", systemImage: "play.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(!backend.isReady)
+            } else {
+                Button {
+                    Task { await validateSavedProxyProfile(profile) }
+                } label: {
+                    Label("检查这条", systemImage: "checkmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!backend.isReady)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(!backend.isReady)
 
             Menu {
                 Button("更新参数") {
@@ -1128,8 +1139,8 @@ private func proxyCandidateRow(profile: ProxyProfile) -> some View {
             .controlSize(.mini)
             .disabled(!backend.isReady)
         } else {
-            Button("更新参数") {
-                Task { await replaceProxyProfile(profile) }
+            Button("检查这条") {
+                Task { await validateSavedProxyProfile(profile) }
             }
             .buttonStyle(.bordered)
             .controlSize(.mini)
@@ -1180,6 +1191,9 @@ private func proxyFullHistoryRow(profile: ProxyProfile) -> some View {
 }
 
 private func proxyProfileCanStart(_ profile: ProxyProfile) -> Bool {
+    guard profile.verificationStatus == "verified", profile.canApply == true else {
+        return false
+    }
     let needsPassword = !(profile.username ?? "").isEmpty
     if needsPassword && profile.passwordSet != true {
         return false
@@ -2622,31 +2636,56 @@ private func cleanupDuplicateProxyProfiles() async {
             proxyStatus = "请先在输入框粘贴新的代理连接参数，再点击对应配置的“更新参数”。"
             return
         }
+        proxyStatus = "正在检查新参数；通过前不会覆盖原配置…"
         do {
+            let parsed = try await client.parseProxy(input: input, protocolHint: proxyProtocolHint)
+            guard parsed.ok else {
+                throw ProxySetupWorkflowError.parseFailed(parsed.errors?.joined(separator: "、") ?? "格式不正确")
+            }
+            let validation = try await client.validateProxy(
+                input: input,
+                timeout: 10,
+                includeIdentity: true,
+                targetProfile: proxyTargetProfile,
+                protocolHint: proxyProtocolHint
+            )
+            guard validation.ok, validation.proxyCheck?.status == "ok" else {
+                let detail = validation.errors?.joined(separator: "、")
+                    ?? validation.proxyCheck?.error
+                    ?? "地址、账号或网络不可用"
+                throw ProxySetupWorkflowError.validationFailed(detail)
+            }
+            guard let receipt = validation.validationReceipt, !receipt.isEmpty else {
+                throw ProxySetupWorkflowError.missingValidationReceipt
+            }
             let result = try await client.replaceProxyProfile(
                 profileID: profile.id,
                 input: input,
+                validationReceipt: receipt,
                 startMonitor: proxyStartMonitorOnSave,
                 targetProfile: proxyTargetProfile,
                 protocolHint: proxyProtocolHint
             )
-            if let updated = result.profile {
-                proxyProfiles.removeAll { $0.id == updated.id }
-                proxyProfiles.append(updated)
+            guard result.ok, let updated = result.profile else {
+                throw ProxySetupWorkflowError.saveFailed(result.error ?? "更新未完成")
             }
+            guard updated.verificationStatus == "verified", updated.canApply == true else {
+                throw ProxySetupWorkflowError.savedProfileNotVerified
+            }
+            proxyProfiles.removeAll { $0.id == updated.id }
+            proxyProfiles.append(updated)
             if let monitor = result.monitor {
                 proxyMonitorState = monitor
             }
             proxyImportPreviewResult = nil
-            proxyParseResult = nil
-            proxyValidateResult = nil
+            proxyParseResult = parsed
+            proxyValidateResult = validation
             proxyExportResult = nil
-            proxyStatus = result.ok
-                ? "已更新代理连接参数。新密码已写入本机密码库；要切全机流量请点“开始使用代理”。"
-                : "失败：\(result.error ?? "无法更新凭据")"
+            proxyStatus = "新参数检查通过并已更新。还没有改变当前系统网络。"
             if result.monitor == nil {
                 await loadProxyMonitor()
             }
+            await dashboardStore.refresh()
         } catch {
             let card = UserFacingMessages.classify(error.localizedDescription)
             proxyStatus = "\(card.headline)\n\(card.nextStep)"

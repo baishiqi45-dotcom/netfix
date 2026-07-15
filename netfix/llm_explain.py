@@ -9,13 +9,14 @@ from typing import Any, Dict, List, Optional, Set
 
 from netfix import explain, keychain, llm_budget
 from netfix.llm_provider import LLMProviderError, OpenAICompatibleProvider, get_provider, provider_candidates
-from netfix.redaction import redact_report
+from netfix.redaction import redact_report, redact_text
 from netfix.settings import load_settings
 
 
 VALID_SEVERITIES = {"ok", "warn", "fail"}
 MAX_IMAGE_INPUTS = 3
 MAX_IMAGE_DATA_URL_CHARS = 6_250_000
+MAX_QUESTION_CHARS = 2_000
 ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
 
 
@@ -558,8 +559,16 @@ def explain_with_llm(
     image_inputs: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
     """Explain a report using an optional cloud LLM, with local fallback."""
-    redacted = redact_report(report, level=redaction_level)
     llm_settings = load_settings().get("llm", {})
+    saved_redaction_level = str(llm_settings.get("redaction_level") or "balanced")
+    requested_redaction_level = str(redaction_level or "balanced")
+    effective_redaction_level = (
+        "strict"
+        if "strict" in {saved_redaction_level, requested_redaction_level}
+        else "balanced"
+    )
+    redacted = redact_report(report, level=effective_redaction_level)
+    question = redact_text(str(question or "").strip()[:MAX_QUESTION_CHARS])
     if not llm_settings.get("enabled"):
         return _fallback(report, "llm_disabled", redacted)
     if llm_settings.get("upload_consent") == "never":

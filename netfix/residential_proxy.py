@@ -962,7 +962,18 @@ def _restore_system_proxy_backup(backup: Dict[str, Any]) -> Dict[str, Any]:
 
     executed = []
     for command in commands:
-        _run_networksetup(command)
+        try:
+            _run_networksetup(command)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "status": "partial_restore_failed" if executed else "restore_failed",
+                "reason_code": "networksetup_restore_failed",
+                "error": str(exc),
+                "network_service": service,
+                "commands": executed,
+                "failed_command": {"args": ["networksetup", *command]},
+            }
         executed.append({"args": ["networksetup", *command]})
     return {"ok": True, "network_service": service, "commands": executed}
 
@@ -1083,6 +1094,59 @@ def _write_apply_journal(entry: Dict[str, Any]) -> Dict[str, Any]:
     payload = {"version": 1, "last_apply": _sanitize_proxy_backup_for_journal(entry)}
     secure_write_json(PROXY_APPLY_JOURNAL, payload, sort_keys=True)
     return payload
+
+
+def _backup_restore_blocked_reason(backup: Dict[str, Any]) -> Optional[str]:
+    if not str(backup.get("service") or ""):
+        return "missing_network_service"
+    if _backup_has_authenticated_proxy(backup):
+        return "authenticated_proxy_backup_not_restorable"
+    for kind in ("web", "secure", "socks"):
+        state = backup.get(kind) if isinstance(backup.get(kind), dict) else {}
+        if state.get("enabled") and (not state.get("server") or not state.get("port")):
+            return f"{kind}_proxy_backup_incomplete"
+    auto_url = backup.get("auto_proxy_url") if isinstance(backup.get("auto_proxy_url"), dict) else {}
+    if auto_url.get("enabled") and not _auto_proxy_url_for_restore(auto_url):
+        return str(auto_url.get("restore_blocked_reason") or "auto_proxy_url_backup_not_restorable")
+    return None
+
+
+def _rollback_backup_for_new_apply(current: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[str]]:
+    """Preserve the original pre-Netfix settings across A -> B profile switches."""
+    journal = _read_apply_journal()
+    previous = journal.get("last_apply") if isinstance(journal.get("last_apply"), dict) else None
+    if not previous or previous.get("rolled_back_at"):
+        return current, None
+    expected = previous.get("applied_snapshot") if isinstance(previous.get("applied_snapshot"), dict) else {}
+    backup = previous.get("backup") if isinstance(previous.get("backup"), dict) else {}
+    if (
+        expected
+        and _system_proxy_matches_snapshot(current, expected)
+        and not _backup_restore_blocked_reason(backup)
+    ):
+        return copy.deepcopy(backup), str(previous.get("id") or "") or None
+    return current, None
+
+
+def _verify_applied_system_topology(service: str, expected: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        current = _capture_system_proxy_backup(service)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "status": "fail",
+            "reason_code": "system_proxy_readback_failed",
+            "error": str(exc),
+        }
+    if not _system_proxy_matches_snapshot(current, expected):
+        return {
+            "ok": False,
+            "status": "fail",
+            "reason_code": "system_proxy_readback_mismatch",
+            "error": "macOS did not report the proxy settings that Netfix just applied",
+            "observed_snapshot": _proxy_topology_snapshot(current),
+        }
+    return {"ok": True, "status": "ok"}
 
 
 def _read_apply_journal() -> Dict[str, Any]:
@@ -1536,6 +1600,24 @@ def replace_proxy_profile(profile_id: str, payload: Dict[str, Any]) -> Dict[str,
     profile = dict(parsed["profile"])
     password = parsed.get("_secret", {}).get("password")
     warnings = list(parsed.get("warnings", []))
+    receipt = str(payload.get("validation_receipt") or "")
+    receipt_result: Dict[str, Any] = {"ok": False, "reason_code": "validation_receipt_missing"}
+    if receipt:
+        receipt_result = consume_validation_receipt(
+            receipt,
+            profile,
+            password=str(password or ""),
+        )
+        if not receipt_result.get("ok"):
+            return {
+                "ok": False,
+                "status": "blocked",
+                "profile_id": profile_id,
+                "error": "validation receipt is invalid or expired",
+                "reason_code": receipt_result.get("reason_code"),
+                "requires_validation": True,
+            }
+    verified = bool(receipt_result.get("ok"))
     keychain_result: Dict[str, Any] = {"ok": True, "service": keychain.PROXY_SERVICE, "account": profile_id, "skipped": True}
     if password:
         keychain_result = keychain.set_secret(keychain.PROXY_SERVICE, profile_id, password)
@@ -1558,11 +1640,15 @@ def replace_proxy_profile(profile_id: str, payload: Dict[str, Any]) -> Dict[str,
     profile.pop("password_set", None)
     for field in ("last_check", "last_identity_report", "last_identity_summary"):
         profile.pop(field, None)
-    profile["verification_status"] = "unverified"
-    profile["can_apply"] = False
-    profile["validation_source"] = "endpoint_replaced"
-    profile.pop("validated_at", None)
-    warnings.append("profile_requires_revalidation_after_replace")
+    profile["verification_status"] = "verified" if verified else "unverified"
+    profile["can_apply"] = verified
+    if verified:
+        profile["validated_at"] = receipt_result.get("validated_at") or _utc_now()
+        profile["validation_source"] = "preflight_receipt"
+    else:
+        profile["validation_source"] = "endpoint_replaced_without_preflight"
+        profile.pop("validated_at", None)
+        warnings.append("profile_requires_revalidation_after_replace")
     saved = upsert_proxy_profile(profile)
     saved["password_set"] = bool(password)
     return {
@@ -2228,7 +2314,7 @@ def apply_proxy_profile(
 
     try:
         service = choose_network_service(network_service)
-        backup = _capture_system_proxy_backup(service)
+        current_backup = _capture_system_proxy_backup(service)
     except Exception as exc:
         return {
             "ok": False,
@@ -2240,6 +2326,7 @@ def apply_proxy_profile(
             "deployment_decision": plan.get("deployment_decision"),
         }
 
+    backup, replaced_apply_id = _rollback_backup_for_new_apply(current_backup)
     if _backup_has_authenticated_proxy(backup):
         return {
             "ok": False,
@@ -2285,7 +2372,59 @@ def apply_proxy_profile(
         "redacted_url": _redacted_url(str(profile.get("protocol") or ""), str(profile.get("host") or ""), int(profile.get("port") or 0), str(profile.get("username") or "")),
         "backup": backup,
         "bridge": bridge_started,
+        "status": "preparing",
     }
+    if replaced_apply_id:
+        entry["replaces_apply_id"] = replaced_apply_id
+
+    # Persist and validate a restorable backup before the first networksetup
+    # mutation. If PAC credentials cannot be moved to Keychain, applying is
+    # blocked instead of promising a rollback that cannot succeed.
+    try:
+        prepared_payload = _write_apply_journal(entry)
+    except Exception as exc:
+        bridge_stop = proxy_bridge.stop_bridge(str(bridge_started.get("id") or "")) if bridge_started else None
+        return {
+            "ok": False,
+            "status": "blocked",
+            "mode": mode,
+            "profile_id": profile.get("id"),
+            "network_service": service,
+            "error": str(exc),
+            "reason_code": "rollback_journal_prepare_failed",
+            "bridge_stop": bridge_stop,
+            "deployment_decision": plan.get("deployment_decision"),
+        }
+    persisted_entry = (
+        prepared_payload.get("last_apply")
+        if isinstance(prepared_payload, dict) and isinstance(prepared_payload.get("last_apply"), dict)
+        else None
+    )
+    if persisted_entry:
+        entry = copy.deepcopy(persisted_entry)
+        entry["bridge"] = bridge_started
+    blocked_reason = _backup_restore_blocked_reason(entry.get("backup", {}))
+    if blocked_reason:
+        bridge_stop = proxy_bridge.stop_bridge(str(bridge_started.get("id") or "")) if bridge_started else None
+        entry["status"] = "blocked_before_apply"
+        entry["restore_blocked_reason"] = blocked_reason
+        entry["bridge_stop_before_apply"] = bridge_stop
+        try:
+            _write_apply_journal(entry)
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "status": "blocked",
+            "mode": mode,
+            "profile_id": profile.get("id"),
+            "network_service": service,
+            "error": "current network settings cannot be safely restored",
+            "reason_code": blocked_reason,
+            "bridge_stop": bridge_stop,
+            "deployment_decision": plan.get("deployment_decision"),
+        }
+
     try:
         executed = []
         for command in _apply_system_proxy_commands(effective_profile, service):
@@ -2304,25 +2443,34 @@ def apply_proxy_profile(
         entry["applied_snapshot"] = _expected_applied_snapshot(
             effective_profile,
             service,
-            backup,
+            current_backup,
             ipv6_disabled=bool(ipv6_commands),
         )
+        entry["status"] = "applied_pending_verification"
         _write_apply_journal(entry)
     except Exception as exc:
         restore = _restore_system_proxy_backup(backup)
-        bridge_stop = proxy_bridge.stop_bridge(str(bridge_started.get("id") or "")) if bridge_started else None
+        bridge_stop = (
+            proxy_bridge.stop_bridge(str(bridge_started.get("id") or ""))
+            if bridge_started and restore.get("ok")
+            else None
+        )
         entry["apply_error"] = str(exc)
         entry["restore_after_apply_error"] = restore
         entry["bridge_stop_after_apply_error"] = bridge_stop
-        _write_apply_journal(entry)
+        entry["status"] = "restored_after_apply_error" if restore.get("ok") else "restore_failed_after_apply_error"
+        try:
+            _write_apply_journal(entry)
+        except Exception as journal_exc:
+            entry["journal_error_after_apply_error"] = str(journal_exc)
         return {
             "ok": False,
-            "status": "failed",
+            "status": "failed" if restore.get("ok") else "restore_failed_after_apply_error",
             "mode": mode,
             "profile_id": profile.get("id"),
             "network_service": service,
             "error": str(exc),
-            "reason_code": "system_proxy_apply_failed",
+            "reason_code": "system_proxy_apply_failed" if restore.get("ok") else "system_proxy_apply_and_restore_failed",
             "deployment_decision": plan.get("deployment_decision"),
             "rollback": restore,
             "bridge_stop": bridge_stop,
@@ -2330,32 +2478,51 @@ def apply_proxy_profile(
 
     verify_result = None
     if verify:
-        verify_result = validate_proxy_profile(
-            effective_profile,
-            target_url=target_url,
-            timeout=max(1, min(int(timeout), 60)),
-            target_profile=target_profile,
-        )
+        topology_result = _verify_applied_system_topology(service, entry.get("applied_snapshot", {}))
+        if topology_result.get("ok"):
+            verify_result = validate_proxy_profile(
+                effective_profile,
+                target_url=target_url,
+                timeout=max(1, min(int(timeout), 60)),
+                target_profile=target_profile,
+            )
+            verify_result["system_path"] = topology_result
+        else:
+            verify_result = {
+                "ok": False,
+                "status": "fail",
+                "reason_code": topology_result.get("reason_code"),
+                "error": topology_result.get("error"),
+                "system_path": topology_result,
+            }
         entry["verify"] = verify_result
         if not verify_result.get("ok") and rollback_on_verify_failure:
             restore = _restore_system_proxy_backup(backup)
             bridge_stop = proxy_bridge.stop_bridge(str(bridge_started.get("id") or "")) if bridge_started and restore.get("ok") else None
-            entry["rolled_back_at"] = _utc_now()
+            if restore.get("ok"):
+                entry["rolled_back_at"] = _utc_now()
+            else:
+                entry["rollback_failed_at"] = _utc_now()
             entry["rollback_after_verify_failure"] = restore
             entry["bridge_stop_after_verify_failure"] = bridge_stop
-            _write_apply_journal(entry)
+            entry["status"] = "rolled_back_after_verify_failure" if restore.get("ok") else "rollback_failed_after_verify_failure"
+            try:
+                _write_apply_journal(entry)
+            except Exception as journal_exc:
+                entry["journal_error_after_verify_failure"] = str(journal_exc)
             return {
                 "ok": False,
-                "status": "rolled_back_after_verify_failure",
+                "status": entry["status"],
                 "mode": mode,
                 "profile_id": profile.get("id"),
                 "network_service": service,
                 "verify": verify_result,
                 "rollback": restore,
                 "bridge_stop": bridge_stop,
-                "reason_code": "verify_failed",
+                "reason_code": "verify_failed" if restore.get("ok") else "verify_failed_rollback_failed",
                 "deployment_decision": plan.get("deployment_decision"),
             }
+        entry["status"] = "applied_verified"
         _write_apply_journal(entry)
 
     return {

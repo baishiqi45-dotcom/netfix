@@ -52,7 +52,6 @@ def test_macos_mutating_fix_paths_still_use_confirmed_synchronous_calls():
     assert 'body["confirmation"] = "APPLY_SYSTEM_FIX"' in api_client
     assert '"confirmation"] = "ROLLBACK_PROXY_PROFILE"' in api_client
     assert "让 Netfix 处理这个问题？" in dashboard
-    assert "你需要做的事" in dashboard
     assert "手动步骤" not in dashboard
 
 
@@ -85,9 +84,14 @@ def test_macos_toolbar_splits_primary_and_secondary_actions():
     assert "private var primaryActionToolbar: some View" not in dashboard
     assert "private var secondaryActionToolbar: some View" in dashboard
     assert 'Button("代理")' in dashboard
-    assert 'Button("日志")' in dashboard
     assert 'Button("设置")' in dashboard
     assert 'Menu("更多")' in dashboard
+    toolbar = dashboard[
+        dashboard.index("private var secondaryActionToolbar"):
+        dashboard.index('Menu("更多")')
+    ]
+    assert 'Label("问 AI", systemImage: "sparkles")' in toolbar
+    assert 'Button("日志")' not in toolbar
 
 
 def test_health_monitor_auto_fix_uses_explicit_tier1_action_only():

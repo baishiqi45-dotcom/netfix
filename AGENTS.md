@@ -59,7 +59,7 @@ python3 netfix.py connectivity 8.8.8.8:443 --json
   ```bash
   python3 netfix.py fix --issue flush-dns-cache
   ```
-- **Tier 2 / 需用户确认**：会改系统配置，**必须先问用户**，不能因 `--yes` 绕过。
+- **Tier 2 / 需用户确认**：会改系统配置，**必须先问用户**，不能因 `--yes` 绕过。只有规则明确标记 `transactional_rollback=true` 时才可执行；当前通用 Tier 2 规则没有可验证快照，只允许 dry-run，真实变更使用代理专用确认端点或交给用户手动处理。
   ```bash
   python3 netfix.py fix --issue reset-system-proxy --dry-run
   # 给用户看 diff，确认后再去掉 --dry-run
@@ -165,13 +165,13 @@ HTTP 端点：
 - `POST /settings/llm`
 - `POST /explain_llm`
 
-MCP 暴露的工具包括 `netfix_codex`、`netfix_services`、`netfix_triage`、`netfix_doctor`、`netfix_report`、`netfix_kb_query`、`netfix_fix_issue`、`netfix_rollback`、`netfix_proxy_switch`。
+MCP 暴露的工具包括 `netfix_codex`、`netfix_services`、`netfix_triage`、`netfix_doctor`、`netfix_report`、`netfix_kb_query`、`netfix_fix_issue`、`netfix_rollback`、`netfix_proxy_switch`。`netfix_rollback` 也会改系统状态，必须传 `confirmed=true` 和 `confirmation=APPLY_SYSTEM_FIX`；`POST /run` 不接受 `rollback`。
 
 Agent 优先用这些更清楚的新工具：
 
 - `netfix_list_fixes`：列出当前已知修复项、Tier、风险和是否需要确认。
 - `netfix_dry_run_fix`：只预演一个修复，不改系统设置。
-- `netfix_apply_fix`：真正执行修复。Tier 2 必须传 `confirmed=true` 和 `confirmation=<见下表>`。`magic_word` 是 `confirmation` 的 deprecated alias，优先用 `confirmation`。
+- `netfix_apply_fix`：执行可安全回滚的修复。Tier 2 除了必须传 `confirmed=true` 和 `confirmation=<见下表>`，规则还必须具备已验证的事务快照；否则返回 `transactional_rollback_unavailable`。`magic_word` 是 `confirmation` 的 deprecated alias，优先用 `confirmation`。
 - `netfix_evidence_chain`：给出“为什么判断这个根因”的诊断证据链。
 - `netfix_sanitized_report`：返回已脱敏报告，适合贴 issue 或发给 AI。
 

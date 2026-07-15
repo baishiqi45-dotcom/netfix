@@ -108,7 +108,20 @@ _TOOLS: List[Dict[str, Any]] = [
         },
         read_only=False,
     ),
-    _tool("netfix_rollback", "Rollback the last Tier 2 change.", read_only=False),
+    _tool(
+        "netfix_rollback",
+        "Rollback the last Tier 2 change. Requires confirmed=true and confirmation=APPLY_SYSTEM_FIX.",
+        {
+            "type": "object",
+            "properties": {
+                "confirmed": {"type": "boolean", "default": False},
+                "confirmation": {"type": "string", "description": "Required: APPLY_SYSTEM_FIX"},
+                "magic_word": {"type": "string", "description": "Compatibility alias for confirmation."},
+                "timeout": {"type": "integer", "default": 60},
+            },
+        },
+        read_only=False,
+    ),
     _tool(
         "netfix_list_fixes",
         "List known netfix repair actions with tier, risk, confirmation, and rollback metadata.",
@@ -469,6 +482,7 @@ def _fix_risk(tier: FixTier) -> str:
 
 def _fix_descriptor(fix_id: str, definition: Dict[str, Any]) -> Dict[str, Any]:
     tier = FixTier(definition.get("tier", 1))
+    transactional = definition.get("transactional_rollback") is True
     return {
         "id": fix_id,
         "label": str(definition.get("description") or fix_id),
@@ -477,7 +491,9 @@ def _fix_descriptor(fix_id: str, definition: Dict[str, Any]) -> Dict[str, Any]:
         "risk": _fix_risk(tier),
         "requires_confirmation": tier.value >= FixTier.CONFIRM.value,
         "confirmation": "APPLY_SYSTEM_FIX" if tier.value >= FixTier.CONFIRM.value else "",
-        "rollback_supported": bool(definition.get("reverse") or definition.get("backup_paths")),
+        "rollback_supported": transactional,
+        "execution_available": tier.value < FixTier.CONFIRM.value or transactional,
+        "blocked_reason": "" if tier.value < FixTier.CONFIRM.value or transactional else "transactional_rollback_unavailable",
         "commands": list(definition.get("commands") or []),
         "manual_steps": list(definition.get("manual_steps") or []),
         "verify": definition.get("verify") or definition.get("verify_diagnostic") or "",
@@ -533,6 +549,26 @@ def _apply_fix_for_mcp(args: Dict[str, Any]) -> Dict[str, Any]:
     result.setdefault("redaction_policy", MCP_REDACTION_POLICY)
     result.setdefault("fix_id", fix_id)
     return result
+
+
+def _rollback_for_mcp(args: Dict[str, Any]) -> Dict[str, Any]:
+    confirmation = str(args.get("confirmation") or args.get("magic_word") or "")
+    if not bool(args.get("confirmed")) or confirmation != "APPLY_SYSTEM_FIX":
+        return {
+            "ok": False,
+            "http_status": 409,
+            "requires_confirmation": True,
+            "confirmation": "APPLY_SYSTEM_FIX",
+            "error": "Rollback requires explicit Tier 2 confirmation.",
+        }
+    return _sanitize_mcp_output(
+        _strip_internal_secrets(
+            run_cli(
+                _ensure_json_and_timeout(["rollback"], int(args.get("timeout") or 60)),
+                timeout=int(args.get("timeout") or 60),
+            )
+        )
+    )
 
 
 def _sanitized_report_for_mcp(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -770,6 +806,12 @@ def _call_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         text = json.dumps(result, ensure_ascii=False, indent=2)
         is_error = isinstance(result, dict) and (not result.get("ok", True) or int(result.get("http_status", 200)) >= 400)
         return {"content": [{"type": "text", "text": text}], "isError": bool(is_error)}
+
+    if name == "netfix_rollback":
+        result = _rollback_for_mcp(args)
+        text = json.dumps(result, ensure_ascii=False, indent=2)
+        is_error = not bool(result.get("ok", False))
+        return {"content": [{"type": "text", "text": text}], "isError": is_error}
 
     if name in _AGENT_TOOL_DISPATCH:
         try:
