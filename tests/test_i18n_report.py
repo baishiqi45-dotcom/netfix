@@ -162,5 +162,77 @@ class TestReportSummary(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(os.stat(root).st_mode), 0o700)
 
 
+class TestReportHumanOutput(unittest.TestCase):
+    def _proxy_down_report(self, with_explanation=True):
+        data = {
+            "meta": {"version": "0.2.0", "timestamp": "now"},
+            "environment": {},
+            "diagnostics": [
+                {"name": "proxy_core_status", "status": "fail", "display_name": "代理软件状态"}
+            ],
+            "root_causes": [
+                {"id": "proxy-down", "description": "代理软件没有运行", "confidence": 0.9}
+            ],
+            "fixes": [
+                {
+                    "id": "check-proxy-core",
+                    "tier": 1,
+                    "description": "检测代理核心是否运行并监听 mixed 端口",
+                    "command": "echo check",
+                }
+            ],
+            "manual_steps": [],
+        }
+        if with_explanation:
+            data["explanation"] = {
+                "headline": "代理客户端没有启动",
+                "explanation": "你的代理软件没开，流量没法通过代理出去。",
+                "primary_action": {"id": "check-proxy-core", "label": "检查代理软件是否运行"},
+                "actions": [],
+                "manual_steps": [],
+            }
+        return data
+
+    def test_summary_prefers_root_cause_over_env_guess(self):
+        # gui_client 缺失且有 fail 时，旧逻辑会说“网络层就有问题”；
+        # 有根因时必须优先用根因对应的人话结论。
+        summary = Report(self._proxy_down_report()).summary()
+        self.assertEqual(summary["headline"], "代理客户端没有启动")
+        self.assertNotIn("Wi-Fi", summary["headline"])
+
+    def test_summary_falls_back_to_root_cause_description(self):
+        summary = Report(self._proxy_down_report(with_explanation=False)).summary()
+        self.assertEqual(summary["headline"], "代理软件没有运行")
+
+    def test_to_human_renders_explanation_card_on_top(self):
+        text = Report(self._proxy_down_report()).to_human()
+        self.assertIn("【结论】代理客户端没有启动", text)
+        self.assertIn("【为什么】你的代理软件没开", text)
+        self.assertIn("【下一步】检查代理软件是否运行：python3 netfix.py fix --issue check-proxy-core", text)
+
+    def test_to_human_uses_display_name_for_diagnostics(self):
+        text = Report(self._proxy_down_report()).to_human()
+        self.assertIn("代理软件状态", text)
+        self.assertNotIn("proxy_core_status", text)
+
+    def test_to_human_falls_back_to_name_without_display_name(self):
+        data = self._proxy_down_report()
+        data["diagnostics"] = [{"name": "proxy_core_status", "status": "fail"}]
+        text = Report(data).to_human()
+        self.assertIn("proxy_core_status", text)
+
+    def test_to_human_fix_section_has_copyable_cli_command(self):
+        text = Report(self._proxy_down_report()).to_human()
+        self.assertIn("python3 netfix.py fix --issue check-proxy-core", text)
+        # 不再展示工程 id 冒号描述、也不再 dump 裸 shell 命令。
+        self.assertNotIn("check-proxy-core: 检测代理核心", text)
+        self.assertNotIn("echo check", text)
+
+    def test_to_human_does_not_dump_raw_json(self):
+        text = Report(self._proxy_down_report()).to_human()
+        self.assertNotIn('"schema_version"', text)
+        self.assertIn("python3 netfix.py report --json", text)
+
+
 if __name__ == "__main__":
     unittest.main()

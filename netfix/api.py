@@ -1978,10 +1978,24 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                     "error": "redaction_level must be balanced or strict",
                     "reason_code": "invalid_redaction_level",
                 }
+            history = body.get("history")
+            if history is not None and (
+                not isinstance(history, list)
+                or any(not isinstance(item, dict) for item in history)
+            ):
+                return 400, {
+                    "ok": False,
+                    "error": "history 必须是 [{\"role\": \"user\"|\"assistant\", \"content\": \"...\"}] 这样的消息列表",
+                    "reason_code": "invalid_llm_history",
+                }
             status, loaded = _load_current_mac_report()
-            if status != 200:
+            if status == 404:
+                # 没有诊断报告时降级为通用网络问答，由 LLM 引导用户先跑诊断。
+                report = None
+            elif status != 200:
                 return status, loaded
-            report = loaded
+            else:
+                report = loaded
             result = llm_explain.explain_with_llm(
                 report=report,
                 question=question,
@@ -1990,6 +2004,7 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                 upload_confirmed=bool(body.get("upload_confirmed") or body.get("upload_consent_confirmed")),
                 allow_fallback=body.get("allow_fallback") if isinstance(body.get("allow_fallback"), bool) else None,
                 image_inputs=body.get("images") if isinstance(body.get("images"), list) else None,
+                history=history,
             )
             return 200, {"ok": True, "result": result}
 

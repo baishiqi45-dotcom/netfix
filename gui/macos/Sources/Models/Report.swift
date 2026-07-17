@@ -145,6 +145,25 @@ struct ManualStep: Codable, Identifiable {
         case steps
     }
 
+    init(stepId: String? = nil, description: String? = nil, steps: [String]? = nil) {
+        self.stepId = stepId
+        self.description = description
+        self.steps = steps
+    }
+
+    init(from decoder: Decoder) throws {
+        if let container = try? decoder.container(keyedBy: CodingKeys.self) {
+            stepId = try container.decodeIfPresent(String.self, forKey: .stepId)
+            description = try container.decodeIfPresent(String.self, forKey: .description)
+            steps = try container.decodeIfPresent([String].self, forKey: .steps)
+        } else {
+            // 容错：AI 回答里的 manual_steps 有时是纯字符串，按 description 处理
+            stepId = nil
+            description = try? decoder.singleValueContainer().decode(String.self)
+            steps = nil
+        }
+    }
+
     var id: String { stepId ?? description ?? UUID().uuidString }
 }
 
@@ -188,6 +207,8 @@ struct Action: Codable, Identifiable {
     let tier: Int
     let needsConfirm: Bool
     let verifyDiagnostic: String?
+    /// AI 解释里附带的推荐理由（本地报告动作没有此字段）。
+    let reason: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -195,6 +216,7 @@ struct Action: Codable, Identifiable {
         case tier
         case needsConfirm = "needs_confirm"
         case verifyDiagnostic = "verify_diagnostic"
+        case reason
     }
 }
 
@@ -874,6 +896,8 @@ struct LLMExplainResult: Codable {
     let headline: String?
     let severity: String?
     let explanation: String?
+    let actions: [Action]?
+    let manualSteps: [ManualStep]?
     let redactedReportHash: String?
 
     enum CodingKeys: String, CodingKey {
@@ -887,8 +911,17 @@ struct LLMExplainResult: Codable {
         case headline
         case severity
         case explanation
+        case actions
+        case manualSteps = "manual_steps"
         case redactedReportHash = "redacted_report_hash"
     }
+}
+
+/// 一轮「问 AI」对话：用户的提问 + 后端返回的解释（回答回来前 result 为空）。
+struct AIChatTurn: Identifiable {
+    let id = UUID()
+    let question: String
+    var result: LLMExplainResult?
 }
 
 struct LLMFallbackStep: Codable {

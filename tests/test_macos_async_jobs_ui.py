@@ -52,7 +52,9 @@ def test_macos_mutating_fix_paths_still_use_confirmed_synchronous_calls():
     assert 'body["confirmation"] = "APPLY_SYSTEM_FIX"' in api_client
     assert '"confirmation"] = "ROLLBACK_PROXY_PROFILE"' in api_client
     assert "让 Netfix 处理这个问题？" in dashboard
-    assert "手动步骤" not in dashboard
+    # 「问 AI」面板现在会把 AI 回答里的 manual_steps 渲染为只读步骤列表（不执行），
+    # 修复执行仍全部走上面的 confirmed 同步路径。
+    assert "手动步骤" in dashboard
 
 
 def test_proxy_save_uses_decoding_client_error_for_human_format_errors():

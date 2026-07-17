@@ -6,6 +6,7 @@ DASHBOARD = ROOT / "gui" / "macos" / "Sources" / "Views" / "DashboardView.swift"
 SETTINGS = ROOT / "gui" / "macos" / "Sources" / "Views" / "SettingsView.swift"
 API_CLIENT = ROOT / "gui" / "macos" / "Sources" / "APIClient.swift"
 MODELS = ROOT / "gui" / "macos" / "Sources" / "Models" / "Report.swift"
+APP_DELEGATE = ROOT / "gui" / "macos" / "Sources" / "AppDelegate.swift"
 
 
 def test_macos_dashboard_has_consent_gated_ai_question_sheet_with_image_picker():
@@ -89,9 +90,67 @@ def test_macos_api_client_sends_question_mode_images_and_feature_flag():
 
     assert "imageQuestionEnabled: Bool" in api_client
     assert '"image_question": imageQuestionEnabled' in api_client
-    assert 'func explainWithLLM(question: String = "", mode: String = "explain", uploadConfirmed: Bool = false, images: [String] = [])' in api_client
+    assert 'func explainWithLLM(question: String = "", mode: String = "explain", uploadConfirmed: Bool = false, images: [String] = [], history: [[String: String]] = [])' in api_client
     assert 'body["images"] = images' in api_client
     assert '"mode": mode' in api_client
+
+
+def test_macos_ai_question_sheet_is_true_multi_turn_with_history():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    models = MODELS.read_text(encoding="utf-8")
+    api_client = API_CLIENT.read_text(encoding="utf-8")
+
+    # sheet 维护 QA 轮次对话流，答案不再互相覆盖
+    assert "struct AIChatTurn: Identifiable" in models
+    assert "@Published var aiConversation: [AIChatTurn]" in source
+    assert "conversation: viewModel.aiConversation" in source
+    assert "private var conversationSection: some View" in source
+    assert "ForEach(conversation) { turn in" in source
+    assert "conversation.isEmpty ? \"发送并解释\" : \"继续追问\"" in source
+    assert "llmExplanation = nil" not in source.split("func explainWithAI")[1].split("func cancelAIExplanation")[0]
+    # 发送时按契约装 history：已回答轮次展开为 user/assistant，最多 20 条、每条 2000 字
+    assert "private static func historyPayload(from conversation: [AIChatTurn]) -> [[String: String]]" in source
+    assert '"role": "user"' in source
+    assert '"role": "assistant"' in source
+    assert ".prefix(2_000)" in source
+    assert ".suffix(20)" in source
+    assert 'body["history"] = history' in api_client
+
+
+def test_macos_ai_answer_renders_actions_and_manual_steps():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    models = MODELS.read_text(encoding="utf-8")
+
+    # LLMExplainResult 解码 actions / manual_steps
+    assert "let actions: [Action]?" in models
+    assert "let manualSteps: [ManualStep]?" in models
+    assert 'case manualSteps = "manual_steps"' in models
+    assert "let reason: String?" in models
+    # actions 渲染成按钮，走主界面同一执行路径；Tier>=2 只展示说明
+    assert "private func actionButtons(for result: LLMExplainResult) -> some View" in source
+    assert "onRunAction(action)" in source
+    assert "action.tier >= 2" in source
+    assert "会更改系统网络设置，请回到主界面确认后执行。" in source
+    assert "requestAction(action)" in source
+    # manual_steps 渲染为步骤列表
+    assert "private func manualStepsList(for result: LLMExplainResult) -> some View" in source
+    assert "手动步骤" in source
+
+
+def test_macos_ai_entry_available_without_fresh_report():
+    source = DASHBOARD.read_text(encoding="utf-8")
+    delegate = APP_DELEGATE.read_text(encoding="utf-8")
+
+    # 门控放宽：后端就绪即可问 AI；新鲜报告只决定是否结合报告回答
+    assert "private var hasFreshReportForAI: Bool" in source
+    assert "hasCurrentReport: hasFreshReportForAI" in source
+    assert "先描述问题，或先检查网络让 AI 结合报告回答。" in source
+    assert "还没有可解释的当前检查" not in source
+    # 菜单栏新增「问 AI…」入口
+    assert 'NSMenuItem(title: "问 AI…", action: #selector(showAIQuestion)' in delegate
+    assert "func showAIQuestion()" in delegate
+    assert "netfixShowAIQuestion" in delegate
+    assert ".netfixShowAIQuestion" in source
 
 
 def test_macos_settings_can_enable_image_question_feature_flag():

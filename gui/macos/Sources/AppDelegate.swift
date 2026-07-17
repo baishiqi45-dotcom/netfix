@@ -124,6 +124,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showSettings()
     }
 
+    /// 菜单栏「问 AI…」：先展开面板，再通知仪表盘打开问 AI 面板（无新鲜报告时按通用问答）。
+    @objc func showAIQuestion() {
+        if let popover = popover, let button = statusItem?.button, !popover.isShown {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        if backend.isReady {
+            Task { await dashboardStateStore.refresh() }
+        }
+        // 等面板就位后再发通知，避免仪表盘还没挂上监听
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            NotificationCenter.default.post(name: .netfixShowAIQuestion, object: nil)
+        }
+    }
+
     @objc private func terminateApp() {
         NSApplication.shared.terminate(nil)
     }
@@ -252,6 +267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bridgeStatusMenuItem.isEnabled = false
         let items = [
             NSMenuItem(title: "打开 Netfix", action: #selector(showPopoverFromMenu), keyEquivalent: ""),
+            NSMenuItem(title: "问 AI…", action: #selector(showAIQuestion), keyEquivalent: ""),
             NSMenuItem(title: "代理设置…", action: #selector(showProxySettings), keyEquivalent: ""),
             NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ","),
             NSMenuItem.separator(),
@@ -501,4 +517,9 @@ extension AppDelegate: NSMenuDelegate {
     func menuDidClose(_ menu: NSMenu) {
         statusItem?.menu = nil
     }
+}
+
+extension Notification.Name {
+    /// 菜单栏「问 AI…」点击后广播，仪表盘收到后打开问 AI 面板。
+    static let netfixShowAIQuestion = Notification.Name("netfix.showAIQuestion")
 }

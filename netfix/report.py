@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .constants import JOURNAL_DIR, VERSION
-from .i18n import fmt, t
+from .i18n import t
 from .utils import human_time, secure_write_json, to_json
 
 
@@ -77,16 +77,26 @@ class Report:
         has_warn = "warn" in statuses
         all_ok = not has_fail and not has_warn
 
-        if all_ok:
-            headline = t("summary.healthy")
-        elif env.get("gui_client") and has_fail:
-            headline = t("summary.proxy_broken")
-        elif has_fail:
-            headline = t("summary.no_network")
-        elif has_warn:
-            headline = t("summary.proxy_needed")
-        else:
-            headline = t("summary.partial")
+        # Prefer the human conclusion for the top root cause; only guess the
+        # problem domain from env/diagnostics when there is no root cause.
+        headline = ""
+        if root_causes:
+            explanation = self.data.get("explanation")
+            if isinstance(explanation, dict):
+                headline = str(explanation.get("headline") or "")
+            if not headline:
+                headline = str(root_causes[0].get("description") or "")
+        if not headline:
+            if all_ok:
+                headline = t("summary.healthy")
+            elif env.get("gui_client") and has_fail:
+                headline = t("summary.proxy_broken")
+            elif has_fail:
+                headline = t("summary.no_network")
+            elif has_warn:
+                headline = t("summary.proxy_needed")
+            else:
+                headline = t("summary.partial")
 
         # Pick the first actionable fix tier.
         action = t("action.tier3.manual")
@@ -112,15 +122,33 @@ class Report:
         manual_steps = self.data.get("manual_steps", [])
 
         summary = self.summary()
+        explanation = self.data.get("explanation")
+        if not isinstance(explanation, dict):
+            explanation = None
+
         lines = [
             f"netfix {meta.get('version', VERSION)}",
             f"{meta.get('timestamp', 'unknown')}",
             "",
-            f"【结论】{summary['headline']}",
         ]
-        if summary["root_cause"]:
-            lines.append(f"【最可能的原因】{summary['root_cause']}")
-        lines.append(f"【建议】{summary['action']}")
+        if explanation and explanation.get("headline"):
+            # Render the plain-language card built by explain.explain_report.
+            lines.append(f"【结论】{explanation['headline']}")
+            detail = str(explanation.get("explanation") or "").strip()
+            if detail:
+                lines.append(f"【为什么】{detail}")
+            primary = explanation.get("primary_action")
+            if isinstance(primary, dict) and primary.get("id"):
+                label = primary.get("label") or primary["id"]
+                lines.append(
+                    f"【下一步】{label}：python3 netfix.py fix --issue {primary['id']}"
+                )
+        else:
+            lines.append(f"【结论】{summary['headline']}")
+            if summary["root_cause"] and summary["root_cause"] != summary["headline"]:
+                lines.append(f"【最可能的原因】{summary['root_cause']}")
+        if fixes or root_causes:
+            lines.append(f"【建议】{summary['action']}")
         lines.append("")
 
         # Environment card
@@ -152,7 +180,7 @@ class Report:
         for diag in diagnostics:
             status = diag.get("status", "unknown")
             symbol = self._status_symbol(status)
-            label = diag.get("name", "unknown")
+            label = diag.get("display_name") or diag.get("name", "unknown")
             proxy = diag.get("proxy_used")
             if proxy and proxy != "direct":
                 label = f"{label} ({proxy})"
@@ -176,10 +204,11 @@ class Report:
             for fix in fixes:
                 tier = fix.get("tier", 3)
                 lines.append(
-                    f"  [{self._fix_tier_label(tier)}] {fix.get('id')}: {fix.get('description')}"
+                    f"  [{self._fix_tier_label(tier)}] {fix.get('description') or fix.get('id')}"
                 )
-                cmd = fix.get("command") or "N/A"
-                lines.append(f"      {t('fix.command')}: {cmd}")
+                lines.append(
+                    f"      {t('fix.command')}: python3 netfix.py fix --issue {fix.get('id')}"
+                )
         else:
             lines.append(f"  {t('label.none')}")
 
@@ -194,9 +223,9 @@ class Report:
         else:
             lines.append(f"  {t('label.none')}")
 
-        # Advanced: raw JSON collapsed at the end
+        # Advanced: point to the raw JSON instead of dumping it inline.
         lines.extend(["", f"{t('section.advanced')}"])
-        lines.append(self.to_json(pretty=False))
+        lines.append(f"  {t('advanced.hint')}")
 
         return "\n".join(lines)
 

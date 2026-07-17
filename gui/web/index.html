@@ -336,6 +336,33 @@
       margin-bottom: 10px;
     }
     .status-card .headline { margin-bottom: 4px; }
+    .chat-thread {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 10px 0;
+      max-height: 420px;
+      overflow-y: auto;
+    }
+    .chat-bubble.user {
+      align-self: flex-end;
+      max-width: 85%;
+      background: var(--primary);
+      color: #fff;
+      border-radius: 12px;
+      padding: 8px 12px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .chat-card {
+      align-self: stretch;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 10px;
+      background: #fff;
+      overflow-wrap: anywhere;
+    }
+    .chat-card .action-buttons { margin-top: 8px; }
     details.details-block {
       border: 1px solid var(--line);
       border-radius: var(--radius);
@@ -563,14 +590,15 @@
           <h3 id="ai-panel-heading" tabindex="-1">需要时让 AI 帮你解释</h3>
           <div id="llm-status-card" class="status-card">
             <div class="headline">正在读取 AI 状态</div>
-            <div class="muted">有检查结果后，可以让 AI 用人话解释当前问题和下一步。</div>
+            <div class="muted">可以直接提问，也可以在检查之后让 AI 结合结果连续追问。</div>
           </div>
+          <div id="llm-chat" class="chat-thread" aria-live="polite"></div>
           <label for="llm-question">你想问什么</label>
-          <textarea id="llm-question" placeholder="请解释当前检查结果，或者描述截图里你想确认的问题。"></textarea>
+          <textarea id="llm-question" placeholder="先描述你的问题，或跑一次检查让 AI 结合报告回答。"></textarea>
           <div class="toolbar">
-            <button class="btn-primary" onclick="askAI()">解释当前问题</button>
+            <button class="btn-primary" onclick="askAI()">问 AI</button>
           </div>
-          <div id="llm-result" class="muted" style="margin-top:8px;font-size:13px;">没有检查结果时，请先运行上方检查。</div>
+          <div id="llm-result" class="muted" style="margin-top:8px;font-size:13px;">先描述你的问题，或点上方“检查当前网络”跑一次检查，AI 会结合报告回答。</div>
 
           <details id="llm-advanced-settings" class="details-block">
             <summary>高级设置</summary>
@@ -695,6 +723,9 @@
     let privacySettings = {};
     let proxyBridgeSettings = {};
     let aiQuestionImages = [];
+    const AI_HISTORY_LIMIT = 20;
+    const AI_HISTORY_CONTENT_LIMIT = 2000;
+    let aiConversation = [];
     let lastFailedJob = null;
     let lastRecoveryDetail = '';
     let operationInProgress = false;
@@ -1232,6 +1263,7 @@
         secondaryButton.classList.add('hidden');
         secondaryButton.disabled = true;
         document.getElementById('btn-open-proxy')?.classList.remove('hidden');
+        document.getElementById('btn-open-ai')?.classList.remove('hidden');
         document.getElementById('btn-open-logs')?.classList.remove('hidden');
         setStatus('fail', '当前状态读取失败');
         log('读取当前状态失败: ' + (e.message || e));
@@ -1510,6 +1542,7 @@
         else if (confirmFix) pushAction('see-actions', '先看会改什么', true);
         else pushAction('service-details', '查看目标服务', true);
       }
+      if ((report.root_causes || []).length) pushAction('ask-ai', '问 AI', false);
       pushAction('service-details', '查看目标服务', false);
 
       if (!detail && rootCopy && normalizeCopy(rootCopy) !== normalizeCopy(headline)) {
@@ -2362,26 +2395,108 @@
       renderAIImagePreview();
     }
 
+    function pushAIMessage(message) {
+      aiConversation.push({
+        role: message.role === 'assistant' ? 'assistant' : 'user',
+        content: String(message.content || '').slice(0, AI_HISTORY_CONTENT_LIMIT),
+        result: message.result || null,
+      });
+      if (aiConversation.length > AI_HISTORY_LIMIT) {
+        aiConversation.splice(0, aiConversation.length - AI_HISTORY_LIMIT);
+      }
+    }
+
+    function aiHistoryPayload() {
+      // 只带当前问题之前的对话历史，与服务端 history 契约一致
+      return aiConversation.slice(0, -1).map(msg => ({ role: msg.role, content: msg.content }));
+    }
+
+    function renderAIManualSteps(manualSteps) {
+      if (!manualSteps.length) return '';
+      return `<ol class="manual-list">${manualSteps.map(step => {
+        if (typeof step === 'string') return `<li>${escapeHtml(userCopy(step))}</li>`;
+        const desc = userCopy(step.description || step.id || '');
+        const subSteps = Array.isArray(step.steps) ? step.steps : [];
+        const sub = subSteps.length
+          ? `<ol class="manual-list">${subSteps.map(item => `<li>${escapeHtml(userCopy(item))}</li>`).join('')}</ol>`
+          : '';
+        return `<li>${escapeHtml(desc)}${sub}</li>`;
+      }).join('')}</ol>`;
+    }
+
+    function renderAIConversation() {
+      const thread = document.getElementById('llm-chat');
+      if (!thread) return;
+      thread.innerHTML = aiConversation.map(msg => {
+        if (msg.role === 'user') {
+          return `<div class="chat-bubble user">${escapeHtml(msg.content)}</div>`;
+        }
+        const result = msg.result || {};
+        const fallbackReason = result.fallback_reason_label || result.fallback_reason || '';
+        const chain = (result.fallback_chain || []).map(item => `${item.provider}:${item.status}${item.reason_code ? '/' + item.reason_code : ''}`).join(' → ');
+        const providerUsed = result.provider_used ? providerLabel(result.provider_used) || result.provider_used : '';
+        const actions = (Array.isArray(result.actions) ? result.actions : []).map(action => {
+          const needsConfirm = !!action.needs_confirm || Number(action.tier) >= 2;
+          return needsConfirm
+            ? `<button data-ai-preview-action="${escapeHtml(action.id)}">先看会改什么：${escapeHtml(userCopy(action.label || action.id))}</button>`
+            : `<button class="btn-primary" data-ai-run-action="${escapeHtml(action.id)}">${escapeHtml(userCopy(action.label || action.id))}</button>`;
+        }).join('');
+        return `
+          <div class="chat-card">
+            <strong>${escapeHtml(result.headline || 'AI 回答')}</strong>
+            <div>${escapeHtml(result.explanation || '')}</div>
+            ${providerUsed ? `<div class="muted">由 ${escapeHtml(providerUsed)} 返回；检查结果已脱敏后发送。</div>` : ''}
+            ${fallbackReason ? `<div class="muted">${escapeHtml(fallbackReason)}</div>` : ''}
+            ${actions ? `<div class="action-buttons">${actions}</div>` : ''}
+            ${renderAIManualSteps(Array.isArray(result.manual_steps) ? result.manual_steps : [])}
+            <details class="details-block">
+              <summary>技术详情</summary>
+              <div class="muted">来源：${escapeHtml(result.source || '')}${chain ? '；备用链路：' + escapeHtml(chain) : ''}</div>
+              <div class="action-preview">${escapeHtml(JSON.stringify({
+                provider_used: result.provider_used || null,
+                fallback_chain: result.fallback_chain || [],
+                redaction_audit: result.redaction_audit || {},
+                redacted_report_hash: result.redacted_report_hash || null,
+              }, null, 2))}</div>
+            </details>
+          </div>
+        `;
+      }).join('');
+      thread.querySelectorAll('[data-ai-run-action]').forEach(btn => {
+        btn.addEventListener('click', () => runAction(btn.dataset.aiRunAction));
+      });
+      thread.querySelectorAll('[data-ai-preview-action]').forEach(btn => {
+        btn.addEventListener('click', () => previewAction(btn.dataset.aiPreviewAction));
+      });
+      thread.scrollTop = thread.scrollHeight;
+    }
+
     async function askAI() {
-      if (!lastReport) {
-        document.getElementById('llm-result').textContent = '请先点“检查当前网络”，有本次检查结果后我才能解释。';
+      const target = document.getElementById('llm-result');
+      const questionInput = document.getElementById('llm-question');
+      const typed = (questionInput.value || '').trim();
+      if (!typed && !lastReport) {
+        target.textContent = '先描述你的问题，或点上方“检查当前网络”跑一次检查，AI 会结合报告回答。';
         return;
       }
-      const target = document.getElementById('llm-result');
-      const question = document.getElementById('llm-question').value || '';
+      const question = typed || '请解释当前检查结果。';
       const images = aiQuestionImages.map(item => item.dataUrl);
       const uploadConfirmed = images.length ? document.getElementById('llm-upload-confirmed').checked : true;
       if (images.length && !uploadConfirmed) {
         target.textContent = '发送图片前请先在高级设置里勾选确认。未确认时不会发送图片或检查结果。';
         return;
       }
+      pushAIMessage({ role: 'user', content: question });
+      questionInput.value = '';
+      renderAIConversation();
       if (images.length) {
         target.textContent = '图片问诊可能产生额外模型费用，正在发送已确认的脱敏请求...';
       } else {
-        target.textContent = '正在解释当前检查结果...';
+        target.textContent = lastReport ? '正在结合检查结果回答...' : '还没有检查结果，先按通用网络问题回答...';
       }
       const data = await api('POST', '/explain_llm', {
         question,
+        history: aiHistoryPayload(),
         mode: images.length ? 'image_question' : 'explain',
         images,
         redaction_level: 'balanced',
@@ -2393,25 +2508,10 @@
         return;
       }
       const result = data.result || {};
-      const fallbackReason = result.fallback_reason_label || result.fallback_reason || '';
-      const chain = (result.fallback_chain || []).map(item => `${item.provider}:${item.status}${item.reason_code ? '/' + item.reason_code : ''}`).join(' → ');
-      const providerUsed = result.provider_used ? providerLabel(result.provider_used) || result.provider_used : '';
-      target.innerHTML = `
-        <strong>${escapeHtml(result.headline || '解释结果')}</strong>
-        <div>${escapeHtml(result.explanation || '')}</div>
-        ${providerUsed ? `<div class="muted">由 ${escapeHtml(providerUsed)} 返回；检查结果已脱敏后发送。</div>` : ''}
-        ${fallbackReason ? `<div class="muted">${escapeHtml(fallbackReason)}</div>` : ''}
-        <details class="details-block">
-          <summary>技术详情</summary>
-          <div class="muted">来源：${escapeHtml(result.source || '')}${chain ? '；备用链路：' + escapeHtml(chain) : ''}</div>
-          <div class="action-preview">${escapeHtml(JSON.stringify({
-            provider_used: result.provider_used || null,
-            fallback_chain: result.fallback_chain || [],
-            redaction_audit: result.redaction_audit || {},
-            redacted_report_hash: result.redacted_report_hash || null,
-          }, null, 2))}</div>
-        </details>
-      `;
+      const answer = [result.headline, result.explanation].filter(Boolean).join('\n') || '（没有返回内容）';
+      pushAIMessage({ role: 'assistant', content: answer, result });
+      target.textContent = lastReport ? '' : '还没有检查结果；点上方“检查当前网络”后，AI 可以结合报告回答。';
+      renderAIConversation();
     }
 
     async function parseProxy() {

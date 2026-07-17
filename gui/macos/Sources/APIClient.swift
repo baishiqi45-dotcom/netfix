@@ -327,7 +327,7 @@ actor APIClient {
         )
     }
 
-    func explainWithLLM(question: String = "", mode: String = "explain", uploadConfirmed: Bool = false, images: [String] = []) async throws -> LLMExplainAPIResponse {
+    func explainWithLLM(question: String = "", mode: String = "explain", uploadConfirmed: Bool = false, images: [String] = [], history: [[String: String]] = []) async throws -> LLMExplainAPIResponse {
         var body: [String: Any] = [
             "question": question,
             "mode": mode,
@@ -335,6 +335,9 @@ actor APIClient {
         ]
         if !images.isEmpty {
             body["images"] = images
+        }
+        if !history.isEmpty {
+            body["history"] = history
         }
         return try await post(
             path: "explain_llm",

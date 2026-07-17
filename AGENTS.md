@@ -165,7 +165,9 @@ HTTP 端点：
 - `POST /settings/llm`
 - `POST /explain_llm`
 
-MCP 暴露的工具包括 `netfix_codex`、`netfix_services`、`netfix_triage`、`netfix_doctor`、`netfix_report`、`netfix_kb_query`、`netfix_fix_issue`、`netfix_rollback`、`netfix_proxy_switch`。`netfix_rollback` 也会改系统状态，必须传 `confirmed=true` 和 `confirmation=APPLY_SYSTEM_FIX`；`POST /run` 不接受 `rollback`。
+MCP 暴露的工具包括 `netfix_codex`、`netfix_services`、`netfix_triage`、`netfix_doctor`、`netfix_report`、`netfix_kb_query`、`netfix_fix_issue`、`netfix_rollback`、`netfix_proxy_switch`、`netfix_chat`、`netfix_symptom_intake`。`netfix_rollback` 也会改系统状态，必须传 `confirmed=true` 和 `confirmation=APPLY_SYSTEM_FIX`；`POST /run` 不接受 `rollback`。
+
+对话式排查动线：用户用自然语言描述症状时，先调 `netfix_symptom_intake` 匹配规则库并拿到建议工具，执行建议工具收集证据，再用 `netfix_chat` 带着 `history`（最近 20 条 user/assistant 消息）做多轮解释。
 
 Agent 优先用这些更清楚的新工具：
 
@@ -238,6 +240,9 @@ curl -s http://127.0.0.1:8765/run \
 ```bash
 # 一键看 Codex 健康
 python3 netfix.py codex --json
+
+# 自然语言问网络问题（用户口语主诉的统一入口）
+python3 netfix.py ask "我网速很慢"
 
 # 执行 Tier 1 修复（dry-run 先看）
 python3 netfix.py fix --issue flush-dns-cache --dry-run

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from netfix import api, dashboard_state, diagnose, explain, kb, logs, reasoner, residential_proxy, services, settings
+from netfix import api, dashboard_state, diagnose, explain, kb, llm_explain, logs, reasoner, residential_proxy, services, settings
 from netfix.codex import check_codex
 from netfix.constants import CASES_DIR, RULES_DIR, VERSION
 from netfix.detect import detect_environment, get_core
@@ -364,7 +364,8 @@ def cmd_layers(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_triage(args: argparse.Namespace) -> int:
+def _triage_report(args: argparse.Namespace) -> Report:
+    """Run the lightweight triage diagnostics and persist the report."""
     env = _enrich_env(detect_environment())
     core = get_core(env)
     names = [
@@ -381,7 +382,12 @@ def cmd_triage(args: argparse.Namespace) -> int:
     report_data = _build_report(env, diagnostics, root_causes, origin="triage", coverage="partial")
     report = Report(report_data)
     report.save()
-    case_path = _maybe_save_case(report_data, args)
+    return report
+
+
+def cmd_triage(args: argparse.Namespace) -> int:
+    report = _triage_report(args)
+    case_path = _maybe_save_case(report.as_dict(), args)
     if case_path and not args.json:
         print(f"[case saved] {case_path}")
     _output(report.as_dict(), args.json, report.to_human)
@@ -580,11 +586,60 @@ def cmd_fix(args: argparse.Namespace) -> int:
     return 0 if result.get("ok", True) else 1
 
 
+def _explanation_card_to_human(card: Dict[str, Any]) -> str:
+    """Render an explanation/LLM card as plain-language sections."""
+    lines = [f"【结论】{card.get('headline') or '暂无明确结论'}", ""]
+    detail = str(card.get("explanation") or "").strip()
+    if detail:
+        lines.append(f"【为什么】{detail}")
+        lines.append("")
+
+    lines.append("【建议操作】")
+    wrote_action = False
+    for action in card.get("actions") or []:
+        if not isinstance(action, dict) or not action.get("id"):
+            continue
+        wrote_action = True
+        lines.append(f"  - {action.get('label') or action['id']}")
+        lines.append(f"    python3 netfix.py fix --issue {action['id']}")
+    for step in card.get("manual_steps") or []:
+        if isinstance(step, dict):
+            desc = step.get("description") or step.get("id")
+            substeps = step.get("steps") or []
+        else:
+            desc, substeps = str(step), []
+        if not desc and not substeps:
+            continue
+        wrote_action = True
+        if desc:
+            lines.append(f"  - {desc}")
+        for sub in substeps:
+            lines.append(f"      • {sub}")
+    if not wrote_action:
+        lines.append("  暂无可执行操作；可以先跑 python3 netfix.py doctor 做一次完整检查。")
+    return "\n".join(lines)
+
+
 def cmd_explain(args: argparse.Namespace) -> int:
     """Print the plain-language explanation for the latest report."""
     report = Report.load().as_dict()
     explanation = explain.explain_report(report)
-    _output(explanation, args.json)
+    _output(explanation, args.json, lambda: _explanation_card_to_human(explanation))
+    return 0
+
+
+def cmd_ask(args: argparse.Namespace) -> int:
+    """Answer a natural-language network question in plain words."""
+    try:
+        report: Optional[Dict[str, Any]] = Report.load().as_dict()
+    except Exception:
+        report = None
+    if report is None:
+        # 还没有诊断报告，先跑一次轻量 triage 拿到上下文再回答。
+        report = _triage_report(args).as_dict()
+    # LLM 未配置时 explain_with_llm 会自动降级为本地规则卡片，无需特判。
+    card = llm_explain.explain_with_llm(report, question=args.question)
+    _output(card, args.json, lambda: _explanation_card_to_human(card))
     return 0
 
 
@@ -630,23 +685,6 @@ def _notify(title: str, message: str) -> None:
         return
     script = f'display notification "{message}" with title "{title}"'
     subprocess.run(["osascript", "-e", script], capture_output=True)
-
-
-def _restart_v2rayn() -> Dict[str, Any]:
-    """Restart the v2rayN GUI so a rewritten config takes effect."""
-    if platform.system() != "Darwin":
-        return {"ok": False, "error": "restart only supported on macOS"}
-    try:
-        subprocess.run(
-            ["osascript", "-e", 'tell application "v2rayN" to quit'],
-            capture_output=True,
-            timeout=10,
-        )
-        time.sleep(2)
-        subprocess.Popen(["open", "-a", "v2rayN"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return {"ok": True, "message": "v2rayN restart triggered"}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
 
 
 def _codex_summary(args: argparse.Namespace) -> Dict[str, Any]:
@@ -913,12 +951,19 @@ def cmd_server(args: argparse.Namespace) -> int:
 _CLI_START_HERE_EPILOG = """\
 start here:
 
+  人话提问：python3 netfix.py ask "我网速很慢"
+  快速排查：python3 netfix.py triage
+  完整检查：python3 netfix.py doctor
+  人话解释上次报告：python3 netfix.py explain
+  预览修复：python3 netfix.py fix --issue <id> --dry-run
+  查解决手册：python3 netfix.py kb --query 关键词
+
   普通用户：打开 Netfix.app，主窗口已经自动接入 /dashboard/state。
   Agent / Codex：用 python3 netfix.py codex --json 一键检查 Codex 链路。
   开发者：python3 netfix.py server --host 127.0.0.1 --port 0 起本地 HTTP API；
            浏览器会打开 Web 控制台，token 写入 ~/.netfix/api-token-<pid>.txt。
 
-更多诊断、修复、AI 解释子命令见各子命令的帮助（python3 netfix.py <cmd> --help）。
+单个子命令的详细参数：python3 netfix.py <cmd> --help。
 """
 
 
@@ -943,6 +988,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_ask = sub.add_parser("ask", parents=[common], help='人话提问，如 ask "我网速很慢"')
+    p_ask.add_argument("question", type=str, help="你的网络问题")
 
     p_codex = sub.add_parser("codex", parents=[common], help="Codex / OpenAI / GitHub 健康检查")
     p_codex.add_argument("--proxy", type=str, default=None, help="手动指定代理 URL")
@@ -1015,35 +1063,53 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+_COMMAND_HANDLERS = {
+    "ask": cmd_ask,
+    "codex": cmd_codex,
+    "services": cmd_services,
+    "triage": cmd_triage,
+    "proxy": cmd_proxy,
+    "doctor": cmd_doctor,
+    "layers": cmd_layers,
+    "dns": cmd_dns,
+    "wifi": cmd_wifi,
+    "ssl": cmd_ssl,
+    "connectivity": cmd_connectivity,
+    "fix": cmd_fix,
+    "report": cmd_report,
+    "logs": cmd_logs,
+    "explain": cmd_explain,
+    "rollback": cmd_rollback,
+    "kb": cmd_kb,
+    "watch": cmd_watch,
+    "proxy-monitor": cmd_proxy_monitor,
+    "proxy-switch": cmd_proxy_switch,
+    "server": cmd_server,
+}
+
+# Subcommand aliases registered in build_parser().
+_KNOWN_COMMAND_WORDS = set(_COMMAND_HANDLERS) | {"check", "full-check", "guide"}
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv:
+        first = argv[0]
+        if (
+            not first.startswith("-")
+            and first not in _KNOWN_COMMAND_WORDS
+            and not any(word.startswith(first) for word in _KNOWN_COMMAND_WORDS)
+        ):
+            # 用户把自然语言直接当成了子命令；给一条能看懂的路，而不是英文报错。
+            print(f'看不懂这个命令："{first}"。', file=sys.stderr)
+            print('直接描述你的问题：python3 netfix.py ask "你的网络问题"', file=sys.stderr)
+            print("完整检查：python3 netfix.py doctor", file=sys.stderr)
+            return 2
     args = parser.parse_args(argv)
 
-    commands = {
-        "codex": cmd_codex,
-        "services": cmd_services,
-        "triage": cmd_triage,
-        "proxy": cmd_proxy,
-        "doctor": cmd_doctor,
-        "layers": cmd_layers,
-        "dns": cmd_dns,
-        "wifi": cmd_wifi,
-        "ssl": cmd_ssl,
-        "connectivity": cmd_connectivity,
-        "fix": cmd_fix,
-        "report": cmd_report,
-        "logs": cmd_logs,
-        "explain": cmd_explain,
-        "rollback": cmd_rollback,
-        "kb": cmd_kb,
-        "watch": cmd_watch,
-        "proxy-monitor": cmd_proxy_monitor,
-        "proxy-switch": cmd_proxy_switch,
-        "server": cmd_server,
-    }
-
     try:
-        return commands[args.command](args)
+        return _COMMAND_HANDLERS[args.command](args)
     except Exception as exc:
         if args.json:
             print_json({"ok": False, "error": str(exc)})

@@ -1,4 +1,4 @@
-"""Optional LLM explanation layer with local safety gates."""
+"""netfix AI network assistant layer with local safety gates."""
 from __future__ import annotations
 
 import copy
@@ -17,6 +17,7 @@ VALID_SEVERITIES = {"ok", "warn", "fail"}
 MAX_IMAGE_INPUTS = 3
 MAX_IMAGE_DATA_URL_CHARS = 6_250_000
 MAX_QUESTION_CHARS = 2_000
+MAX_HISTORY_MESSAGES = 20
 ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
 
 
@@ -75,7 +76,25 @@ def _fallback(
     fallback_chain: Optional[List[Dict[str, Any]]] = None,
     needs_upload_confirmation: bool = False,
 ) -> Dict[str, Any]:
-    local = explain.explain_report(report)
+    if report:
+        local = explain.explain_report(report)
+        headline = local.get("headline", "本地规则解释")
+        severity = local.get("severity", "warn")
+        explanation = local.get("explanation", "")
+        evidence = local.get("evidence", [])
+        actions = local.get("actions", [])
+        manual_steps = local.get("manual_steps", [])
+    else:
+        # 无诊断报告时降级为通用网络问答卡片，引导用户先跑诊断。
+        headline = "还没运行诊断，先按通用网络问答来聊"
+        severity = "ok"
+        explanation = (
+            "你还没有运行网络诊断，我先按通用网络知识回答。想拿到针对这台 Mac 的准确结论，"
+            "请先运行 python3 netfix.py triage（或点击 App 里的检查），再把报告发给我。"
+        )
+        evidence = []
+        actions = []
+        manual_steps = []
     return {
         "schema_version": "llm_explanation.v1",
         "source": "fallback",
@@ -85,12 +104,12 @@ def _fallback(
         "provider_used": None,
         "fallback_chain": fallback_chain or [],
         "needs_upload_confirmation": needs_upload_confirmation,
-        "headline": local.get("headline", "本地规则解释"),
-        "severity": local.get("severity", "warn"),
-        "explanation": local.get("explanation", ""),
-        "evidence": local.get("evidence", []),
-        "actions": local.get("actions", []),
-        "manual_steps": local.get("manual_steps", []),
+        "headline": headline,
+        "severity": severity,
+        "explanation": explanation,
+        "evidence": evidence,
+        "actions": actions,
+        "manual_steps": manual_steps,
         "redaction_audit": redacted.get("redaction_audit", {}),
         "redacted_report_hash": redacted.get("redacted_report_hash"),
     }
@@ -501,6 +520,27 @@ def _has_unsupported_image_format(image_inputs: Optional[List[Any]]) -> bool:
     return False
 
 
+def _sanitize_history(history: Optional[List[Any]]) -> List[Dict[str, str]]:
+    """Keep recent user/assistant turns; truncate and redact each message."""
+    if not isinstance(history, list):
+        return []
+    normalized: List[Dict[str, str]] = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "")
+        if role not in {"user", "assistant"}:
+            continue
+        content = item.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        normalized.append({
+            "role": role,
+            "content": redact_text(content.strip()[:MAX_QUESTION_CHARS]),
+        })
+    return normalized[-MAX_HISTORY_MESSAGES:]
+
+
 def _build_messages(
     report: Dict[str, Any],
     question: str,
@@ -508,18 +548,25 @@ def _build_messages(
     redacted: Dict[str, Any],
     provider_id: str,
     image_inputs: Optional[List[Any]] = None,
+    history: Optional[List[Dict[str, str]]] = None,
 ) -> List[Dict[str, Any]]:
     preset = get_provider(provider_id) or {}
     system = (
-        "You are netfix's optional explanation layer. Return strict JSON only. "
+        "You are netfix's AI network assistant. You can chat with the user "
+        "across multiple turns. Return strict JSON only. "
         "Do not invent shell commands. Only recommend action ids already present "
         "in the local report. Tier and execution are enforced locally. "
+        "If the user has not run a diagnostic yet, answer general networking "
+        "questions and naturally guide them to run a diagnostic first, such as "
+        "`python3 netfix.py triage` or the check button in the Netfix app. "
         + str(preset.get("system_prompt") or "")
     )
+    report_available = bool(report)
     user_payload = {
         "mode": mode,
         "question": question,
-        "redacted_report": redacted["redacted_report"],
+        "report_available": report_available,
+        "redacted_report": redacted["redacted_report"] if report_available else None,
         "redaction_audit": redacted["redaction_audit"],
         "allowed_action_ids": sorted(_allowed_action_ids(report)),
         "schema": {
@@ -533,6 +580,11 @@ def _build_messages(
             "residential_proxy_guide": {"status": "not_configured|valid|auth_failed|not_residential|unknown", "steps": []},
         },
     }
+    if not report_available:
+        user_payload["note"] = (
+            "用户尚未运行诊断；请当作通用网络问答回答，"
+            "并自然引导用户先运行诊断（如 python3 netfix.py triage 或点击 App 里的检查）。"
+        )
     user_text = json.dumps(user_payload, ensure_ascii=False, default=str)
     user_content: Any = user_text
     if mode == "image_question":
@@ -543,22 +595,27 @@ def _build_messages(
         else:
             parts.extend(_normalize_image_inputs(image_inputs))
         user_content = parts
-    return [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user_content},
-    ]
+    messages: List[Dict[str, Any]] = [{"role": "system", "content": system}]
+    for item in history or []:
+        messages.append({"role": item["role"], "content": item["content"]})
+    messages.append({"role": "user", "content": user_content})
+    return messages
 
 
 def explain_with_llm(
-    report: Dict[str, Any],
+    report: Optional[Dict[str, Any]],
     question: str = "",
     mode: str = "explain",
     redaction_level: str = "balanced",
     upload_confirmed: bool = False,
     allow_fallback: Optional[bool] = None,
     image_inputs: Optional[List[Any]] = None,
+    history: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
-    """Explain a report using an optional cloud LLM, with local fallback."""
+    """Explain a report or chat about networking using an optional cloud LLM, with local fallback."""
+    if not isinstance(report, dict):
+        report = {}
+    history_messages = _sanitize_history(history)
     llm_settings = load_settings().get("llm", {})
     saved_redaction_level = str(llm_settings.get("redaction_level") or "balanced")
     requested_redaction_level = str(redaction_level or "balanced")
@@ -652,6 +709,7 @@ def explain_with_llm(
                     redacted,
                     provider_id,
                     image_inputs=prepared_image_inputs if mode == "image_question" else image_inputs,
+                    history=history_messages,
                 ),
                 max_tokens=int(provider_settings.get("max_tokens") or 900),
                 temperature=float(provider_settings.get("temperature") if provider_settings.get("temperature") is not None else 0.2),

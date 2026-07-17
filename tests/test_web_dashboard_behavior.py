@@ -248,6 +248,16 @@ async function fetch(url, options = {}) {
   }
   const payloads = {
     '/health': { ok: true, version: 'test' },
+    '/explain_llm': {
+      ok: true,
+      result: {
+        headline: '本地解释 headline',
+        explanation: 'DNS 解析失败导致目标服务不可达。',
+        source: 'llm',
+        actions: [{ id: 'flush-dns-cache', label: '刷新 DNS 缓存', tier: 1, needs_confirm: false }],
+        manual_steps: [{ id: 'm1', description: '手动切换 DNS', steps: ['打开系统设置', '进入网络', '修改 DNS'] }],
+      },
+    },
     '/dashboard/state': dashboardState,
     '/run': { ok: false, error: 'stop after request capture' },
     '/proxy/validation-targets': { ok: true, profiles: [] },
@@ -305,6 +315,7 @@ globalThis.__dashboardTest = {
   retryFailedJob,
   openProxyPanel,
   openAIPanel,
+  askAI,
   openLogs,
   clearAllData,
   loadDashboardState,
@@ -531,6 +542,7 @@ async function runScenario() {
     assert(button.textContent === '重新读取', `error CTA was ${button.textContent}`);
     assert(button.disabled === false, 'error CTA stayed disabled');
     assert(!getElement('btn-open-proxy').classList.contains('hidden'), 'proxy entry hidden during dashboard error');
+    assert(!getElement('btn-open-ai').classList.contains('hidden'), 'AI entry hidden during dashboard error');
     assert(!getElement('btn-open-logs').classList.contains('hidden'), 'logs entry hidden during dashboard error');
     failDashboard = false;
     const before = count('/dashboard/state');
@@ -572,6 +584,43 @@ async function runScenario() {
     const saves = calls.filter(call => call.path === '/proxy/profiles' && call.method === 'POST');
     assert(saves.length === 0, `failed preflight still saved ${saves.length} profiles`);
     assert(getElement('proxy-result').innerHTML.includes('没有保存'), 'failed preflight did not explain that nothing was saved');
+    return { calls };
+  }
+
+  if (scenario === 'ai-chat') {
+    getElement('llm-question').value = '为什么 GitHub 打不开？';
+    await api.askAI();
+    await flush();
+    const first = calls.find(call => call.path === '/explain_llm');
+    assert(first, 'askAI did not POST /explain_llm');
+    assert(Array.isArray(first.body.history) && first.body.history.length === 0, `first ask sent history: ${JSON.stringify(first.body.history)}`);
+    const thread = getElement('llm-chat');
+    assert(thread.innerHTML.includes('为什么 GitHub 打不开？'), 'user bubble missing from chat thread');
+    assert(thread.innerHTML.includes('本地解释 headline'), 'AI card missing from chat thread');
+    assert(thread.innerHTML.includes('data-ai-run-action="flush-dns-cache"'), 'action button missing from AI card');
+    assert(thread.innerHTML.includes('<ol class="manual-list">'), 'manual steps missing from AI card');
+    assert(getElement('llm-question').value === '', 'question input was not cleared after send');
+    getElement('llm-question').value = '那 DNS 呢？';
+    await api.askAI();
+    await flush();
+    const second = calls.filter(call => call.path === '/explain_llm')[1];
+    assert(second, 'second askAI did not POST /explain_llm');
+    assert(second.body.history.length === 2, `second ask sent history: ${JSON.stringify(second.body.history)}`);
+    assert(second.body.history[0].role === 'user' && second.body.history[0].content === '为什么 GitHub 打不开？', `wrong first history entry: ${JSON.stringify(second.body.history[0])}`);
+    assert(second.body.history[1].role === 'assistant' && second.body.history[1].content.includes('本地解释 headline'), `wrong assistant history entry: ${JSON.stringify(second.body.history[1])}`);
+    assert(thread.innerHTML.includes('为什么 GitHub 打不开？') && thread.innerHTML.includes('那 DNS 呢？'), 'new answer replaced the conversation instead of appending');
+    return { history: second.body.history };
+  }
+
+  if (scenario === 'ai-no-report') {
+    await api.askAI();
+    assert(count('/explain_llm') === 0, 'empty question without report still called backend');
+    assert(getElement('llm-result').textContent.includes('先描述你的问题'), `missing no-report hint: ${getElement('llm-result').textContent}`);
+    getElement('llm-question').value = 'DNS 是什么？';
+    await api.askAI();
+    await flush();
+    assert(count('/explain_llm') === 1, 'question without report was blocked');
+    assert(getElement('llm-chat').innerHTML.includes('DNS 是什么？'), 'no-report answer did not append to chat thread');
     return { calls };
   }
 
@@ -656,6 +705,12 @@ class TestWebDashboardBehavior(unittest.TestCase):
 
     def test_clear_data_does_not_pull_ai_state(self):
         self.run_scenario("clear-data")
+
+    def test_ai_chat_sends_history_and_appends_answers(self):
+        self.run_scenario("ai-chat")
+
+    def test_ai_question_is_allowed_without_report(self):
+        self.run_scenario("ai-no-report")
 
     def test_runtime_log_is_buffered_until_disclosure_opens(self):
         self.run_scenario("log-buffer")

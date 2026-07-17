@@ -11,7 +11,7 @@ if __package__ in {None, ""}:
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
 
-from netfix import agent_tools, keychain, llm_explain, llm_provider, residential_proxy, settings
+from netfix import agent_tools, keychain, llm_explain, llm_provider, residential_proxy, settings, symptom_intake
 from netfix.constants import VERSION
 from netfix.fix_engine import FixEngine
 from netfix.redaction import redact_report, redact_text
@@ -237,6 +237,43 @@ _TOOLS: List[Dict[str, Any]] = [
         read_only=True,
     ),
     _tool(
+        "netfix_chat",
+        "Multi-turn chat with the netfix LLM explainer. Pass question plus the recent history for follow-up questions; without a diagnostic report it degrades to general network Q&A.",
+        {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string"},
+                "history": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "description": "最近 20 条对话消息，role 仅支持 user/assistant，每条 content 最多 2000 字符。",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "role": {"type": "string", "enum": ["user", "assistant"]},
+                            "content": {"type": "string", "maxLength": 2000},
+                        },
+                    },
+                },
+                "timeout": {"type": "integer", "default": 60},
+            },
+            "required": ["question"],
+        },
+        read_only=True,
+    ),
+    _tool(
+        "netfix_symptom_intake",
+        "Match a free-text symptom description (Chinese supported) against the local rules and suggest checks and MCP tools to run next.",
+        {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "自由文本症状描述，支持中文口语。"},
+            },
+            "required": ["text"],
+        },
+        read_only=True,
+    ),
+    _tool(
         "netfix_proxy_switch",
         "Switch to a healthy proxy profile.",
         {
@@ -394,6 +431,8 @@ _AGENT_TOOL_DISPATCH = {
     "netfix_proxy_parse": lambda a: _parse_proxy_for_mcp(a),
     "netfix_proxy_import_preview": lambda a: _import_proxy_preview_for_mcp(a),
     "netfix_explain_llm": lambda a: _explain_llm_for_mcp(a),
+    "netfix_chat": lambda a: _chat_for_mcp(a),
+    "netfix_symptom_intake": lambda a: _symptom_intake_for_mcp(a),
     "netfix_list_fixes": lambda a: _list_fixes_for_mcp(a),
     "netfix_dry_run_fix": lambda a: _dry_run_fix_for_mcp(a),
     "netfix_sanitized_report": lambda a: _sanitized_report_for_mcp(a),
@@ -710,6 +749,36 @@ def _explain_llm_for_mcp(args: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "ok": True,
         "result": _sanitize_mcp_output(_strip_internal_secrets(result)),
+    }
+
+
+def _chat_for_mcp(args: Dict[str, Any]) -> Dict[str, Any]:
+    question = str(args.get("question") or "").strip()
+    if not question:
+        return {"ok": False, "schema_version": MCP_SCHEMA_VERSION, "redaction_policy": MCP_REDACTION_POLICY, "error": "question is required"}
+    history = args.get("history") if isinstance(args.get("history"), list) else []
+    try:
+        report: Optional[Dict[str, Any]] = Report.load().as_dict()
+    except Exception:
+        # 没有诊断报告时降级为通用网络问答，由 explain_with_llm 引导用户先跑诊断。
+        report = None
+    result = llm_explain.explain_with_llm(report=report, question=question, history=history)
+    return {
+        "ok": True,
+        "schema_version": MCP_SCHEMA_VERSION,
+        "redaction_policy": MCP_REDACTION_POLICY,
+        "result": _sanitize_mcp_output(_strip_internal_secrets(result)),
+        "note": "这是多轮对话接口：history 传最近 20 条 user/assistant 消息（role 仅 user/assistant，其他 role 会被忽略），服务端逐条脱敏并截断。",
+    }
+
+
+def _symptom_intake_for_mcp(args: Dict[str, Any]) -> Dict[str, Any]:
+    result = symptom_intake.intake_symptoms(str(args.get("text") or args.get("question") or ""))
+    return {
+        "ok": True,
+        "schema_version": MCP_SCHEMA_VERSION,
+        "redaction_policy": MCP_REDACTION_POLICY,
+        **result,
     }
 
 
