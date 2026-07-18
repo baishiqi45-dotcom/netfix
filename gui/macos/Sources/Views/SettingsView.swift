@@ -2285,6 +2285,8 @@ private func cleanupDuplicateProxyProfiles() async {
             parts.append("适合解释文字诊断报告，暂不处理截图")
         } else if provider.id == "minimax" {
             parts.append("适合国内账号，支持文字解释和截图问诊")
+        } else if provider.id == "kimi_coding" {
+            parts.append("编程版订阅 key（sk-kimi- 前缀），与 Moonshot 开放平台按量 key 不通用")
         } else if provider.market == "domestic" {
             parts.append("国内模型，可用于解释脱敏诊断报告")
         } else {
@@ -2415,6 +2417,9 @@ private func cleanupDuplicateProxyProfiles() async {
             llmProviders = providers.providers
             llmChainReadiness = try await client.llmChainReadiness()
             aiStatus = "已保存 AI 设置。现在可以回到主界面问 AI。"
+            if let warning = response.warning, !warning.isEmpty {
+                aiStatus = (aiStatus ?? "") + "提示：\(warning)"
+            }
             return true
         } catch {
             aiStatus = "失败：\(error.localizedDescription)"

@@ -46,8 +46,18 @@ def set_secret(service: str, account: str, secret: str) -> Dict[str, Any]:
     trusted_app = _trusted_app_path()
     if trusted_app:
         cmd.extend(["-T", trusted_app])
+    # 所有读写都经过 security(1) CLI 子进程。若 ACL 只信任应用自身，
+    # 之后任何读取都会弹授权框（后台进程则静默挂起）。把 security CLI
+    # 本身加入信任列表，读写链路才不会自相矛盾。
+    security_cli = shutil.which("security")
+    if security_cli:
+        cmd.extend(["-T", security_cli])
     cmd.append("-w")
-    proc = subprocess.run(cmd, input=f"{secret}\n", capture_output=True, text=True, timeout=15)
+    # macOS 26 的 security(1) 对新条目和更新都会两次读取 stdin
+    # （"password data for new item" + "retype password"）。只发一行会
+    # 因两次输入不匹配而静默存入空密码。重复发送同一密码以通过确认；
+    # 旧版本只读一行时多余的第二行无害。
+    proc = subprocess.run(cmd, input=f"{secret}\n{secret}\n", capture_output=True, text=True, timeout=15)
     if proc.returncode != 0:
         return {"ok": False, "error": (proc.stderr or proc.stdout).strip()}
     return {"ok": True, "service": service, "account": account}
@@ -131,7 +141,7 @@ def delete_known_netfix_secrets(settings_snapshot: Dict[str, Any]) -> Dict[str, 
             value = str(llm.get(key) or "")
             if value:
                 targets.add((LLM_SERVICE, value))
-    for provider_id in ("deepseek", "moonshot_kimi", "minimax", "qwen", "custom_openai_compatible", "openai"):
+    for provider_id in ("deepseek", "moonshot_kimi", "minimax", "qwen", "kimi_coding", "custom_openai_compatible", "openai"):
         targets.add((LLM_SERVICE, provider_id))
 
     profiles = settings_snapshot.get("proxy_profiles", []) if isinstance(settings_snapshot, dict) else []

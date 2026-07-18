@@ -664,6 +664,7 @@ struct LLMProviderInfo: Codable, Identifiable {
 struct LLMSettingsResponse: Codable {
     let ok: Bool
     let settings: LLMSettings
+    let warning: String?
 }
 
 struct DeepSeekSidecarImportResponse: Codable {
@@ -893,6 +894,9 @@ struct LLMExplainResult: Codable {
     let providerUsed: String?
     let fallbackChain: [LLMFallbackStep]?
     let needsUploadConfirmation: Bool?
+    let confirmationRequest: ConfirmationRequest?
+    let planSteps: [ChatStep]?
+    let observations: [ChatObservation]?
     let headline: String?
     let severity: String?
     let explanation: String?
@@ -908,12 +912,374 @@ struct LLMExplainResult: Codable {
         case providerUsed = "provider_used"
         case fallbackChain = "fallback_chain"
         case needsUploadConfirmation = "needs_upload_confirmation"
+        case confirmationRequest = "confirmation_request"
+        case planSteps = "plan_steps"
+        case observations
         case headline
         case severity
         case explanation
         case actions
         case manualSteps = "manual_steps"
         case redactedReportHash = "redacted_report_hash"
+    }
+}
+
+/// P0-A.3: 通用 confirmation_request，覆盖 upload / change_system_setting / switch_proxy_node 等。
+struct ConfirmationRequest: Codable, Equatable {
+    let requestId: String?
+    let category: String
+    let summary: String
+    let impact: String
+    let reasonCode: String?
+    let preview: [String: AnyCodable]?
+    let magicWord: String?
+    let expiresAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case requestId = "request_id"
+        case category
+        case summary
+        case impact
+        case reasonCode = "reason_code"
+        case preview
+        case magicWord = "magic_word"
+        case expiresAt = "expires_at"
+    }
+}
+
+/// P0-A.2: Plan/Act/Observe 中的 plan step。
+struct ChatStep: Codable, Equatable, Identifiable {
+    let tool: String
+    let label: String?
+    let why: String?
+    let status: String?
+
+    var id: String { tool + (label ?? "") }
+
+    enum CodingKeys: String, CodingKey {
+        case tool
+        case label
+        case why
+        case status
+    }
+}
+
+/// P0-A.2: Plan/Act/Observe 中的 observation（本地规则或 LLM 观察到的事实）。
+struct ChatObservation: Codable, Equatable, Identifiable {
+    let fact: String
+    let confidence: Double?
+    let source: String?
+
+    var id: String { (source ?? "obs") + "-" + fact.prefix(40) }
+
+    enum CodingKeys: String, CodingKey {
+        case fact
+        case confidence
+        case source
+    }
+}
+
+// MARK: - P1-A: 多轮对话 session / memory / proactive alerts
+
+/// P1-A.1: 多轮对话 session，对应 netfix/chat_session.py 的 ChatSession。
+/// 后端字段 snake_case → Swift camelCase。
+struct ChatSession: Codable, Identifiable, Equatable {
+    let sessionID: String
+    let title: String?
+    let createdAt: String
+    let updatedAt: String?
+    let lastTurnID: String?
+    let turnCount: Int?
+    let symptomID: String?
+    let status: String?
+    let tags: [String]?
+    let schemaVersion: String?
+
+    var id: String { sessionID }
+
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+        case title
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case lastTurnID = "last_turn_id"
+        case turnCount = "turn_count"
+        case symptomID = "symptom_id"
+        case status
+        case tags
+        case schemaVersion = "schema_version"
+    }
+}
+
+/// P1-A.1: 一轮对话 turn；与 ChatStep / ChatObservation 一同复用现有 plan/act/observe。
+struct ChatTurn: Codable, Identifiable, Equatable {
+    let turnID: String
+    let sessionID: String
+    let role: String
+    let content: String
+    let createdAt: String
+    let planSteps: [ChatStep]?
+    let observations: [ChatObservation]?
+    let rootCauseID: String?
+    let rootCauseConfidence: Double?
+    let keyDiagnostics: [String]?
+    let providerUsed: String?
+    let redactedReportHash: String?
+    let attachments: [String]?
+
+    var id: String { turnID }
+
+    enum CodingKeys: String, CodingKey {
+        case turnID = "turn_id"
+        case sessionID = "session_id"
+        case role
+        case content
+        case createdAt = "created_at"
+        case planSteps = "plan_steps"
+        case observations
+        case rootCauseID = "root_cause_id"
+        case rootCauseConfidence = "root_cause_confidence"
+        case keyDiagnostics = "key_diagnostics"
+        case providerUsed = "provider_used"
+        case redactedReportHash = "redacted_report_hash"
+        case attachments
+    }
+}
+
+/// P1-A.2: 一段建议的「行动步骤」，与 plan_steps 区分：plan_steps 偏工具调用，PlanStep 偏最终给用户看的动作。
+struct PlanStep: Codable, Identifiable, Equatable {
+    let stepID: String
+    let label: String
+    let detail: String?
+    let category: String?
+    let tier: Int?
+    let actionID: String?
+
+    var id: String { stepID }
+
+    enum CodingKeys: String, CodingKey {
+        case stepID = "step_id"
+        case label
+        case detail
+        case category
+        case tier
+        case actionID = "action_id"
+    }
+}
+
+/// P1-A.2: 观察项（与 ChatObservation 字段语义对齐；区别：Observation 可作为 EvidenceChain 的成员）。
+struct Observation: Codable, Identifiable, Equatable {
+    let observationID: String
+    let fact: String
+    let source: String?
+    let confidence: Double?
+    let diagnosticName: String?
+
+    var id: String { observationID }
+
+    enum CodingKeys: String, CodingKey {
+        case observationID = "observation_id"
+        case fact
+        case source
+        case confidence
+        case diagnosticName = "diagnostic_name"
+    }
+}
+
+/// P1-A.3: Evidence Chain panel 的输入。
+struct EvidenceChain: Codable, Equatable {
+    let rootCauseID: String?
+    let rootCauseDescription: String?
+    let confidence: Double?
+    let keyDiagnostics: [String]
+    let observations: [Observation]
+
+    enum CodingKeys: String, CodingKey {
+        case rootCauseID = "root_cause_id"
+        case rootCauseDescription = "root_cause_description"
+        case confidence
+        case keyDiagnostics = "key_diagnostics"
+        case observations
+    }
+}
+
+/// P1-A.3: ConfirmationRequest 已存在（upload_redacted_report / change_system_setting / switch_proxy_node）。
+/// 这里扩展：category 决定样式，previews 列出「会修改：系统代理 / 路由表 / DNS」三类副作用。
+extension ConfirmationRequest {
+    /// 主分类：上传类 vs 系统变更类 vs 节点切换类。
+    enum Kind: String, Codable {
+        case uploadRedactedReport = "upload_redacted_report"
+        case uploadImage = "upload_image"
+        case changeSystemSetting = "change_system_setting"
+        case switchProxyNode = "switch_proxy_node"
+        case unknown
+
+        init(rawValue: String) {
+            switch rawValue {
+            case "upload_redacted_report": self = .uploadRedactedReport
+            case "upload_image": self = .uploadImage
+            case "change_system_setting": self = .changeSystemSetting
+            case "switch_proxy_node": self = .switchProxyNode
+            default: self = .unknown
+            }
+        }
+    }
+
+    var kind: Kind { Kind(rawValue: category) }
+
+    /// 副作用预览，例如 ["系统代理", "路由表", "DNS"]，由 SwiftUI 渲染徽章。
+    var affectedSurfaces: [String] {
+        guard kind == .changeSystemSetting || kind == .switchProxyNode else { return [] }
+        return preview?["affected_surfaces"]?.arrayValue?.compactMap { $0.stringValue } ?? []
+    }
+}
+
+// MARK: - P1-B: 主动告警 / 记忆
+
+/// P1-B.1: 主动告警。alert_type 对应后端的 4 类：exit_ip_type_change / dns_failure_rate_spike / node_consecutive_timeout / rtt_spike。
+struct ProactiveAlert: Codable, Identifiable, Equatable {
+    let alertID: String
+    let alertType: String
+    let severity: String?
+    let headline: String
+    let detail: String?
+    let suggestedActions: [String]?
+    let evidence: [String: AnyCodable]?
+    let createdAt: String
+    let expiresAt: String?
+    let dismissed: Bool?
+    let cooldownUntil: String?
+
+    var id: String { alertID }
+
+    enum CodingKeys: String, CodingKey {
+        case alertID = "alert_id"
+        case alertType = "alert_type"
+        case severity
+        case headline
+        case detail
+        case suggestedActions = "suggested_actions"
+        case evidence
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+        case dismissed
+        case cooldownUntil = "cooldown_until"
+    }
+
+    /// 给 SwiftUI 用的友好图标。
+    var icon: String {
+        switch alertType {
+        case "exit_ip_type_change": return "globe.americas"
+        case "dns_failure_rate_spike": return "exclamationmark.arrow.circlepath"
+        case "node_consecutive_timeout": return "wifi.exclamationmark"
+        case "rtt_spike": return "speedometer"
+        default: return "bell"
+        }
+    }
+
+    /// 4 类告警的中文标题。
+    var localizedTitle: String {
+        switch alertType {
+        case "exit_ip_type_change": return "出口网络类型变了"
+        case "dns_failure_rate_spike": return "DNS 失败率上升"
+        case "node_consecutive_timeout": return "代理节点连续超时"
+        case "rtt_spike": return "网络延迟突然升高"
+        default: return "网络状态提醒"
+        }
+    }
+}
+
+/// P1-B.2: 记忆条目。memory_kind 对应后端 fact / preference / ignored-alert 三类。
+struct MemoryEntry: Codable, Identifiable, Equatable {
+    let memoryID: String
+    let memoryKind: String
+    let summary: String
+    let detail: String?
+    let reference: String?
+    let weight: Double?
+    let lastUsedAt: String?
+    let createdAt: String
+    let expiresAt: String?
+
+    var id: String { memoryID }
+
+    enum CodingKeys: String, CodingKey {
+        case memoryID = "memory_id"
+        case memoryKind = "memory_kind"
+        case summary
+        case detail
+        case reference
+        case weight
+        case lastUsedAt = "last_used_at"
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+    }
+}
+
+/// 记忆列表的响应包装。
+struct MemoryListResponse: Codable {
+    let ok: Bool
+    let entries: [MemoryEntry]
+    let schemaVersion: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case entries
+        case schemaVersion = "schema_version"
+    }
+}
+
+/// 主动告警列表的响应包装。
+struct ProactiveAlertListResponse: Codable {
+    let ok: Bool
+    let alerts: [ProactiveAlert]
+    let schemaVersion: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case alerts
+        case schemaVersion = "schema_version"
+    }
+}
+
+/// ChatSession 列表/单条响应的包装。
+struct ChatSessionListResponse: Codable {
+    let ok: Bool
+    let sessions: [ChatSession]
+    let schemaVersion: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case sessions
+        case schemaVersion = "schema_version"
+    }
+}
+
+struct ChatSessionDetailResponse: Codable {
+    let ok: Bool
+    let session: ChatSession
+    let turns: [ChatTurn]?
+    let schemaVersion: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case session
+        case turns
+        case schemaVersion = "schema_version"
+    }
+}
+
+struct ChatSessionActionResponse: Codable {
+    let ok: Bool
+    let session: ChatSession?
+    let turn: ChatTurn?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case session
+        case turn
+        case error
     }
 }
 

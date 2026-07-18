@@ -196,13 +196,6 @@ _CAUSE_EXPLANATIONS: Dict[str, Dict[str, Any]] = {
         "actions": [],
         "manual_steps": ["如果你需要保留 IPv6，就在路由器或代理软件里修复 IPv6 路由。"],
     },
-    "ipv6-route-ambiguous": {
-        "headline": "IPv6 路由状态不太干净",
-        "explanation": "系统检测到了 IPv6 路由，但网关信息不明确。这通常不是硬断网，但会让支持 IPv6 的目标在启动连接时变慢。",
-        "primary_action": "disable-ipv6",
-        "actions": [],
-        "manual_steps": ["如果你需要保留 IPv6，先处理自动代理或代理模式混用，再检查路由器 IPv6 设置。"],
-    },
     "upload-congestion": {
         "headline": "检测到上行流量较高",
         "explanation": "网络本身能通，但本机网盘、同步或下载器的上行流量较高。Codex、ChatGPT 这类实时应用可能会有等待。",
@@ -238,6 +231,180 @@ _CAUSE_EXPLANATIONS: Dict[str, Dict[str, Any]] = {
         "actions": [],
         "manual_steps": ["切换网络或节点", "检查路由器是否拥塞", "暂停后台上传/下载"],
     },
+    # P0-A.6: 补全缺失 cause 模板，覆盖规则库已声明但解释库为空的情况。
+    "wrong-password": {
+        "headline": "代理用户名或密码错误",
+        "explanation": "代理服务器拒绝了这次认证请求。常见原因是配置里的账号密码和服务商给的不一致，或大小写、空格、特殊字符被改动。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": [
+            "打开代理客户端，对照服务商后台重新粘贴用户名和密码",
+            "如果使用系统代理，到「系统设置 → 网络 → 代理」补全账号",
+            "复制 Netfix 报告时记得先脱敏，不要把密码贴进对话",
+        ],
+    },
+    "self-signed-cert": {
+        "headline": "这条连接看到的不是网站原始证书",
+        "explanation": "直连或代理路径上的证书不是由公开 CA 签发的。在企业/学校网络里通常是 HTTPS 检查的特征，但也要警惕未知中间人。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": [
+            "用 openssl s_client -showcerts <host>:443 查看签发者",
+            "如果是公司批准的 CA，联系 IT 确认并把 CA 装到 Keychain",
+            "如果是未知网络，不要继续输入密码，先切到可信网络",
+        ],
+    },
+    "missing-ca": {
+        "headline": "系统缺少信任这个证书的 CA",
+        "explanation": "证书本身可能是合法的，但当前 macOS Keychain 没有装它，所以会被拒绝。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": [
+            "向网站管理员或 IT 索取 PEM 格式 CA",
+            "双击导入 Keychain，并在「证书」分类设为「始终信任」",
+            "不要点浏览器的「继续访问」长期绕过校验",
+        ],
+    },
+    "mtu-too-high": {
+        "headline": "小数据能过，大数据包在路上被丢了",
+        "explanation": "普通连接能建立，所以看起来「网络没坏」。但超过某个字节数之后就失败，符合 VPN 路径 MTU 偏大的特征。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": [
+            "跑 bin/mtu-tune.sh 探测最佳 MTU",
+            "把结果写回 /etc/ppp/ip-up 或网卡 MTU 设置",
+            "恢复时记下原值以便回滚",
+        ],
+    },
+    "dns-hijack": {
+        "headline": "当前 DNS 把网站带到了错误地址",
+        "explanation": "域名能查到，但当前 DNS 返回的地址和两个公共 DNS 不一致，而且不属于目标服务的 CDN。这是疑似 DNS 污染或劫持。",
+        "primary_action": "flush-dns-cache",
+        "actions": ["set-public-dns"],
+        "manual_steps": [
+            "先刷新 DNS 缓存",
+            "如果仍然异常，确认改用 1.1.1.1 / 8.8.8.8",
+            "企业内网可能有 split DNS，不要一刀切覆盖内网解析",
+        ],
+    },
+    "node-flagged": {
+        "headline": "网络已经通了，但当前出口被网站拦下",
+        "explanation": "请求成功到达 ChatGPT/Claude 等服务，对方返回 403 或 Cloudflare 挑战。常见原因是当前代理节点 IP 属于数据中心 ASN 或风险分较高。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": [
+            "在代理客户端换一个不同地区或类型的节点",
+            "如果必须保留当前节点，先确认账号是否被风控（重新登录或换浏览器）",
+            "不要连续多次切换节点，可能触发额外的反爬校验",
+        ],
+    },
+    "node-blocked": {
+        "headline": "当前代理节点可能已经下线",
+        "explanation": "代理软件还在运行，但本地端口到上游节点之间连接失败。连续多次握手超时通常意味着节点被墙或上游故障。",
+        "primary_action": "check-proxy-core",
+        "actions": [],
+        "manual_steps": [
+            "在代理客户端切换到其他节点",
+            "查看服务商状态页是否在维护",
+            "如果所有节点都失败，检查本地到机场入口的网络",
+        ],
+    },
+    "node-misconfigured": {
+        "headline": "代理节点配置与实际不一致",
+        "explanation": "代理客户端里的节点地址、端口或协议与服务商给的不一致，可能导致握手失败。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": [
+            "在代理客户端里重新粘贴订阅 URL 或完整节点参数",
+            "确认协议（vmess / vless / trojan / ss）与端口匹配",
+            "如果导入的节点超过一个月，考虑重新拉取订阅",
+        ],
+    },
+    "doh-bypass": {
+        "headline": "DoH 绕过了系统 hosts 和内网解析",
+        "explanation": "浏览器或系统启用了 DoH，会绕过 /etc/hosts 和内网 DNS，导致内网服务打不开。",
+        "primary_action": "set-public-dns",
+        "actions": [],
+        "manual_steps": [
+            "在浏览器设置里关闭 Secure DNS / DoH",
+            "或在系统设置里关闭「使用安全 DNS」选项",
+        ],
+    },
+    # P0-B.8: 浏览器能开、Codex CLI 连不上；常见原因是 CLI 没读到代理环境变量
+    "cli-no-env-proxy": {
+        "headline": "浏览器能上网，但命令行工具读不到代理",
+        "explanation": "macOS 系统代理只对走系统设置的 App 生效；终端里直接启动的 CLI（如 Codex CLI、curl、git）需要单独声明 HTTP_PROXY/HTTPS_PROXY 或 ALL_PROXY。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": [
+            "在代理客户端里打开「为终端设置代理」或「导出环境变量」",
+            "或临时执行：export ALL_PROXY=socks5h://127.0.0.1:10808 HTTPS_PROXY=http://127.0.0.1:10809",
+            "把上面两行加进 ~/.zshrc 或 ~/.zprofile，让新终端窗口自动生效",
+            "在终端里跑 curl -x http://127.0.0.1:10809 https://api.openai.com -I 验证",
+        ],
+    },
+    # P0-B.8: 切换网络（公司/家/Wi-Fi 名）后代理/PAC 状态没有跟随重置
+    "network-baseline-drift": {
+        "headline": "换了网络之后代理配置还停留在上一个",
+        "explanation": "切换 Wi-Fi、插拔网线或在公司/家来回跑时，代理客户端、PAC、IPv6 默认路由这些都按上一次网络记的。现在用的网络跟它对不上，所以直连/代理都异常。",
+        "primary_action": "reset-system-proxy",
+        "actions": ["check-proxy-core", "disable-auto-proxy"],
+        "manual_steps": [
+            "先在代理客户端里点一次「重启核心」或重新应用订阅",
+            "再到系统设置里关掉 PAC / WPAD 自动代理，只保留手动代理",
+            "在「系统设置 → 网络 → 当前 Wi-Fi → 详细信息」里把 IPv6 配置改成「仅本地链接」",
+            "最后跑一次 netfix codex，确认现在的网络路径对了",
+        ],
+    },
+    # P1.3: 细分 IPv6 路由——网关信息不明确时的更细粒度模板
+    "ipv6-route-ambiguous": {
+        "headline": "IPv6 路由状态不太干净",
+        "explanation": "系统检测到了 IPv6 路由，但网关信息不明确。这通常不是硬断网，但会让支持 IPv6 的目标在启动连接时变慢。",
+        "primary_action": "disable-ipv6",
+        "actions": [],
+        "manual_steps": [
+            "如果你需要保留 IPv6，先处理自动代理或代理模式混用，再检查路由器 IPv6 设置。",
+        ],
+    },
+    # P1.3: 5GHz/2.4GHz 信道拥挤导致网关/客户端连不上
+    "wifi-band-crowded": {
+        "headline": "Wi-Fi 频段太挤，网关握手不稳定",
+        "explanation": "周围邻居的 Wi-Fi 或者自己的设备把同一信道塞满了，路由器到 Mac 这段丢包抖动明显。换一个信道或频段通常能稳住。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": [
+            "在路由器后台把 2.4GHz 信道从「自动」改成 1/6/11 中干扰最小的一个",
+            "把 5GHz 优先开放给当前 Mac，避免它在 2.4GHz 上反复掉线",
+            "把 Mac 暂时挪到离路由器 2~3 米的位置，确认信号稳定",
+            "如果路由器支持 160MHz 或 Wi-Fi 6，优先在后台开启",
+        ],
+    },
+    # P1.3: 代理服务器要求了一种 CLI/系统代理都不支持的认证方式（例如 NTLM / SAML / 自定义 challenge）
+    "auth-scheme-unsupported": {
+        "headline": "代理要求的认证方式当前客户端不支持",
+        "explanation": "代理返回了非标准的认证挑战（例如 NTLM、Negotiate、SAML、单点登录回调），但系统代理设置和大多数 GUI 客户端只能填用户名/密码，所以认证一直失败。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": [
+            "确认服务商后台是否真的只支持这种认证；有些机场给的是「企业 SSO 模式」，需要联系他们改成 Basic Auth",
+            "如果必须保留，去代理客户端官网确认它是否在说明里支持 NTLM / SAML",
+            "在 Netfix 设置里把代理协议从 SOCKS5 临时改成 HTTP Proxy，部分客户端对 HTTP Basic 兼容更好",
+            "和同事/服务商确认完后，再回到代理客户端里重新粘贴用户名密码保存",
+        ],
+    },
+    # P1.3: 证书过了有效期，但场景不是中间人劫持
+    "cert-expired-not-mitm": {
+        "headline": "网站或代理的证书已经过了有效期",
+        "explanation": "服务端证书已经过了 notAfter 时间，所以客户端拒绝继续握手。这通常是后台证书续期没跟上，不一定是中间人。少数旧代理客户端的本地时钟漂移也会触发同样现象。",
+        "primary_action": None,
+        "actions": [],
+        "manual_steps": [
+            "用浏览器打开目标站点，看是不是所有人都报「证书过期」",
+            "如果只有当前节点报，联系服务商让他们续证书，或者临时换节点",
+            "打开「系统设置 → 通用 → 日期与时间」勾上「自动设置」，避免本地时钟漂移触发误判",
+            "续证书前不要在浏览器里点「继续访问」跳过校验",
+        ],
+    },
 }
 
 
@@ -250,6 +417,7 @@ _FIX_LABELS: Dict[str, str] = {
     "renew-dhcp": "续租 DHCP",
     "disable-ipv6": "暂时关闭 IPv6",
     "set-public-dns": "改用公共 DNS",
+    "disable-quic": "关闭浏览器 QUIC",
 }
 
 

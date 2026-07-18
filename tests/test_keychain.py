@@ -16,7 +16,7 @@ class TestKeychain(unittest.TestCase):
         cmd = args[0]
         self.assertEqual(cmd[-1], "-w")
         self.assertNotIn("sk-secret", cmd)
-        self.assertEqual(kwargs["input"], "sk-secret\n")
+        self.assertEqual(kwargs["input"], "sk-secret\nsk-secret\n")
         self.assertTrue(kwargs["capture_output"])
 
     def test_set_secret_limits_keychain_item_to_trusted_app_when_available(self):

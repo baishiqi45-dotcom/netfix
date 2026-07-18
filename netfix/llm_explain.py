@@ -5,6 +5,8 @@ import copy
 import base64
 import json
 import struct
+import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set
 
 from netfix import explain, keychain, llm_budget
@@ -19,6 +21,93 @@ MAX_IMAGE_DATA_URL_CHARS = 6_250_000
 MAX_QUESTION_CHARS = 2_000
 MAX_HISTORY_MESSAGES = 20
 ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
+
+# confirmation_request 通用机制：把原来只针对"上传脱敏报告"的 needs_upload_confirmation
+# 升级为覆盖所有破坏性 / 隐私类操作的统一气泡。SwiftUI 端 AIChatView 用同一个渲染管线。
+CONFIRMATION_CATEGORIES = {
+    "upload_redacted_report": {
+        "summary": "需要把脱敏后的诊断报告发给 AI 供应商",
+        "impact": "读取脱敏报告；代理密码 / 订阅链接 / Keychain 内容不会发送",
+        "magic_word": "UPLOAD_REDACTED_REPORT",
+    },
+    "upload_image": {
+        "summary": "需要把脱敏后的截图发给 AI 视觉模型",
+        "impact": "图中可见文字会原样发送；文件元数据已被剥离",
+        "magic_word": "UPLOAD_IMAGE",
+    },
+    "change_system_setting": {
+        "summary": "需要修改系统网络设置",
+        "impact": "会调用 networksetup / scutil；可能短暂影响网络",
+        "magic_word": "APPLY_SYSTEM_FIX",
+    },
+    "switch_proxy_node": {
+        "summary": "需要切换到另一个代理节点",
+        "impact": "会更新代理客户端配置并重启代理内核",
+        "magic_word": "APPLY_PROXY_PROFILE",
+    },
+    "disable_ipv6": {
+        "summary": "需要临时禁用 IPv6",
+        "impact": "所有 IPv6 流量会暂时失效，恢复后自动开启",
+        "magic_word": "APPLY_SYSTEM_FIX",
+    },
+    "flush_dns": {
+        "summary": "需要刷新 DNS 缓存",
+        "impact": "只清缓存，不改系统配置",
+        "magic_word": "FLUSH_DNS_CACHE",
+    },
+    "renew_dhcp": {
+        "summary": "需要续租 DHCP",
+        "impact": "会丢弃当前 IP 地址并重新获取",
+        "magic_word": "APPLY_SYSTEM_FIX",
+    },
+    "reset_system_proxy": {
+        "summary": "需要重置系统代理",
+        "impact": "当前系统代理设置会被备份并替换",
+        "magic_word": "APPLY_SYSTEM_FIX",
+    },
+}
+
+
+def build_confirmation_request(
+    category: str,
+    *,
+    reason_code: str = "",
+    preview: Optional[Dict[str, Any]] = None,
+    expires_in_seconds: int = 300,
+) -> Dict[str, Any]:
+    """Build a generic confirmation_request dict for the SwiftUI bubble.
+
+    The frontend matches on `category` to decide which copy / icon / confirmation
+    magic phrase to render. `magic_word` is the legacy field name retained so the
+    existing Tier 2 confirmation flow stays compatible (see `tests/test_docs_contract.py`).
+    """
+    spec = CONFIRMATION_CATEGORIES.get(category) or {
+        "summary": "需要执行一个破坏性操作",
+        "impact": "请确认后果",
+        "magic_word": "APPLY_SYSTEM_FIX",
+    }
+    return {
+        "request_id": f"confirm-{int(time.time() * 1000)}",
+        "category": category,
+        "summary": spec["summary"],
+        "impact": spec["impact"],
+        "reason_code": reason_code or category,
+        "preview": preview or {},
+        "magic_word": spec["magic_word"],
+        "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=expires_in_seconds)).isoformat(),
+    }
+
+
+def merge_confirmation_request(payload: Dict[str, Any], request: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Attach a confirmation_request to a fallback payload and clear the legacy field."""
+    if not request:
+        payload["confirmation_request"] = None
+        return payload
+    payload["confirmation_request"] = request
+    # 兼容旧字段：当前端仍未升级时仍能看到 needs_upload_confirmation 提示
+    if request.get("category") in {"upload_redacted_report", "upload_image"}:
+        payload["needs_upload_confirmation"] = True
+    return payload
 
 
 FALLBACK_REASON_LABELS = {
@@ -75,6 +164,9 @@ def _fallback(
     *,
     fallback_chain: Optional[List[Dict[str, Any]]] = None,
     needs_upload_confirmation: bool = False,
+    confirmation_request: Optional[Dict[str, Any]] = None,
+    plan_steps: Optional[List[Dict[str, Any]]] = None,
+    observations: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     if report:
         local = explain.explain_report(report)
@@ -104,15 +196,96 @@ def _fallback(
         "provider_used": None,
         "fallback_chain": fallback_chain or [],
         "needs_upload_confirmation": needs_upload_confirmation,
+        "confirmation_request": confirmation_request,
         "headline": headline,
         "severity": severity,
         "explanation": explanation,
         "evidence": evidence,
         "actions": actions,
         "manual_steps": manual_steps,
+        "plan_steps": plan_steps or [],
+        "observations": observations or [],
         "redaction_audit": redacted.get("redaction_audit", {}),
         "redacted_report_hash": redacted.get("redacted_report_hash"),
     }
+
+
+def _plan_steps_from_intake(intake_hint: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert a symptom_intake result into a default plan_steps trail.
+
+    Each plan step has the shape:
+        {"tool": "<mcp_tool_name>", "label": "<人话>", "why": "<reason>", "status": "pending"}
+    The status stays "pending" until the SwiftUI client runs the matching tool
+    and feeds back the observation.
+    """
+    if not isinstance(intake_hint, dict):
+        return []
+    steps: List[Dict[str, Any]] = []
+    for tool in intake_hint.get("suggested_tools") or []:
+        if not isinstance(tool, dict):
+            continue
+        name = str(tool.get("tool") or "").strip()
+        if not name:
+            continue
+        steps.append({
+            "tool": name,
+            "label": _tool_step_label(name),
+            "why": str(tool.get("why") or ""),
+            "status": "pending",
+        })
+    if not steps and intake_hint.get("matched_symptoms"):
+        # 没有工具建议但有命中症状：放一个最低成本的「跑一次诊断」作为兜底。
+        steps.append({
+            "tool": "netfix_triage",
+            "label": "跑一次五层诊断",
+            "why": "已识别到症状关键词，先跑一次诊断收集证据",
+            "status": "pending",
+        })
+    return steps
+
+
+def _observations_from_intake(intake_hint: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert a symptom_intake result into an observation trail for SwiftUI."""
+    if not isinstance(intake_hint, dict):
+        return []
+    observations: List[Dict[str, Any]] = []
+    matched = intake_hint.get("matched_symptoms") or []
+    if matched and isinstance(matched[0], dict):
+        first = matched[0]
+        observations.append({
+            "fact": f"症状关键词命中：{first.get('name') or first.get('id') or ''}",
+            "confidence": float(first.get("confidence") or 0.0),
+            "source": "symptom_intake",
+        })
+    if intake_hint.get("note"):
+        observations.append({
+            "fact": str(intake_hint.get("note")),
+            "confidence": 0.0,
+            "source": "symptom_intake",
+        })
+    return observations
+
+
+def _tool_step_label(tool_name: str) -> str:
+    """Return a 短人话 label for a tool name so the SwiftUI plan card stays readable."""
+    mapping = {
+        "netfix_codex": "跑 Codex / OpenAI 健康检查",
+        "netfix_services": "探测常用海外服务",
+        "netfix_triage": "跑五层诊断",
+        "netfix_doctor": "跑完整诊断",
+        "netfix_get_global_state": "查看主网络路径",
+        "netfix_get_dns_state": "查看 DNS 状态",
+        "netfix_get_proxy_state": "查看系统代理",
+        "netfix_get_listeners": "查看本地监听端口",
+        "netfix_get_ip_reputation": "查出口 IP 信誉",
+        "netfix_check_proxy_auth": "检测代理认证状态",
+        "netfix_test_proxy_for_url": "走代理测试目标",
+        "netfix_test_direct_for_url": "直连测试目标",
+        "netfix_dns_resolve": "解析目标域名",
+        "netfix_trace_path": "跟踪网络路径",
+        "netfix_proxy_switch": "切换代理节点",
+    }
+    return mapping.get(tool_name, tool_name.replace("_", " ").replace("netfix ", ""))
 
 
 def _allowed_action_map(report: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -180,11 +353,47 @@ def sanitize_llm_response(raw: Dict[str, Any], report: Dict[str, Any]) -> Dict[s
     data["manual_steps"] = manual if isinstance(manual, list) else []
     data.pop("command", None)
     data.pop("commands", None)
+
+    # P0-A.3: 自动给首个 tier≥2 修复动作挂上 confirmation_request，UI 端能用同一个气泡组件
+    # 渲染上传确认 / 修改系统设置 / 切换节点等所有破坏性操作。
+    data["confirmation_request"] = _first_tier2_confirmation_request(safe_actions)
+    data["needs_upload_confirmation"] = bool(data.get("confirmation_request"))
+
     redacted_output = redact_report({"llm_response": data}, level="balanced").get("redacted_report", {})
     safe_output = redacted_output.get("llm_response")
     if isinstance(safe_output, dict):
         data = safe_output
     return data
+
+
+_ACTION_TO_CONFIRMATION_CATEGORY = {
+    "flush-dns-cache": "flush_dns",
+    "renew-dhcp": "renew_dhcp",
+    "disable-ipv6": "disable_ipv6",
+    "reset-system-proxy": "reset_system_proxy",
+    "disable-auto-proxy": "change_system_setting",
+    "check-proxy-core": "change_system_setting",
+}
+
+
+def _first_tier2_confirmation_request(safe_actions: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return a confirmation_request for the first tier>=2 action, or None.
+
+    swiftui renders the same bubble for upload / switch_proxy_node / change_system_setting;
+    magic_word stays compatible with existing Tier 2 confirmation tokens.
+    """
+    for action in safe_actions:
+        tier = int(action.get("tier") or 3)
+        if tier < 2:
+            continue
+        action_id = str(action.get("id") or "")
+        category = _ACTION_TO_CONFIRMATION_CATEGORY.get(action_id, "change_system_setting")
+        return build_confirmation_request(
+            category,
+            reason_code=f"action_{action_id}",
+            preview={"action_id": action_id, "label": action.get("label") or action_id},
+        )
+    return None
 
 
 def _provider_settings(base_settings: Dict[str, Any], provider_id: str, mode: str = "explain") -> Dict[str, Any]:
@@ -611,11 +820,21 @@ def explain_with_llm(
     allow_fallback: Optional[bool] = None,
     image_inputs: Optional[List[Any]] = None,
     history: Optional[List[Any]] = None,
+    intake_hint: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Explain a report or chat about networking using an optional cloud LLM, with local fallback."""
+    """Explain a report or chat about networking using an optional cloud LLM, with local fallback.
+
+    intake_hint: optional precomputed symptom_intake result dict with keys
+        matched_symptoms / suggested_checks / suggested_tools / note. When supplied,
+    the local rule layer derives a default plan_steps + observations snapshot so
+    the SwiftUI client can render a plan/act/observe trail before the cloud LLM
+    responds (and even when the cloud LLM is offline / has fallen back).
+    """
     if not isinstance(report, dict):
         report = {}
     history_messages = _sanitize_history(history)
+    plan_steps = _plan_steps_from_intake(intake_hint)
+    observations = _observations_from_intake(intake_hint)
     llm_settings = load_settings().get("llm", {})
     saved_redaction_level = str(llm_settings.get("redaction_level") or "balanced")
     requested_redaction_level = str(redaction_level or "balanced")
@@ -627,26 +846,33 @@ def explain_with_llm(
     redacted = redact_report(report, level=effective_redaction_level)
     question = redact_text(str(question or "").strip()[:MAX_QUESTION_CHARS])
     if not llm_settings.get("enabled"):
-        return _fallback(report, "llm_disabled", redacted)
+        return _fallback(report, "llm_disabled", redacted, plan_steps=plan_steps, observations=observations)
     if llm_settings.get("upload_consent") == "never":
-        return _fallback(report, "upload_consent_never", redacted)
+        return _fallback(report, "upload_consent_never", redacted, plan_steps=plan_steps, observations=observations)
     prepared_image_inputs: List[Dict[str, Any]] = []
     image_redaction_audit: Dict[str, Any] = {}
     if mode == "image_question":
         features = llm_settings.get("features") if isinstance(llm_settings.get("features"), dict) else {}
         if not bool(features.get("image_question")):
-            return _fallback(report, "image_question_disabled", redacted)
+            return _fallback(report, "image_question_disabled", redacted, plan_steps=plan_steps, observations=observations)
         prepared_image_inputs, image_redaction_audit = _prepare_image_inputs(image_inputs)
         if not prepared_image_inputs:
             if _has_unsupported_image_format(image_inputs):
-                return _fallback(report, "image_unsupported_format", redacted)
-            return _fallback(report, "image_input_missing", redacted)
+                return _fallback(report, "image_unsupported_format", redacted, plan_steps=plan_steps, observations=observations)
+            return _fallback(report, "image_input_missing", redacted, plan_steps=plan_steps, observations=observations)
         if not upload_confirmed:
             return _fallback(
                 report,
                 "upload_consent_required",
                 redacted,
                 needs_upload_confirmation=True,
+                confirmation_request=build_confirmation_request(
+                    "upload_image",
+                    reason_code="upload_consent_required",
+                    preview={"mime_count": len(image_redaction_audit.get("mime_types") or [])},
+                ),
+                plan_steps=plan_steps,
+                observations=observations,
             )
     if mode != "image_question" and llm_settings.get("upload_consent") == "ask_each_time" and not upload_confirmed:
         return _fallback(
@@ -654,6 +880,13 @@ def explain_with_llm(
             "upload_consent_required",
             redacted,
             needs_upload_confirmation=True,
+            confirmation_request=build_confirmation_request(
+                "upload_redacted_report",
+                reason_code="upload_consent_required",
+                preview={"redaction_level": effective_redaction_level},
+            ),
+            plan_steps=plan_steps,
+            observations=observations,
         )
 
     active_provider = str(llm_settings.get("provider") or "custom_openai_compatible")
@@ -740,7 +973,16 @@ def explain_with_llm(
             data["image_redaction_audit"] = image_redaction_audit
         data["redaction_audit"] = redacted["redaction_audit"]
         data["redacted_report_hash"] = redacted["redacted_report_hash"]
+        data["plan_steps"] = plan_steps
+        data["observations"] = observations
         return data
 
     reason = fallback_chain[-1]["reason_code"] if fallback_chain else "missing_api_key"
-    return _fallback(report, f"provider_error: {reason}", redacted, fallback_chain=fallback_chain)
+    return _fallback(
+        report,
+        f"provider_error: {reason}",
+        redacted,
+        fallback_chain=fallback_chain,
+        plan_steps=plan_steps,
+        observations=observations,
+    )

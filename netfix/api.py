@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from netfix import agent_tools, deepseek_sidecar, dashboard_state, keychain, llm_budget, llm_explain, llm_provider, logs, network_monitor_service, proxy_bridge, proxy_monitor_service, residential_proxy, services, settings, user_facing_errors
+from netfix import agent_session, agent_tools, deepseek_sidecar, dashboard_state, keychain, llm_budget, llm_explain, llm_provider, logs, memory, network_monitor_service, proxy_bridge, proxy_monitor_service, residential_proxy, services, settings, symptom_intake, user_facing_errors
 from netfix.constants import JOURNAL_DIR, REPO_ROOT, RULES_DIR, VERSION
 from netfix.detect import detect_environment, get_core
 from netfix.fix_engine import FixEngine
@@ -38,6 +38,13 @@ _VISION_ADAPTER_READY_STATUSES = {
 LLM_CHAIN_TEST_CONFIRMATION = "TEST_LLM_CHAIN"
 LLM_PROVIDER_TEST_CONFIRMATION = "TEST_LLM_PROVIDER"
 SYSTEM_FIX_CONFIRMATION = "APPLY_SYSTEM_FIX"
+
+# Process-singleton conversation + memory stores. ``base_dir`` defaults to
+# JOURNAL_DIR so production callers get the canonical location, while tests
+# can ``patch`` ``netfix.api._session_store``/``_memory_store`` to point at
+# ``tmp_path``. Both stores keep all writes under JOURNAL_DIR.
+_SESSION_STORE: Optional["agent_session.AgentSessionStore"] = None
+_MEMORY_STORE: Optional["memory.MemoryStore"] = None
 _TINY_PNG_DATA_URL = (
     "data:image/png;base64,"
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
@@ -46,6 +53,56 @@ _TINY_PNG_DATA_URL = (
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _session_store() -> "agent_session.AgentSessionStore":
+    """Return the process-wide AgentSessionStore, creating it on first use."""
+    global _SESSION_STORE
+    if _SESSION_STORE is None:
+        _SESSION_STORE = agent_session.AgentSessionStore()
+    return _SESSION_STORE
+
+
+def _memory_store() -> "memory.MemoryStore":
+    """Return the process-wide MemoryStore, creating it on first use."""
+    global _MEMORY_STORE
+    if _MEMORY_STORE is None:
+        _MEMORY_STORE = memory.MemoryStore()
+    return _MEMORY_STORE
+
+
+def _split_chat_sessions_path(path: str) -> Tuple[str, str]:
+    """Parse /chat/sessions[/{id}[/turns|/decisions|/confirm|/concepts/{cid}]].
+
+    Returns (suffix, session_id_or_empty). ``suffix`` is the remaining part of
+    the URL path after ``/chat/sessions``. Returns (path, "") when the URL does
+    not match the chat-sessions routing.
+    """
+    prefix = "/chat/sessions"
+    if not path.startswith(prefix):
+        return path, ""
+    remainder = path[len(prefix):]
+    if not remainder:
+        return "", ""
+    if not remainder.startswith("/"):
+        return path, ""
+    parts = remainder.lstrip("/").split("/")
+    session_id = parts[0] if parts else ""
+    suffix = "/".join(parts[1:])
+    return suffix, session_id
+
+
+def _split_memory_path(path: str) -> Tuple[str, str]:
+    """Parse /memory[/...]. Returns (action, query) for matched memory paths."""
+    prefix = "/memory"
+    if not path.startswith(prefix):
+        return path, ""
+    remainder = path[len(prefix):]
+    if not remainder:
+        return "", ""
+    if not remainder.startswith("/"):
+        return path, ""
+    return remainder.lstrip("/").split("/", 1)[0], ""
 
 
 def _write_api_token_file() -> Path:
@@ -723,6 +780,24 @@ def _record_startup_bridge_check() -> Dict[str, Any]:
         return startup_check
 
 
+# api_key 明文前缀 → 更匹配的供应商预设，仅用于保存时的非阻断提示。
+_LLM_API_KEY_PREFIX_HINTS = {
+    "sk-kimi-": "kimi_coding",
+}
+
+
+def _llm_api_key_prefix_warning(provider: str, api_key: str) -> str:
+    """Return a non-blocking hint when the pasted key prefix fits another preset."""
+    if not api_key:
+        return ""
+    for prefix, suggested in _LLM_API_KEY_PREFIX_HINTS.items():
+        if api_key.startswith(prefix) and provider != suggested:
+            preset = llm_provider.get_provider(suggested) or {}
+            label = str(preset.get("label") or suggested)
+            return f"检测到的 AI 密钥以 {prefix} 开头，更像「{label}」的 key；当前供应商可能无法使用，建议在供应商列表改选「{label}」。"
+    return ""
+
+
 def _llm_providers_with_status() -> List[Dict[str, Any]]:
     """Return provider presets plus local readiness metadata."""
     llm_settings = settings.load_settings().get("llm", {})
@@ -1088,6 +1163,14 @@ def _load_latest_report() -> Tuple[int, Any]:
         return 500, {"ok": False, "error": f"failed to read report: {exc}"}
 
 
+def _load_latest_report_payload() -> Optional[Dict[str, Any]]:
+    """Return the latest report dict (or None) without the (status, payload) tuple."""
+    status, payload = _load_latest_report()
+    if status == 200 and isinstance(payload, dict):
+        return payload
+    return None
+
+
 def _load_current_mac_report() -> Tuple[int, Any]:
     """Load the report that represents the current Mac, not a later subset check."""
     current_mac_path = JOURNAL_DIR / "current_mac_report.json"
@@ -1368,6 +1451,48 @@ def _run_fresh_report_after_fix(fix_id: str, timeout: int) -> Dict[str, Any]:
     """Run a follow-up report that covers the diagnostic the fix is meant to change."""
     command = "doctor" if fix_id == "disable-ipv6" else "codex"
     return run_cli([command, "--json", "--timeout", str(timeout)], timeout=timeout)
+
+
+def _diff_report_for_verify(before: Optional[Dict[str, Any]], after: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compare two reports and surface only the changes the user cares about."""
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return {"available": False, "reason": "missing_report_snapshot"}
+    before_diag = {d.get("name"): d for d in before.get("diagnostics", []) if isinstance(d, dict)}
+    after_diag = {d.get("name"): d for d in after.get("diagnostics", []) if isinstance(d, dict)}
+    changes: List[Dict[str, Any]] = []
+    for name in set(before_diag) | set(after_diag):
+        before_status = before_diag.get(name, {}).get("status")
+        after_status = after_diag.get(name, {}).get("status")
+        if before_status != after_status:
+            changes.append({
+                "diagnostic": name,
+                "before": before_status,
+                "after": after_status,
+                "improved": _status_rank(after_status) < _status_rank(before_status),
+            })
+    before_causes = [c.get("id") for c in before.get("root_causes", []) if isinstance(c, dict)]
+    after_causes = [c.get("id") for c in after.get("root_causes", []) if isinstance(c, dict)]
+    resolved_causes = [c for c in before_causes if c not in after_causes]
+    return {
+        "available": True,
+        "diagnostic_changes": changes,
+        "resolved_root_causes": resolved_causes,
+        "before_severity": _report_overall_severity(before),
+        "after_severity": _report_overall_severity(after),
+    }
+
+
+def _status_rank(status: Optional[str]) -> int:
+    return {"ok": 0, "warn": 1, "fail": 2}.get(status or "", -1)
+
+
+def _report_overall_severity(report: Dict[str, Any]) -> str:
+    diag = report.get("diagnostics", []) or []
+    if any(isinstance(d, dict) and d.get("status") == "fail" for d in diag):
+        return "fail"
+    if any(isinstance(d, dict) and d.get("status") == "warn" for d in diag):
+        return "warn"
+    return "ok"
 
 
 def _strip_internal_secrets(value: Any) -> Any:
@@ -1783,6 +1908,36 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                     return 200, {"ok": True, "profile_id": profile_id, "last_check": profile.get("last_check")}
             return 404, {"ok": False, "error": "profile not found"}
 
+        # /chat/sessions — list & read endpoints
+        if path == "/chat/sessions":
+            return 200, {"ok": True, "sessions": _session_store().list_summaries()}
+        chat_suffix, chat_session_id = _split_chat_sessions_path(path)
+        if chat_session_id and not chat_suffix:
+            session = _session_store().get(chat_session_id)
+            if session is None:
+                return 404, {"ok": False, "error": "session not found"}
+            return 200, {"ok": True, "session": session}
+
+        # /memory/recent?scenario_id=...&limit=...
+        memory_action, _memory_q = _split_memory_path(path)
+        if memory_action == "recent":
+            from urllib.parse import parse_qs
+            try:
+                qs = parse_qs(urlparse(self.path).query)
+            except Exception:
+                qs = {}
+            scenario_id = (qs.get("scenario_id") or [""])[0]
+            try:
+                limit = int((qs.get("limit") or ["10"])[0])
+            except (TypeError, ValueError):
+                limit = 10
+            return 200, {
+                "ok": True,
+                "scenario_id": scenario_id,
+                "limit": limit,
+                "entries": _memory_store().find_recent(scenario_id=scenario_id or None, limit=limit),
+            }
+
         return 404, {"ok": False, "error": "not found"}
 
     def _route_post(self, path: str) -> Tuple[int, Any]:
@@ -1821,6 +1976,37 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                 return 400, {"ok": False, "error": self._body_error_message()}
             return _execute_confirmed_fix(body)
 
+        if path == "/fixes/verify":
+            body = self._read_body()
+            if body is None:
+                return 400, {"ok": False, "error": self._body_error_message()}
+            fix_id = str(body.get("fix_id") or body.get("issue") or "").strip()
+            if not fix_id:
+                return 400, {"ok": False, "error": "fix_id is required", "reason_code": "missing_fix_id"}
+            try:
+                timeout = max(15, min(int(body.get("timeout") or 60), 180))
+            except (TypeError, ValueError):
+                timeout = 60
+            before = body.get("before_report")
+            if not isinstance(before, dict):
+                before = _load_latest_report_payload()
+            report = _run_fresh_report_after_fix(fix_id, timeout)
+            if not report.get("ok"):
+                return 502, {
+                    "ok": False,
+                    "error": report.get("error") or "post-fix verification failed",
+                    "fix_id": fix_id,
+                }
+            after_payload = report.get("result") or report
+            diff = _diff_report_for_verify(before if isinstance(before, dict) else None,
+                                           after_payload if isinstance(after_payload, dict) else None)
+            return 200, {
+                "ok": True,
+                "fix_id": fix_id,
+                "report": after_payload,
+                "diff": diff,
+            }
+
         if path.startswith("/jobs/") and path.endswith("/cancel"):
             job_id = path[len("/jobs/"):-len("/cancel")]
             if not job_id:
@@ -1829,6 +2015,117 @@ class APIRequestHandler(BaseHTTPRequestHandler):
             if job is None:
                 return 404, {"ok": False, "error": "job not found"}
             return 200, {**job, "ok": True}
+
+        # /chat/sessions and /memory/* do not require a JSON body, but the
+        # rest of the POST handlers below do — we read on demand per route.
+
+        if path == "/chat/sessions":
+            body = self._read_body() or {}
+            if not isinstance(body, dict):
+                body = {}
+            try:
+                session_id = _session_store().create(
+                    session_id=str(body.get("session_id") or "") or None,
+                    scenario_id=str(body.get("scenario_id") or ""),
+                    root_cause_id=str(body.get("root_cause_id") or ""),
+                    symptom_text=str(body.get("symptom_text") or ""),
+                    fingerprint=str(body.get("fingerprint") or ""),
+                    status=str(body.get("status") or "active"),
+                    metadata=body.get("metadata") if isinstance(body.get("metadata"), dict) else None,
+                )
+            except FileExistsError as exc:
+                return 409, {"ok": False, "error": str(exc), "reason_code": "session_id_conflict"}
+            return 200, {"ok": True, "session_id": session_id}
+
+        chat_suffix, chat_session_id = _split_chat_sessions_path(path)
+        if chat_session_id:
+            body = self._read_body() or {}
+            if not isinstance(body, dict):
+                body = {}
+            store = _session_store()
+            if chat_suffix == "turns":
+                turn = body.get("turn") if isinstance(body.get("turn"), dict) else {k: body.get(k) for k in (
+                    "turn_id", "index", "role", "created_at", "question",
+                    "plan", "tool_calls", "observations", "conclusion",
+                    "answer", "confirmation_request",
+                ) if k in body}
+                try:
+                    saved = store.append_turn(chat_session_id, turn or {})
+                except FileNotFoundError:
+                    return 404, {"ok": False, "error": "session not found"}
+                return 200, {"ok": True, "turn": saved}
+            if chat_suffix == "confirm":
+                outcome = str(body.get("outcome") or "").strip().lower()
+                if outcome not in {"accepted", "rejected", "postponed"}:
+                    return 400, {"ok": False, "error": "outcome must be accepted, rejected, or postponed"}
+                decision = {
+                    "category": str(body.get("category") or "manual_ack"),
+                    "outcome": outcome,
+                    "action_id": str(body.get("action_id") or ""),
+                    "confirmation": str(body.get("confirmation") or ""),
+                    "note": str(body.get("note") or ""),
+                }
+                try:
+                    saved = store.record_decision(chat_session_id, decision)
+                except FileNotFoundError:
+                    return 404, {"ok": False, "error": "session not found"}
+                except ValueError as exc:
+                    return 400, {"ok": False, "error": str(exc)}
+                return 200, {"ok": True, "decision": saved, "status": store.get(chat_session_id).get("status")}
+            if chat_suffix == "decisions":
+                if not isinstance(body, dict):
+                    return 400, {"ok": False, "error": "body must be a dict"}
+                try:
+                    saved = store.record_decision(chat_session_id, body)
+                except FileNotFoundError:
+                    return 404, {"ok": False, "error": "session not found"}
+                except ValueError as exc:
+                    return 400, {"ok": False, "error": str(exc)}
+                return 200, {"ok": True, "decision": saved}
+            if chat_suffix.startswith("concepts/"):
+                concept_id = chat_suffix[len("concepts/"):]
+                if not concept_id:
+                    return 400, {"ok": False, "error": "concept_id is required"}
+                try:
+                    explained = store.mark_concept_explained(chat_session_id, concept_id)
+                except FileNotFoundError:
+                    return 404, {"ok": False, "error": "session not found"}
+                return 200, {"ok": True, "explained_concepts": explained}
+
+        # /memory/decay, /memory/append — also work without a forced body
+        memory_action, _memory_q = _split_memory_path(path)
+        if memory_action == "append":
+            body = self._read_body() or {}
+            if not isinstance(body, dict):
+                body = {}
+            try:
+                entry = _memory_store().append_entry(
+                    date=body.get("date") or _utc_now(),
+                    scenario_id=str(body.get("scenario_id") or ""),
+                    root_cause_id=str(body.get("root_cause_id") or ""),
+                    fingerprint=str(body.get("fingerprint") or ""),
+                    action_id=str(body.get("action_id") or ""),
+                    verify_result=str(body.get("verify_result") or "unknown"),
+                    symptom=str(body.get("symptom") or ""),
+                    target=str(body.get("target") or ""),
+                    learning=str(body.get("learning") or ""),
+                    confidence=float(body.get("confidence") or 0.0),
+                )
+            except Exception as exc:
+                return 400, {"ok": False, "error": str(exc)}
+            return 200, {"ok": True, "entry": entry}
+        if memory_action == "decay":
+            from urllib.parse import parse_qs
+            try:
+                qs = parse_qs(urlparse(self.path).query)
+            except Exception:
+                qs = {}
+            try:
+                days = int((qs.get("days") or ["30"])[0])
+            except (TypeError, ValueError):
+                days = 30
+            removed = _memory_store().decay_older_than(days=days)
+            return 200, {"ok": True, "removed": removed, "days": days}
 
         body = self._read_body()
         if body is None:
@@ -1847,7 +2144,11 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                 payload["api_key_account"] = account
                 payload["api_key_set"] = True
             saved = settings.update_llm_settings(payload)
-            return 200, {"ok": True, "settings": saved}
+            response = {"ok": True, "settings": saved}
+            warning = _llm_api_key_prefix_warning(provider, api_key)
+            if warning:
+                response["warning"] = warning
+            return 200, response
 
         if path == "/settings/privacy":
             saved = settings.update_privacy_settings(body)
@@ -1950,6 +2251,27 @@ class APIRequestHandler(BaseHTTPRequestHandler):
             )
             return (200 if result.get("ok") else 400), result
 
+        if path == "/symptom/intake":
+            text = body.get("text", "")
+            if not isinstance(text, str):
+                return 400, {
+                    "ok": False,
+                    "error": "text must be a string",
+                    "reason_code": "invalid_intake_text",
+                }
+            if len(text) > llm_explain.MAX_QUESTION_CHARS:
+                return 400, {
+                    "ok": False,
+                    "error": f"text must be at most {llm_explain.MAX_QUESTION_CHARS} characters",
+                    "reason_code": "intake_text_too_long",
+                }
+            try:
+                limit = int(body.get("limit") or 3)
+            except (TypeError, ValueError):
+                limit = 3
+            result = symptom_intake.intake_symptoms(text, limit=max(1, min(limit, 10)))
+            return 200, {"ok": True, "result": result}
+
         if path == "/explain_llm":
             mode = body.get("mode", "explain")
             if not isinstance(mode, str) or mode not in {"explain", "image_question"}:
@@ -1988,6 +2310,17 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                     "error": "history 必须是 [{\"role\": \"user\"|\"assistant\", \"content\": \"...\"}] 这样的消息列表",
                     "reason_code": "invalid_llm_history",
                 }
+            intake_hint = body.get("intake_hint")
+            if intake_hint is not None and not isinstance(intake_hint, dict):
+                return 400, {
+                    "ok": False,
+                    "error": "intake_hint must be a dict with matched_symptoms / suggested_tools",
+                    "reason_code": "invalid_intake_hint",
+                }
+            # 客户端没有显式传 intake_hint 时，根据 question 自动跑一次 symptom_intake
+            # 作为 plan/observe 的本地种子；LLM 不可用也能让 plan 卡片先出来。
+            if intake_hint is None and question:
+                intake_hint = symptom_intake.intake_symptoms(question, limit=3)
             status, loaded = _load_current_mac_report()
             if status == 404:
                 # 没有诊断报告时降级为通用网络问答，由 LLM 引导用户先跑诊断。
@@ -2005,8 +2338,40 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                 allow_fallback=body.get("allow_fallback") if isinstance(body.get("allow_fallback"), bool) else None,
                 image_inputs=body.get("images") if isinstance(body.get("images"), list) else None,
                 history=history,
+                intake_hint=intake_hint,
             )
-            return 200, {"ok": True, "result": result}
+            # Optional session persistence — opt-in via ``session_id``; we
+            # never auto-create a session, callers must explicit POST
+            # /chat/sessions first. The user turn + assistant answer get
+            # persisted as two turns so the SwiftUI / MCP client can replay
+            # the conversation later.
+            session_id = str(body.get("session_id") or "").strip()
+            session_persisted: Optional[Dict[str, Any]] = None
+            session_error: Optional[str] = None
+            if session_id:
+                try:
+                    store = _session_store()
+                    if store.get(session_id) is None:
+                        session_error = f"session not found: {session_id}"
+                    else:
+                        store.append_turn(session_id, {
+                            "role": "user",
+                            "question": question,
+                            "plan": (intake_hint or {}).get("suggested_tools") if isinstance(intake_hint, dict) else None,
+                        })
+                        store.append_turn(session_id, {
+                            "role": "assistant",
+                            "answer": result,
+                        })
+                        session_persisted = {"session_id": session_id, "turns_appended": 2}
+                except Exception as exc:
+                    session_error = str(exc)
+            response: Dict[str, Any] = {"ok": True, "result": result}
+            if session_persisted is not None:
+                response["session_persisted"] = session_persisted
+            if session_error is not None:
+                response["session_error"] = session_error
+            return 200, response
 
         if path == "/proxy/parse":
             parsed = residential_proxy.parse_proxy_input(body)
@@ -2337,6 +2702,38 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                 return
             status, body = routed
             _send_json(self, status, body)
+        except Exception as exc:
+            _send_json(self, 500, {"ok": False, "error": f"internal error: {exc}"})
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        try:
+            path = urlparse(self.path).path
+            if not self._is_safe_browser_origin():
+                _send_json(self, 403, {"ok": False, "error": "cross-origin local API request rejected"})
+                return
+            if not self._has_valid_api_token():
+                _send_json(self, 403, {"ok": False, "error": "missing or invalid local API token"})
+                return
+
+            if path == "/chat/sessions":
+                _send_json(self, 400, {"ok": False, "error": "DELETE /chat/sessions is not supported; specify a session_id"})
+                return
+
+            chat_suffix, chat_session_id = _split_chat_sessions_path(path)
+            if chat_session_id and not chat_suffix:
+                store = _session_store()
+                existed = store.get(chat_session_id) is not None
+                removed = store.delete(chat_session_id)
+                status = 200 if removed else 404
+                if not existed and not removed:
+                    return _send_json(self, 404, {"ok": False, "error": "session not found"})
+                return _send_json(self, status, {"ok": True, "removed": removed})
+
+            if path == "/memory":
+                removed = _memory_store().clear_all()
+                return _send_json(self, 200, {"ok": True, "removed": removed})
+
+            return _send_json(self, 404, {"ok": False, "error": "not found"})
         except Exception as exc:
             _send_json(self, 500, {"ok": False, "error": f"internal error: {exc}"})
 

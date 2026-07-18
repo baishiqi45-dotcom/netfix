@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildPopover() {
         let popover = NSPopover()
-        popover.contentSize = NSSize(width: 460, height: 500)
+        popover.contentSize = NSSize(width: 460, height: 640)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(
             rootView: RootView(
@@ -124,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showSettings()
     }
 
-    /// 菜单栏「问 AI…」：先展开面板，再通知仪表盘打开问 AI 面板（无新鲜报告时按通用问答）。
+    /// 菜单栏「问 AI…」：先展开面板，再通知仪表盘滚动到常驻问 AI 对话区并聚焦输入框（无新鲜报告时按通用问答）。
     @objc func showAIQuestion() {
         if let popover = popover, let button = statusItem?.button, !popover.isShown {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
@@ -520,6 +520,6 @@ extension AppDelegate: NSMenuDelegate {
 }
 
 extension Notification.Name {
-    /// 菜单栏「问 AI…」点击后广播，仪表盘收到后打开问 AI 面板。
+    /// 菜单栏「问 AI…」点击后广播，仪表盘收到后滚动到常驻问 AI 对话区并聚焦输入框。
     static let netfixShowAIQuestion = Notification.Name("netfix.showAIQuestion")
 }

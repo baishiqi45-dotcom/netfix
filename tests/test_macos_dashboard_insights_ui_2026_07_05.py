@@ -78,7 +78,7 @@ def test_dashboard_and_menu_do_not_guess_green_or_expose_route_jargon():
     ]
 
     assert 'case "external_system_proxy": return "由其他 App 管理"' in dashboard
-    assert 'contentSize = NSSize(width: 460, height: 500)' in app_delegate
+    assert 'contentSize = NSSize(width: 460, height: 640)' in app_delegate
     assert '.frame(minWidth: 420, idealWidth: 460, minHeight: 440)' in dashboard
     assert 'case .unknown:\n            color = .systemGray' in app_delegate
     assert "backend.isReady ? .systemGreen : .systemYellow" not in app_delegate

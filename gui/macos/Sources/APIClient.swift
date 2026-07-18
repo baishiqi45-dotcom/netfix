@@ -622,6 +622,142 @@ actor APIClient {
         }
         throw APIError.runFailed(response.error ?? "未知错误")
     }
+
+    // MARK: - P1-A / P1-B: 多轮对话 session / 主动告警 / 记忆
+
+    /// 创建或延续一个 chat session；同一 symptom 下继续问答会复用同一 session。
+    func createSession(symptomID: String? = nil, title: String? = nil) async throws -> ChatSessionDetailResponse {
+        var body: [String: Any] = [:]
+        if let symptomID, !symptomID.isEmpty { body["symptom_id"] = symptomID }
+        if let title, !title.isEmpty { body["title"] = title }
+        return try await post(path: "chat/sessions", body: body, timeout: 20)
+    }
+
+    /// 列出最近的 chat session。
+    func listSessions(limit: Int = 20) async throws -> ChatSessionListResponse {
+        try await get(path: "chat/sessions?limit=\(limit)", timeout: 20)
+    }
+
+    /// 取单条 session 和它的 turns。
+    func getSession(sessionID: String) async throws -> ChatSessionDetailResponse {
+        try await get(path: "chat/sessions/\(sessionID)", timeout: 20)
+    }
+
+    /// 把一轮 user/assistant 文本追加到 session。
+    func appendTurn(
+        sessionID: String,
+        role: String,
+        content: String,
+        planSteps: [ChatStep]? = nil,
+        observations: [ChatObservation]? = nil,
+        rootCauseID: String? = nil,
+        keyDiagnostics: [String]? = nil,
+        providerUsed: String? = nil,
+        redactedReportHash: String? = nil
+    ) async throws -> ChatSessionActionResponse {
+        var body: [String: Any] = [
+            "role": role,
+            "content": content,
+        ]
+        if let planSteps, !planSteps.isEmpty {
+            body["plan_steps"] = planSteps.map { step -> [String: Any] in
+                var dict: [String: Any] = ["tool": step.tool]
+                if let label = step.label { dict["label"] = label }
+                if let why = step.why { dict["why"] = why }
+                if let status = step.status { dict["status"] = status }
+                return dict
+            }
+        }
+        if let observations, !observations.isEmpty {
+            body["observations"] = observations.map { obs -> [String: Any] in
+                var dict: [String: Any] = ["fact": obs.fact]
+                if let confidence = obs.confidence { dict["confidence"] = confidence }
+                if let source = obs.source { dict["source"] = source }
+                return dict
+            }
+        }
+        if let rootCauseID, !rootCauseID.isEmpty {
+            body["root_cause_id"] = rootCauseID
+        }
+        if let keyDiagnostics, !keyDiagnostics.isEmpty {
+            body["key_diagnostics"] = keyDiagnostics
+        }
+        if let providerUsed, !providerUsed.isEmpty {
+            body["provider_used"] = providerUsed
+        }
+        if let redactedReportHash, !redactedReportHash.isEmpty {
+            body["redacted_report_hash"] = redactedReportHash
+        }
+        return try await post(path: "chat/sessions/\(sessionID)/turns", body: body, timeout: 20)
+    }
+
+    /// 用户对 confirmation_request 做出确认或拒绝。
+    func confirm(sessionID: String, turnID: String, decision: String, requestID: String? = nil) async throws -> ChatSessionActionResponse {
+        var body: [String: Any] = ["turn_id": turnID, "decision": decision]
+        if let requestID, !requestID.isEmpty { body["request_id"] = requestID }
+        return try await post(path: "chat/sessions/\(sessionID)/confirm", body: body, timeout: 20)
+    }
+
+    /// 标记某个概念已经被解释过（用于去重「又解释一次相同概念」）。
+    func markConceptExplained(sessionID: String, conceptKey: String) async throws -> ChatSessionActionResponse {
+        try await post(
+            path: "chat/sessions/\(sessionID)/concepts",
+            body: ["concept_key": conceptKey],
+            timeout: 20
+        )
+    }
+
+    /// 决定一个 proactive alert 是立即处理 / 这次忽略 / 永久关闭。
+    func decide(alertID: String, action: String, cooldownSeconds: Int? = nil) async throws -> ProactiveAlertListResponse {
+        var body: [String: Any] = ["action": action]
+        if let cooldownSeconds { body["cooldown_seconds"] = cooldownSeconds }
+        return try await postDecodingClientError(path: "alerts/\(alertID)/decide", body: body, timeout: 20)
+    }
+
+    /// 删除一个 chat session（前端「清空对话」按钮）。
+    func deleteSession(sessionID: String) async throws -> ChatSessionActionResponse {
+        try await postDecodingClientError(path: "chat/sessions/\(sessionID)/delete", body: [:], timeout: 20)
+    }
+
+    /// 拉取当前的主动告警。
+    func listProactiveAlerts(includeDismissed: Bool = false) async throws -> ProactiveAlertListResponse {
+        let suffix = includeDismissed ? "?include_dismissed=1" : ""
+        return try await get(path: "alerts\(suffix)", timeout: 20)
+    }
+
+    /// 关闭某条告警（用户主动忽略）。
+    func dismissAlert(alertID: String) async throws -> ProactiveAlertListResponse {
+        try await postDecodingClientError(path: "alerts/\(alertID)/dismiss", body: [:], timeout: 20)
+    }
+
+    /// 给某条告警设置冷却时间。
+    func cooldownAlert(alertID: String, seconds: Int) async throws -> ProactiveAlertListResponse {
+        try await postDecodingClientError(path: "alerts/\(alertID)/cooldown", body: ["seconds": seconds], timeout: 20)
+    }
+
+    /// 拉取长期记忆条目。
+    func listMemory(kind: String? = nil, limit: Int = 50) async throws -> MemoryListResponse {
+        var query = "?limit=\(limit)"
+        if let kind, !kind.isEmpty { query += "&kind=\(kind)" }
+        return try await get(path: "memory\(query)", timeout: 20)
+    }
+
+    /// 写入一条记忆（事实 / 偏好 / 忽略过的告警）。
+    func appendMemory(kind: String, summary: String, detail: String? = nil, reference: String? = nil, weight: Double = 1.0) async throws -> MemoryListResponse {
+        var body: [String: Any] = [
+            "memory_kind": kind,
+            "summary": summary,
+            "weight": weight,
+        ]
+        if let detail, !detail.isEmpty { body["detail"] = detail }
+        if let reference, !reference.isEmpty { body["reference"] = reference }
+        return try await post(path: "memory", body: body, timeout: 20)
+    }
+
+    /// 衰减某条记忆的权重（用于「这条记忆很久没用了」）。
+    func decayMemory(memoryID: String, factor: Double = 0.5) async throws -> MemoryListResponse {
+        try await postDecodingClientError(path: "memory/\(memoryID)/decay", body: ["factor": factor], timeout: 20)
+    }
 }
 
 enum APIError: Error, Equatable {
@@ -662,7 +798,7 @@ extension APIError: LocalizedError {
         if lower.contains("cloud ai explanation is disabled") || lower.contains("llm_disabled") {
             return "AI 还没启用：打开设置里的 AI，启用后填写 AI 密钥并保存测试。"
         }
-        if lower.contains("auth_failed") || lower.contains("unauthorized") || lower.contains("forbidden") || lower.contains("invalid api key") {
+        if lower.contains("auth_failed") || lower.contains("unauthorized") || lower.contains("forbidden") || lower.contains("invalid api key") || lower.contains("invalid authentication") {
             return "AI 密钥验证失败：请检查从供应商后台复制的内容是否完整，保存后再测试。"
         }
         if lower.contains("model_not_found") || lower.contains("model") && lower.contains("not found") {

@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "gui" / "macos" / "Sources" / "Views" / "DashboardView.swift"
+AI_CHAT = ROOT / "gui" / "macos" / "Sources" / "Views" / "AIChatView.swift"
 API_CLIENT = ROOT / "gui" / "macos" / "Sources" / "APIClient.swift"
 MODELS = ROOT / "gui" / "macos" / "Sources" / "Models" / "Report.swift"
 HEALTH_MONITOR = ROOT / "gui" / "macos" / "Sources" / "Monitoring" / "HealthMonitor.swift"
@@ -33,6 +34,7 @@ def test_macos_dashboard_uses_cancellable_async_jobs_for_read_only_checks():
 
 def test_macos_mutating_fix_paths_still_use_confirmed_synchronous_calls():
     dashboard = DASHBOARD.read_text(encoding="utf-8")
+    chat = AI_CHAT.read_text(encoding="utf-8")
     api_client = API_CLIENT.read_text(encoding="utf-8")
 
     assert "func executeAction(_ action: Action) async" in dashboard
@@ -52,9 +54,9 @@ def test_macos_mutating_fix_paths_still_use_confirmed_synchronous_calls():
     assert 'body["confirmation"] = "APPLY_SYSTEM_FIX"' in api_client
     assert '"confirmation"] = "ROLLBACK_PROXY_PROFILE"' in api_client
     assert "让 Netfix 处理这个问题？" in dashboard
-    # 「问 AI」面板现在会把 AI 回答里的 manual_steps 渲染为只读步骤列表（不执行），
+    # 常驻「问 AI」对话区（AIChatView）会把 AI 回答里的 manual_steps 渲染为只读步骤列表（不执行），
     # 修复执行仍全部走上面的 confirmed 同步路径。
-    assert "手动步骤" in dashboard
+    assert "手动步骤" in chat
 
 
 def test_proxy_save_uses_decoding_client_error_for_human_format_errors():

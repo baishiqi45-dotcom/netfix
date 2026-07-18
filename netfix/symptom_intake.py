@@ -30,6 +30,33 @@ _EXTRA_KEYWORDS: Dict[str, List[str]] = {
     "ip-reputation-risk": ["ip 风险", "数据中心", "高风险"],
     "proxy-auth-required": ["代理认证", "要密码"],
     "local-wifi-issue": ["网速慢", "很慢", "网络慢", "丢包", "延迟高", "卡顿", "转圈"],
+    "cli-no-proxy": [
+        "codex cli 连不上",
+        "命令行连不上",
+        "终端连不上",
+        "浏览器可以",
+        "浏览器能开",
+        "cli 不行",
+        "curl 不行",
+        "终端代理",
+        "git 代理",
+        "export proxy",
+    ],
+    "network-switch": [
+        "换网络",
+        "换 wifi",
+        "换 wi-fi",
+        "切换 wifi",
+        "切换网络",
+        "换了网络",
+        "换了 wifi",
+        "回家",
+        "回公司",
+        "到了公司",
+        "换路由器",
+        "换网了",
+        "代理全乱",
+    ],
 }
 
 # 症状规则里的诊断 id → 现有 MCP 工具。

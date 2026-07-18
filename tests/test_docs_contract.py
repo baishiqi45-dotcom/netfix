@@ -123,6 +123,7 @@ def test_agents_doc_lists_all_confirmation_phrases():
         "RESTART_STALE_PROXY_BRIDGE",
         "IMPORT_DEEPSEEK_SIDECAR_KEY",
         "DELETE_NETFIX_LOCAL_DATA",
+        "DELETE_NETFIX_LOCAL_DATA",
     ]
     missing = [phrase for phrase in required if phrase not in text]
     assert not missing, f"AGENTS.md confirmation table missing: {missing}"

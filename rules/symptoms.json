@@ -25,6 +25,7 @@
     },
     {
       "id": "proxy-auth-failure",
+      "_todo": "duplicate of proxy-auth-required; consolidate root_causes before P1 release",
       "keywords": ["407", "Proxy Authentication Required", "authentication failed"],
       "diagnostics": ["proxy_core_status", "codex_api_via_proxy"],
       "root_causes": [
@@ -200,6 +201,7 @@
     },
     {
       "id": "proxy-auth-required",
+      "_todo": "keep as canonical entry; proxy-auth-failure should merge into this one",
       "keywords": ["407", "Proxy Authentication Required"],
       "diagnostics": ["proxy_auth_check"],
       "root_causes": [
@@ -223,6 +225,34 @@
         "靠近路由器或切换到 5GHz 频段",
         "重启路由器",
         "检查是否有其他设备占用大量带宽"
+      ]
+    },
+    {
+      "id": "cli-no-proxy",
+      "keywords": ["codex cli", "命令行", "terminal", "终端", "curl", "cli proxy"],
+      "diagnostics": ["codex_api_direct", "proxy_core_status", "system_proxy_state"],
+      "root_causes": [
+        {"id": "cli-no-env-proxy", "description": "终端进程没读到系统代理环境变量，浏览器可以但 CLI 不行", "confidence": 0.85}
+      ],
+      "fixes": [],
+      "manual_steps": [
+        "在代理客户端里打开「为终端设置代理」",
+        "或在 ~/.zshrc / ~/.zprofile 里 export ALL_PROXY=socks5h://127.0.0.1:10808",
+        "新开一个终端窗口再跑 Codex CLI"
+      ]
+    },
+    {
+      "id": "network-switch",
+      "keywords": ["换网络", "切换wifi", "切换 wi-fi", "回公司", "回家", "换路由", "换了网络", "换网了"],
+      "diagnostics": ["system_proxy_state", "gateway", "proxy_core_status"],
+      "root_causes": [
+        {"id": "network-baseline-drift", "description": "切换网络后系统代理/PAC/IPv6 还停留在上一个网络，导致两边都不对", "confidence": 0.8}
+      ],
+      "fixes": ["reset-system-proxy"],
+      "manual_steps": [
+        "在代理客户端里点「重启核心」",
+        "在系统设置里关闭 PAC / 自动代理",
+        "把当前 Wi-Fi 的 IPv6 配置改成「仅本地链接」"
       ]
     }
   ],
