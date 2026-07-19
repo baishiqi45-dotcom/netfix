@@ -923,4 +923,63 @@ final class NetfixTests: XCTestCase {
         XCTAssertFalse(presentation.egressLabel.contains("public_ipv4_hash"))
         XCTAssertFalse(presentation.egressLabel.contains("unknown"))
     }
+
+    /// P1-A.3: 恢复历史会话时，后端 turns 要能映射回 user 提问 + assistant 回答的对话轮次。
+    func testChatTurnMappingRestoresConversation() {
+        func turn(
+            _ id: String,
+            role: String,
+            content: String,
+            planSteps: [ChatStep]? = nil,
+            observations: [ChatObservation]? = nil,
+            providerUsed: String? = nil
+        ) -> ChatTurn {
+            ChatTurn(
+                turnID: id,
+                sessionID: "s1",
+                role: role,
+                content: content,
+                createdAt: "2026-07-18T00:00:00Z",
+                planSteps: planSteps,
+                observations: observations,
+                rootCauseID: nil,
+                rootCauseConfidence: nil,
+                keyDiagnostics: nil,
+                providerUsed: providerUsed,
+                redactedReportHash: nil,
+                attachments: nil
+            )
+        }
+
+        let turns = [
+            // 开头的孤立 assistant（没有对应提问）也要保留
+            turn("t0", role: "assistant", content: "补充：刚才的检查已过期。"),
+            turn("t1", role: "user", content: "家里网速很慢"),
+            turn(
+                "t2",
+                role: "assistant",
+                content: "检测发现 DNS 解析偏慢。",
+                planSteps: [ChatStep(tool: "dns_check", label: "查 DNS", why: nil, status: "ok")],
+                observations: [ChatObservation(fact: "DNS 平均 300ms", confidence: 0.8, source: "rule")],
+                providerUsed: "deepseek"
+            ),
+            turn("t3", role: "user", content: "下一步怎么处理？"),
+            // system 等非对话角色忽略
+            turn("t5", role: "system", content: "session created"),
+        ]
+
+        let conversation = DashboardViewModel.aiChatTurns(from: turns)
+
+        XCTAssertEqual(conversation.count, 3)
+        XCTAssertEqual(conversation[0].question, "")
+        XCTAssertEqual(conversation[0].result?.explanation, "补充：刚才的检查已过期。")
+        XCTAssertEqual(conversation[1].question, "家里网速很慢")
+        XCTAssertEqual(conversation[1].result?.explanation, "检测发现 DNS 解析偏慢。")
+        XCTAssertEqual(conversation[1].result?.source, "llm")
+        XCTAssertEqual(conversation[1].result?.planSteps?.first?.tool, "dns_check")
+        XCTAssertEqual(conversation[1].result?.observations?.first?.fact, "DNS 平均 300ms")
+        // 还没有回答的提问保持 result == nil，和发出等待中的轮次一致
+        XCTAssertEqual(conversation[2].question, "下一步怎么处理？")
+        XCTAssertNil(conversation[2].result)
+    }
 }

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from netfix import agent_session, agent_tools, deepseek_sidecar, dashboard_state, keychain, llm_budget, llm_explain, llm_provider, logs, memory, network_monitor_service, proxy_bridge, proxy_monitor_service, residential_proxy, services, settings, symptom_intake, user_facing_errors
+from netfix import agent_session, agent_tools, deepseek_sidecar, dashboard_state, keychain, llm_budget, llm_explain, llm_provider, logs, memory, network_monitor_service, proactive_alerts, proxy_bridge, proxy_monitor_service, residential_proxy, services, settings, symptom_intake, user_facing_errors
 from netfix.constants import JOURNAL_DIR, REPO_ROOT, RULES_DIR, VERSION
 from netfix.detect import detect_environment, get_core
 from netfix.fix_engine import FixEngine
@@ -103,6 +103,78 @@ def _split_memory_path(path: str) -> Tuple[str, str]:
     if not remainder.startswith("/"):
         return path, ""
     return remainder.lstrip("/").split("/", 1)[0], ""
+
+
+def _split_alerts_path(path: str) -> Tuple[str, str]:
+    """Parse /alerts[/{alert_id}[/{action}]]. Returns (action, alert_id).
+
+    Follows the same convention as ``_split_chat_sessions_path``: ``action``
+    is the remainder after the alert id (``decide`` / ``dismiss`` /
+    ``cooldown``), empty when the URL is just ``/alerts`` or
+    ``/alerts/{alert_id}``.
+    """
+    prefix = "/alerts"
+    if not path.startswith(prefix):
+        return path, ""
+    remainder = path[len(prefix):]
+    if not remainder:
+        return "", ""
+    if not remainder.startswith("/"):
+        return path, ""
+    parts = remainder.lstrip("/").split("/")
+    alert_id = parts[0] if parts else ""
+    action = "/".join(parts[1:])
+    return action, alert_id
+
+
+def _iso_utc(ts: Any) -> Optional[str]:
+    """Epoch seconds → ISO8601 UTC string; None when missing/unparseable."""
+    if ts is None:
+        return None
+    try:
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def _alert_to_api_dict(alert: Dict[str, Any]) -> Dict[str, Any]:
+    """Serialize a stored proactive alert to the Swift client's ProactiveAlert shape."""
+    card = proactive_alerts.to_card(alert)
+    payload = alert.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    evidence = dict(payload)
+    evidence["summary"] = card.get("body", "")
+    return {
+        "alert_id": alert.get("alert_id", ""),
+        "alert_type": alert.get("alert_type", ""),
+        "severity": payload.get("severity"),
+        "headline": card.get("headline", ""),
+        "detail": card.get("body", ""),
+        "suggested_actions": [
+            button.get("id")
+            for button in card.get("buttons", [])
+            if isinstance(button, dict) and button.get("id")
+        ],
+        "evidence": evidence,
+        "created_at": _iso_utc(alert.get("triggered_at")),
+        "expires_at": _iso_utc(alert.get("expires_at")),
+        "dismissed": bool(alert.get("dismissed")),
+        "cooldown_until": _iso_utc(alert.get("cooldown_until")),
+    }
+
+
+def _alerts_list_payload(include_dismissed: bool = False) -> Dict[str, Any]:
+    """Build the shared ProactiveAlertListResponse payload for all /alerts routes."""
+    alerts = proactive_alerts.list_alerts(
+        active_only=not include_dismissed,
+        include_dismissed=include_dismissed,
+    )
+    return {
+        "ok": True,
+        "alerts": [_alert_to_api_dict(alert) for alert in alerts],
+        "schema_version": "proactive_alerts.v1",
+    }
 
 
 def _write_api_token_file() -> Path:
@@ -1938,6 +2010,16 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                 "entries": _memory_store().find_recent(scenario_id=scenario_id or None, limit=limit),
             }
 
+        # /alerts[?include_dismissed=1] — proactive alert list (Swift client contract)
+        if path == "/alerts":
+            from urllib.parse import parse_qs
+            try:
+                qs = parse_qs(urlparse(self.path).query)
+            except Exception:
+                qs = {}
+            include_dismissed = (qs.get("include_dismissed") or [""])[0] in {"1", "true", "yes"}
+            return 200, _alerts_list_payload(include_dismissed=include_dismissed)
+
         return 404, {"ok": False, "error": "not found"}
 
     def _route_post(self, path: str) -> Tuple[int, Any]:
@@ -2126,6 +2208,55 @@ class APIRequestHandler(BaseHTTPRequestHandler):
                 days = 30
             removed = _memory_store().decay_older_than(days=days)
             return 200, {"ok": True, "removed": removed, "days": days}
+
+        # /alerts/{alert_id}/dismiss|decide|cooldown — alert card actions; these
+        # endpoints only read/tag alert state, so no confirmation phrase applies.
+        alerts_action, alerts_alert_id = _split_alerts_path(path)
+        if alerts_alert_id:
+            if alerts_action == "dismiss":
+                self._read_body()  # consume the (empty) JSON body the client sends
+                if not proactive_alerts.dismiss_alert(alerts_alert_id):
+                    return 404, {"ok": False, "error": "alert not found"}
+                return 200, _alerts_list_payload()
+            if alerts_action == "decide":
+                body = self._read_body()
+                if body is None:
+                    return 400, {"ok": False, "error": self._body_error_message()}
+                action = str(body.get("action") or "").strip()
+                if not action:
+                    return 400, {"ok": False, "error": "action is required"}
+                if action == "remind_later":
+                    raw_cooldown = body.get("cooldown_seconds")
+                    try:
+                        cooldown_seconds = int(raw_cooldown) if raw_cooldown is not None else 1800
+                    except (TypeError, ValueError):
+                        return 400, {"ok": False, "error": "cooldown_seconds must be a positive integer"}
+                    if cooldown_seconds <= 0:
+                        return 400, {"ok": False, "error": "cooldown_seconds must be a positive integer"}
+                    if not proactive_alerts.set_cooldown(alerts_alert_id, cooldown_seconds):
+                        return 404, {"ok": False, "error": "alert not found"}
+                else:
+                    # "dismiss" itself and the business actions (check_ai_service,
+                    # switch_node, start_read_only_check, test_other_nodes,
+                    # open_proxy_app, view_bandwidth_hogs, ...) all mean the user
+                    # has handled the alert, so mark it dismissed.
+                    if not proactive_alerts.dismiss_alert(alerts_alert_id):
+                        return 404, {"ok": False, "error": "alert not found"}
+                return 200, _alerts_list_payload()
+            if alerts_action == "cooldown":
+                body = self._read_body()
+                if body is None:
+                    return 400, {"ok": False, "error": self._body_error_message()}
+                try:
+                    seconds = int(body.get("seconds"))
+                except (TypeError, ValueError):
+                    seconds = 0
+                if seconds <= 0:
+                    return 400, {"ok": False, "error": "seconds must be a positive integer"}
+                if not proactive_alerts.set_cooldown(alerts_alert_id, seconds):
+                    return 404, {"ok": False, "error": "alert not found"}
+                return 200, _alerts_list_payload()
+            return 404, {"ok": False, "error": "not found"}
 
         body = self._read_body()
         if body is None:

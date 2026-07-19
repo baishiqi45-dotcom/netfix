@@ -164,6 +164,9 @@ HTTP 端点：
 - `GET /llm/providers`
 - `POST /settings/llm`
 - `POST /explain_llm`
+- `GET /alerts`（`?include_dismissed=1` 含已忽略；主动告警卡片）
+- `POST /alerts/<id>/decide` `{ "action": "...", "cooldown_seconds": 1800 }`
+- `POST /alerts/<id>/dismiss`、`POST /alerts/<id>/cooldown` `{ "seconds": 1800 }`
 
 MCP 暴露的工具包括 `netfix_codex`、`netfix_services`、`netfix_triage`、`netfix_doctor`、`netfix_report`、`netfix_kb_query`、`netfix_fix_issue`、`netfix_rollback`、`netfix_proxy_switch`、`netfix_chat`、`netfix_symptom_intake`。`netfix_rollback` 也会改系统状态，必须传 `confirmed=true` 和 `confirmation=APPLY_SYSTEM_FIX`；`POST /run` 不接受 `rollback`。
 

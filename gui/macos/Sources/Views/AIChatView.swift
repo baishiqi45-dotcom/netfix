@@ -56,6 +56,8 @@ struct AIChatView: View {
     var onDismissAlert: ((ProactiveAlert) -> Void)?
     var onActOnAlert: ((ProactiveAlert, String) -> Void)?
     var onIgnoreAlert: ((ProactiveAlert) -> Void)?
+    /// P1-A.3: 头部「清空对话」按钮回调，仅 conversation 非空时显示。
+    var onClearConversation: (() -> Void)?
 
     private let context: AIQuestionContext = .diagnosis
     @State private var question = ""
@@ -69,6 +71,12 @@ struct AIChatView: View {
     @State private var dontAskCategoriesThisSession: Set<String> = []
     /// 用户是否已经看过 SessionRecoveryBanner；首次出现时为 true。
     @State private var showSessionRecovery: Bool = true
+    /// 消息列表高度：随内容增长，夹在 160…380 之间。
+    @State private var messageListHeight: CGFloat = 160
+    /// 用户是否停留在消息列表底部附近；不在底部时不强制自动滚动。
+    @State private var isNearBottom: Bool = true
+    /// 「回车发送」的本地键盘监听（macOS 13 没有 onKeyPress）。
+    @State private var returnKeyMonitor: Any?
 
     private struct PendingUpload {
         let question: String
@@ -81,6 +89,16 @@ struct AIChatView: View {
                 Label("问 AI", systemImage: "sparkles")
                     .font(.headline)
                 Spacer()
+                if !conversation.isEmpty, let onClearConversation {
+                    Button {
+                        onClearConversation()
+                    } label: {
+                        Label("清空对话", systemImage: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(isWorking)
+                    .help("删除当前会话并清空对话记录")
+                }
                 Button {
                     onOpenAISettings()
                 } label: {
@@ -119,9 +137,11 @@ struct AIChatView: View {
         .padding()
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(8)
+        .onAppear { installReturnKeyMonitor() }
+        .onDisappear { removeReturnKeyMonitor() }
     }
 
-    /// 固定高度的消息列表：内部滚动；对话为空时给出快捷问题。
+    /// 消息列表：高度随内容增长（160…380），内部滚动；对话为空时给出快捷问题。
     private var messageList: some View {
         ScrollViewReader { reader in
             ScrollView {
@@ -136,24 +156,42 @@ struct AIChatView: View {
                     Color.clear
                         .frame(height: 1)
                         .id("conversationBottom")
+                        // 底部锚点在可视范围内才算「在底部附近」
+                        .onAppear { isNearBottom = true }
+                        .onDisappear { isNearBottom = false }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
+                .animation(.easeOut(duration: 0.2), value: conversation.count)
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: AIChatContentHeightKey.self, value: proxy.size.height)
+                    }
+                )
             }
-            .frame(height: 200)
+            .frame(height: messageListHeight)
+            .animation(.easeOut(duration: 0.2), value: messageListHeight)
             .background(Color(NSColor.textBackgroundColor))
             .cornerRadius(6)
+            .onPreferenceChange(AIChatContentHeightKey.self) { contentHeight in
+                messageListHeight = min(380, max(160, contentHeight))
+            }
             .onChange(of: isWorking) { _ in
-                // 发出提问和收到回答时都滚到最新一轮
-                withAnimation {
-                    reader.scrollTo("conversationBottom", anchor: .bottom)
-                }
+                scrollToBottomIfNeeded(reader)
             }
             .onChange(of: conversation.count) { _ in
-                withAnimation {
-                    reader.scrollTo("conversationBottom", anchor: .bottom)
-                }
+                scrollToBottomIfNeeded(reader)
             }
+        }
+    }
+
+    /// 自动滚动策略：用户本来就在底部附近、或刚发出新提问（最后一轮还没回答）时才滚到底部，
+    /// 避免用户往上翻历史时被拽回去。
+    private func scrollToBottomIfNeeded(_ reader: ScrollViewProxy) {
+        let justSentQuestion = conversation.last?.result == nil && !conversation.isEmpty
+        guard isNearBottom || justSentQuestion else { return }
+        withAnimation {
+            reader.scrollTo("conversationBottom", anchor: .bottom)
         }
     }
 
@@ -346,6 +384,28 @@ struct AIChatView: View {
         // 追问是真多轮：发出后清空输入框和截图，准备下一轮
         question = ""
         images = []
+        // 发送后保持输入焦点，可以接着敲下一句
+        composerFocused.wrappedValue = true
+    }
+
+    // MARK: - 回车发送（Return 发送、Shift+Return 换行）
+
+    /// macOS 13 没有 onKeyPress：用本地事件监听，仅在输入框聚焦时拦截 Return 并吞掉事件。
+    private func installReturnKeyMonitor() {
+        guard returnKeyMonitor == nil else { return }
+        returnKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 36, !event.modifierFlags.contains(.shift) else { return event }
+            guard composerFocused.wrappedValue, !isWorking, !sendDisabled else { return event }
+            send()
+            return nil
+        }
+    }
+
+    private func removeReturnKeyMonitor() {
+        if let returnKeyMonitor {
+            NSEvent.removeMonitor(returnKeyMonitor)
+            self.returnKeyMonitor = nil
+        }
     }
 
     /// 多轮对话流：每一轮是用户提问 + AI/本地回答卡片，追问不再覆盖旧答案。
@@ -405,14 +465,15 @@ struct AIChatView: View {
                     }
                 } else {
                     HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
+                        TypingDotsView()
                         Text("正在解释…")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
+            // 新一轮对话出现时轻轻浮入，避免生硬闪烁
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
 
         if let errorMessage, !errorMessage.isEmpty {
@@ -828,5 +889,43 @@ struct AIChatView: View {
 
     private var allowedImageMimeTypes: Set<String> {
         ["image/png", "image/jpeg", "image/webp", "image/gif"]
+    }
+}
+
+
+// MARK: - 消息列表内容高度
+
+/// 消息列表内容高度的 PreferenceKey：列表高度随内容增长，夹在 160…380 之间。
+private struct AIChatContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 160
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+// MARK: - 「正在解释…」跳点动画
+
+/// 等待 AI 回答时的三个跳点，轻量循环动画。
+private struct TypingDotsView: View {
+    @State private var animating = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(Color.secondary)
+                    .frame(width: 4, height: 4)
+                    .opacity(animating ? 1.0 : 0.25)
+                    .animation(
+                        .easeInOut(duration: 0.5)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.15),
+                        value: animating
+                    )
+            }
+        }
+        .onAppear { animating = true }
+        .accessibilityHidden(true)
     }
 }

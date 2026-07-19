@@ -205,6 +205,89 @@ class TestLLMExplain(unittest.TestCase):
         self.assertNotIn("sk-live-secret-token", payload)
         self.assertIn("[redacted_email]", payload)
 
+    def test_invalid_json_response_retries_once_with_doubled_max_tokens(self):
+        settings = {
+            "llm": {
+                "enabled": True,
+                "provider": "deepseek",
+                "base_url": "https://api.deepseek.com",
+                "model": "deepseek-v4-flash",
+                "api_key_account": "deepseek",
+                "upload_consent": "always",
+                "fallback": {"enabled": False},
+            }
+        }
+        seen_tokens = []
+
+        def fake_complete(_self, messages, max_tokens=900, temperature=0.2):
+            seen_tokens.append(max_tokens)
+            if len(seen_tokens) == 1:
+                raise LLMProviderError("truncated", reason_code="invalid_json_response")
+            return {"headline": "ok", "severity": "ok", "explanation": "done", "actions": []}
+
+        with patch("netfix.llm_explain.load_settings", return_value=settings), \
+                patch("netfix.llm_explain.keychain.get_secret", return_value="k"), \
+                patch.object(OpenAICompatibleProvider, "complete_json", fake_complete):
+            result = explain_with_llm(SAMPLE_REPORT, upload_confirmed=True)
+
+        self.assertEqual(result["source"], "llm")
+        self.assertEqual(result["provider_used"], "deepseek")
+        self.assertEqual(seen_tokens, [900, 1800])
+
+    def test_invalid_json_response_twice_falls_back_without_more_retries(self):
+        settings = {
+            "llm": {
+                "enabled": True,
+                "provider": "deepseek",
+                "base_url": "https://api.deepseek.com",
+                "model": "deepseek-v4-flash",
+                "api_key_account": "deepseek",
+                "upload_consent": "always",
+                "fallback": {"enabled": False},
+            }
+        }
+        seen_tokens = []
+
+        def fake_complete(_self, messages, max_tokens=900, temperature=0.2):
+            seen_tokens.append(max_tokens)
+            raise LLMProviderError("truncated", reason_code="invalid_json_response")
+
+        with patch("netfix.llm_explain.load_settings", return_value=settings), \
+                patch("netfix.llm_explain.keychain.get_secret", return_value="k"), \
+                patch.object(OpenAICompatibleProvider, "complete_json", fake_complete):
+            result = explain_with_llm(SAMPLE_REPORT, upload_confirmed=True)
+
+        self.assertEqual(result["source"], "fallback")
+        self.assertEqual(result["fallback_reason"], "provider_error: invalid_json_response")
+        self.assertEqual(seen_tokens, [900, 1800])
+
+    def test_other_provider_errors_do_not_retry(self):
+        settings = {
+            "llm": {
+                "enabled": True,
+                "provider": "deepseek",
+                "base_url": "https://api.deepseek.com",
+                "model": "deepseek-v4-flash",
+                "api_key_account": "deepseek",
+                "upload_consent": "always",
+                "fallback": {"enabled": False},
+            }
+        }
+        calls = []
+
+        def fake_complete(_self, messages, max_tokens=900, temperature=0.2):
+            calls.append(max_tokens)
+            raise LLMProviderError("boom", reason_code="timeout")
+
+        with patch("netfix.llm_explain.load_settings", return_value=settings), \
+                patch("netfix.llm_explain.keychain.get_secret", return_value="k"), \
+                patch.object(OpenAICompatibleProvider, "complete_json", fake_complete):
+            result = explain_with_llm(SAMPLE_REPORT, upload_confirmed=True)
+
+        self.assertEqual(result["source"], "fallback")
+        self.assertEqual(result["fallback_reason"], "provider_error: timeout")
+        self.assertEqual(calls, [900])
+
     def test_provider_candidates_use_text_and_vision_priority(self):
         text_ids = [item["id"] for item in provider_candidates(mode="explain")]
         vision_ids = [item["id"] for item in provider_candidates(mode="image_question")]

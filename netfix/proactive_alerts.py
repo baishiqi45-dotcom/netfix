@@ -60,15 +60,19 @@ def _save(state: Dict[str, Any]) -> None:
     os.replace(tmp, ALERT_FILE)
 
 
-def list_alerts(active_only: bool = True) -> List[Dict[str, Any]]:
-    """Return alerts. If active_only=True, drop those whose cooldown has elapsed."""
+def list_alerts(active_only: bool = True, include_dismissed: bool = False) -> List[Dict[str, Any]]:
+    """Return alerts.
+
+    If ``active_only`` is True, drop alerts past their ``expires_at``.
+    Dismissed alerts are hidden unless ``include_dismissed`` is True.
+    """
     state = _load()
     now = _now()
     out = []
     for raw in state.get("alerts", []):
         if active_only and raw.get("expires_at", 0) < now:
             continue
-        if raw.get("dismissed"):
+        if not include_dismissed and raw.get("dismissed"):
             continue
         out.append(dict(raw))
     return out
@@ -82,6 +86,20 @@ def dismiss_alert(alert_id: str) -> bool:
         if raw.get("alert_id") == alert_id:
             raw["dismissed"] = True
             raw["dismissed_at"] = _now()
+            changed = True
+    if changed:
+        _save(state)
+    return changed
+
+
+def set_cooldown(alert_id: str, seconds: float) -> bool:
+    """Snooze an alert until now + ``seconds``; returns True if any was changed."""
+    state = _load()
+    cooldown_until = _now() + seconds
+    changed = False
+    for raw in state.get("alerts", []):
+        if raw.get("alert_id") == alert_id:
+            raw["cooldown_until"] = cooldown_until
             changed = True
     if changed:
         _save(state)

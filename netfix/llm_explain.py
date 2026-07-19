@@ -932,22 +932,39 @@ def explain_with_llm(
             timeout_s=int(provider_settings.get("timeout_s") or 20),
             provider_id=provider_id,
         )
-        try:
-            llm_budget.record_request(provider_id, mode, budget_settings)
-            raw = provider.complete_json(
-                messages=_build_messages(
-                    report,
-                    question,
-                    mode,
-                    redacted,
-                    provider_id,
-                    image_inputs=prepared_image_inputs if mode == "image_question" else image_inputs,
-                    history=history_messages,
-                ),
-                max_tokens=int(provider_settings.get("max_tokens") or 900),
-                temperature=float(provider_settings.get("temperature") if provider_settings.get("temperature") is not None else 0.2),
-            )
-        except LLMProviderError as exc:
+        messages = _build_messages(
+            report,
+            question,
+            mode,
+            redacted,
+            provider_id,
+            image_inputs=prepared_image_inputs if mode == "image_question" else image_inputs,
+            history=history_messages,
+        )
+        max_tokens = int(provider_settings.get("max_tokens") or 900)
+        temperature = float(provider_settings.get("temperature") if provider_settings.get("temperature") is not None else 0.2)
+        # invalid_json_response 常见于推理模型把 max_tokens 耗尽导致 JSON 截断：
+        # 首次失败后把 max_tokens 翻倍重试一次，仍失败才进 fallback 链。
+        llm_budget.record_request(provider_id, mode, budget_settings)
+        raw = None
+        last_exc: Optional[LLMProviderError] = None
+        for attempt, tokens in enumerate((max_tokens, max_tokens * 2)):
+            if attempt > 0:
+                llm_budget.record_request(provider_id, mode, budget_settings)
+            try:
+                raw = provider.complete_json(
+                    messages=messages,
+                    max_tokens=tokens,
+                    temperature=temperature,
+                )
+                last_exc = None
+                break
+            except LLMProviderError as exc:
+                last_exc = exc
+                if exc.reason_code != "invalid_json_response":
+                    break
+        if last_exc is not None:
+            exc = last_exc
             llm_budget.record_provider_result(provider_id, exc.reason_code, budget_settings)
             fallback_chain.append({
                 "provider": provider_id,

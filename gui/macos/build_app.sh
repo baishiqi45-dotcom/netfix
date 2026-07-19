@@ -95,11 +95,30 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
 EOF
 
 echo "Skipping ad-hoc app bundle signing for local runnable candidate."
-if ! "${BACKEND_IN_BUNDLE}" --version >/dev/null 2>&1; then
+# Gatekeeper 会对 .app bundle 内的新二进制做在线评估，评估窗口内执行一律
+# Killed: 9（与签名是否有效无关）；因此可运行性验证放到 bundle 外的临时副本上，
+# 只校验二进制与签名本身。真正启动验证由安装脚本在安装后做实机校验。
+VERIFY_COPY="$(mktemp -t netfix-backend-verify.XXXXXX)"
+backend_runnable=false
+for _ in 1 2 3; do
+    cp "${BACKEND_IN_BUNDLE}" "${VERIFY_COPY}"
+    chmod 755 "${VERIFY_COPY}"
+    if "${VERIFY_COPY}" --version >/dev/null 2>&1; then
+        backend_runnable=true
+        break
+    fi
+    # PyInstaller 的重签名在部分 macOS 版本上会被 amfid 拒绝（Error -423），
+    # 必须先移除签名再重新 ad-hoc 签名。
     echo "Re-signing bundled backend after copy..."
-    codesign --force --sign - "${BACKEND_IN_BUNDLE}"
+    codesign --remove-signature "${BACKEND_IN_BUNDLE}" || true
+    codesign --sign - "${BACKEND_IN_BUNDLE}"
+    sleep 2
+done
+rm -f "${VERIFY_COPY}"
+if [[ "${backend_runnable}" != true ]]; then
+    echo "Bundled backend is not runnable: ${BACKEND_IN_BUNDLE}" >&2
+    exit 2
 fi
-"${BACKEND_IN_BUNDLE}" --version >/dev/null
 codesign --verify --strict "${BACKEND_IN_BUNDLE}"
 echo "Skipping app bundle code-sign verification for unsigned local candidate."
 

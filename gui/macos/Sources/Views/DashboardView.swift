@@ -1342,8 +1342,39 @@ struct DashboardView: View {
                         uploadConfirmed: uploadConfirmed
                     )
                 }
+            },
+            // P1-A.3: 对话为空时才可能用到「恢复上次对话」
+            recoverableSessions: viewModel.aiConversation.isEmpty ? viewModel.recoverableSessions : [],
+            proactiveAlerts: viewModel.proactiveAlerts,
+            onResumeSession: { session in
+                Task { await viewModel.resumeChatSession(session) }
+            },
+            onDismissAlert: { alert in
+                Task { await viewModel.dismissProactiveAlert(alert) }
+            },
+            onActOnAlert: { alert, action in
+                handleProactiveAlertAction(alert, action: action)
+            },
+            onIgnoreAlert: { alert in
+                Task { await viewModel.ignoreProactiveAlert(alert) }
+            },
+            onClearConversation: {
+                Task { await viewModel.clearAIConversation() }
             }
         )
+    }
+
+    /// P1-B.1: 告警「立即处理」：先告知后端决定，再按动作类型分发；未知动作兜底跑全量检查。
+    private func handleProactiveAlertAction(_ alert: ProactiveAlert, action: String) {
+        Task { await viewModel.decideProactiveAlert(alert, action: action) }
+        switch action {
+        case "switch_node", "test_other_nodes", "open_proxy_app":
+            // 切节点/打开代理 App 走现有的代理设置入口
+            openProxySettings()
+        default:
+            // check_ai_service / start_read_only_check / view_bandwidth_hogs 及其他：全量检查
+            Task { await viewModel.diagnose() }
+        }
     }
 
     private func friendlyDiagnosticStatus(_ status: String) -> String {
@@ -1469,6 +1500,10 @@ final class DashboardViewModel: ObservableObject {
     @Published var llmError: String?
     /// 「问 AI」的多轮对话记录，追问时把历史一并发给后端。
     @Published var aiConversation: [AIChatTurn] = []
+    /// P1-A.3: 后端保存的历史会话，对话为空时提示「恢复上次对话」。
+    @Published var recoverableSessions: [ChatSession] = []
+    /// P1-B.1: 后端主动告警，插在对话流顶部，每 60 秒轮询一次。
+    @Published var proactiveAlerts: [ProactiveAlert] = []
     @Published var activeJobID: String?
     @Published private var proxyBridgeState: ProxyBridgeResponse?
     @Published var dashboardState: DashboardHomePresentation?
@@ -1680,6 +1715,10 @@ final class DashboardViewModel: ObservableObject {
     private var progressIndex = 0
     private var cancellationRequested = false
     private var activeAIRequestID: UUID?
+    /// P1-A.3: 当前对话对应的后端 session；恢复历史会话后有值，「清空对话」时一并删除。
+    private var currentSessionID: String?
+    /// P1-B.1: 主动告警的轮询任务，backend 掉线或 ViewModel 释放时取消。
+    private var alertsPollingTask: Task<Void, Never>?
     fileprivate(set) var lastOperation: LastOperation?
     /// P1-B.1: 最近一次成功执行的系统网络修复；非空时 DashboardView 显示「撤销此修复」按钮。
     fileprivate(set) var lastRolledBackAction: RollbackCandidate?
@@ -1731,8 +1770,13 @@ final class DashboardViewModel: ObservableObject {
                 await dashboardStore.refresh()
                 // 常驻对话区依赖云端 AI 状态，后端就绪后立即读取一次
                 await refreshCloudAIStatus()
+                // P1-A.3 / P1-B.1: 拉历史会话和主动告警，并启动告警轮询
+                await refreshChatSessions()
+                await refreshProactiveAlerts()
+                startAlertsPolling()
             } else if !backend.isReady {
                 client = nil
+                stopAlertsPolling()
             }
         }
     }
@@ -2062,6 +2106,157 @@ final class DashboardViewModel: ObservableObject {
         // 取消后撤掉还没拿到回答的提问
         aiConversation.removeAll { $0.result == nil }
         llmError = "已停止这次 AI 解释。"
+    }
+
+    // MARK: - P1-A.3: 历史会话恢复 / 清空对话
+
+    /// 拉取最近的历史会话，供对话为空时的「恢复上次对话」横幅使用。
+    func refreshChatSessions() async {
+        guard let client else { return }
+        do {
+            let response = try await client.listSessions(limit: 5)
+            recoverableSessions = response.sessions
+        } catch {
+            // 历史会话是辅助信息，失败时不阻断问答主流程
+            recoverableSessions = []
+        }
+    }
+
+    /// 恢复一条历史会话：把后端 turns 映射回对话流，之后追问复用同一 session。
+    func resumeChatSession(_ session: ChatSession) async {
+        guard let client else { return }
+        do {
+            let detail = try await client.getSession(sessionID: session.sessionID)
+            aiConversation = Self.aiChatTurns(from: detail.turns ?? [])
+            currentSessionID = session.sessionID
+            // 已恢复的那条不再出现在「可恢复」列表里
+            recoverableSessions.removeAll { $0.sessionID == session.sessionID }
+            llmError = nil
+        } catch {
+            llmError = "恢复上次对话失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// 清空对话：本地立即清空；有后端 session 时一并删除。
+    func clearAIConversation() async {
+        let sessionID = currentSessionID
+        aiConversation = []
+        currentSessionID = nil
+        llmError = nil
+        guard let client, let sessionID else { return }
+        do {
+            _ = try await client.deleteSession(sessionID: sessionID)
+        } catch {
+            // 删除失败不阻断本地清空，下次拉列表时自然同步
+        }
+        await refreshChatSessions()
+    }
+
+    /// 把后端 ChatTurn 序列映射回 [AIChatTurn]：user → question，紧跟的 assistant → result。
+    /// 映射是有损的（plan_steps / observations 尽量保留），孤立 assistant 也保留成一轮。
+    nonisolated static func aiChatTurns(from turns: [ChatTurn]) -> [AIChatTurn] {
+        var conversation: [AIChatTurn] = []
+        for turn in turns {
+            switch turn.role {
+            case "user":
+                conversation.append(AIChatTurn(question: turn.content))
+            case "assistant":
+                let result = LLMExplainResult(
+                    source: turn.providerUsed != nil ? "llm" : nil,
+                    fallbackReason: nil,
+                    fallbackReasonLabel: nil,
+                    failureReasonCode: nil,
+                    providerUsed: turn.providerUsed,
+                    fallbackChain: nil,
+                    needsUploadConfirmation: nil,
+                    confirmationRequest: nil,
+                    planSteps: turn.planSteps,
+                    observations: turn.observations,
+                    headline: nil,
+                    severity: nil,
+                    explanation: turn.content,
+                    actions: nil,
+                    manualSteps: nil,
+                    redactedReportHash: turn.redactedReportHash
+                )
+                if conversation.isEmpty || conversation[conversation.count - 1].result != nil {
+                    // 没有对应提问的回答也保留，避免恢复后丢内容
+                    conversation.append(AIChatTurn(question: "", result: result))
+                } else {
+                    conversation[conversation.count - 1].result = result
+                }
+            default:
+                continue
+            }
+        }
+        return conversation
+    }
+
+    // MARK: - P1-B.1: 主动告警
+
+    /// 拉一次主动告警；失败时保留现有列表，等下一轮轮询再同步。
+    func refreshProactiveAlerts() async {
+        guard let client else { return }
+        do {
+            let response = try await client.listProactiveAlerts()
+            proactiveAlerts = response.alerts
+        } catch {
+            // 告警是辅助信息，失败不阻断主流程
+        }
+    }
+
+    /// 后端就绪后每 60 秒轮询一次主动告警。
+    private func startAlertsPolling() {
+        alertsPollingTask?.cancel()
+        alertsPollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                guard !Task.isCancelled, let self else { return }
+                await self.refreshProactiveAlerts()
+            }
+        }
+    }
+
+    private func stopAlertsPolling() {
+        alertsPollingTask?.cancel()
+        alertsPollingTask = nil
+        proactiveAlerts = []
+    }
+
+    /// 关闭告警（永久）：本地先移除，后端返回最新列表后对齐。
+    func dismissProactiveAlert(_ alert: ProactiveAlert) async {
+        proactiveAlerts.removeAll { $0.alertID == alert.alertID }
+        guard let client else { return }
+        do {
+            let response = try await client.dismissAlert(alertID: alert.alertID)
+            proactiveAlerts = response.alerts
+        } catch {
+            // 失败时本地已移除，等下一轮轮询再对齐
+        }
+    }
+
+    /// 这次忽略：冷却 30 分钟，本地先移除。
+    func ignoreProactiveAlert(_ alert: ProactiveAlert) async {
+        proactiveAlerts.removeAll { $0.alertID == alert.alertID }
+        guard let client else { return }
+        do {
+            let response = try await client.cooldownAlert(alertID: alert.alertID, seconds: 1_800)
+            proactiveAlerts = response.alerts
+        } catch {
+            // 失败时本地已移除，等下一轮轮询再对齐
+        }
+    }
+
+    /// 立即处理：告知后端用户选了哪个动作；动作本身的执行由 View 层分发。
+    func decideProactiveAlert(_ alert: ProactiveAlert, action: String) async {
+        proactiveAlerts.removeAll { $0.alertID == alert.alertID }
+        guard let client else { return }
+        do {
+            let response = try await client.decide(alertID: alert.alertID, action: action)
+            proactiveAlerts = response.alerts
+        } catch {
+            // 失败时本地已移除，等下一轮轮询再对齐
+        }
     }
 
     private func friendlyAIError(_ message: String) -> String {

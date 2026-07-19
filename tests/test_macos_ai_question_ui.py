@@ -59,9 +59,15 @@ def test_macos_dashboard_has_inline_ai_chat_view_with_image_picker():
 def test_macos_ai_chat_inline_layout_fixed_list_prompts_and_paperclip():
     chat = AI_CHAT.read_text(encoding="utf-8")
 
-    # 消息列表固定约 200pt 内部滚动，对话为空时给快捷问题
+    # 消息列表高度随内容自适应（160…380pt），内部滚动，对话为空时给快捷问题
     assert "private var messageList: some View" in chat
-    assert ".frame(height: 200)" in chat
+    assert "AIChatContentHeightKey" in chat
+    assert "min(380, max(160, contentHeight))" in chat
+    assert ".frame(height: messageListHeight)" in chat
+    # 智能滚动：用户翻看历史时不强制拽回底部
+    assert "isNearBottom" in chat
+    # 回车发送（Shift+Return 换行）：NSEvent 本地监听在 composer 聚焦时拦截 Return
+    assert "addLocalMonitorForEvents" in chat
     assert "if conversation.isEmpty {" in chat
     assert "private var promptGrid: some View" in chat
     assert "LazyVGrid" in chat
